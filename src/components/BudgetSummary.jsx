@@ -3,6 +3,15 @@ import {
   calcStatCost, calcAbilityCost, calcProficiencyCost, calcSkillsCost,
 } from '../utils/calcBudget';
 
+function MiniCard({ label, value }) {
+  return (
+    <div className="bg-slate-800/50 rounded-xl border border-white/8 p-3 text-center">
+      <p className="text-[10px] text-slate-500 tracking-wide mb-1">{label}</p>
+      <p className="text-lg font-bold text-amber-200/80">{value}</p>
+    </div>
+  );
+}
+
 export default function BudgetSummary({ char, stats, abilities, proficiencies, skills }) {
   const { level, budget } = getLevelInfo(char.exp);
   const statCost  = calcStatCost(stats);
@@ -14,42 +23,38 @@ export default function BudgetSummary({ char, stats, abilities, proficiencies, s
   const overBudget = remaining < 0;
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-yellow-400">성장예산</h2>
-        <span className="text-sm text-gray-400">Lv.{level} | 예산 {budget}</span>
+    <div className="bg-slate-900/70 backdrop-blur-sm rounded-2xl border border-white/10 p-5 shadow-xl shadow-black/30">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-slate-600 font-mono tracking-widest">—</span>
+          <h2 className="text-sm font-semibold text-slate-300 tracking-wide uppercase">성장예산</h2>
+        </div>
+        <span className="text-xs text-slate-500 font-mono">Lv.{level} · {budget}pt</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 text-sm">
-        <Row label="스탯 비용" value={statCost} />
-        <Row label="기능 비용" value={ablCost} />
-        <Row label="숙련 비용" value={profCost} />
-        <Row label="스킬 비용" value={skillCost} />
+      <div className="grid grid-cols-4 gap-1.5 mb-3">
+        <MiniCard label="스탯" value={statCost} />
+        <MiniCard label="기능" value={ablCost} />
+        <MiniCard label="숙련" value={profCost} />
+        <MiniCard label="스킬" value={skillCost} />
       </div>
 
-      <div className="border-t border-gray-600 pt-2 flex justify-between text-sm font-semibold">
-        <span className="text-gray-300">사용점수</span>
-        <span className="text-white">{used} / {budget}</span>
+      <div className="flex items-center justify-between text-sm border-t border-white/8 pt-3 mb-3">
+        <span className="text-slate-400">사용점수</span>
+        <span className="font-semibold text-slate-200 font-mono">{used} / {budget}</span>
       </div>
 
-      <div className={`text-center rounded py-2 font-bold text-lg ${
-        overBudget ? 'bg-red-900 text-red-300' : 'bg-gray-700 text-green-400'
+      <div className={`rounded-xl py-2.5 text-center font-bold text-base border transition-colors ${
+        overBudget
+          ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+          : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
       }`}>
-        {overBudget ? `초과 ${Math.abs(remaining)}점` : `남은점수: ${remaining}점`}
+        {overBudget ? `초과 ${Math.abs(remaining)}점` : `남은점수 ${remaining}점`}
       </div>
 
       {overBudget && (
-        <p className="text-xs text-red-400 text-center">예산을 초과했습니다!</p>
+        <p className="text-xs text-rose-400/80 text-center mt-2">예산을 초과했습니다.</p>
       )}
     </div>
-  );
-}
-
-function Row({ label, value }) {
-  return (
-    <>
-      <span className="text-gray-400">{label}</span>
-      <span className="text-white text-right">{value}</span>
-    </>
   );
 }

@@ -23,8 +23,8 @@ const OPERATORS = [
   { op: '-', label: '-', tip: '빼기' },
   { op: '*', label: '*', tip: '곱하기' },
   { op: '/', label: '/', tip: '나누기' },
-  { op: '(',  label: '(',  tip: '우선 계산할 묶음 시작' },
-  { op: ')',  label: ')',  tip: '우선 계산할 묶음 끝' },
+  { op: '(',  label: '(',  tip: '묶음 시작' },
+  { op: ')',  label: ')',  tip: '묶음 끝' },
 ];
 
 const QUICK_COMBOS = [
@@ -50,15 +50,15 @@ function FormulaPreview({ formula, stats, rank }) {
   if (!show) return null;
 
   return (
-    <div className="bg-gray-900 rounded-lg border border-gray-700 p-3 space-y-2">
-      <p className="text-xs font-semibold text-gray-400">계산 미리보기 (기대값 기준)</p>
+    <div className="bg-slate-950/60 rounded-xl border border-white/8 p-3 space-y-2">
+      <p className="text-[10px] text-slate-600 uppercase tracking-widest">계산 미리보기</p>
 
       {hasDbVar ? (
         <div className="grid grid-cols-3 gap-2">
           {[[침식0, '침식 0'], [침식6, '침식 6'], [침식9, '침식 9']].map(([res, lbl]) => (
-            <div key={lbl} className="bg-gray-800 rounded p-2 text-center">
-              <p className="text-xs text-gray-500 mb-0.5">{lbl}</p>
-              <p className={`text-sm font-bold ${res?.value !== null ? 'text-green-400' : 'text-red-400'}`}>
+            <div key={lbl} className="bg-slate-800/60 rounded-lg p-2 text-center">
+              <p className="text-[10px] text-slate-600 mb-0.5">{lbl}</p>
+              <p className={`text-sm font-bold ${res?.value !== null ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {res?.value !== null ? res.value : '오류'}
               </p>
             </div>
@@ -66,15 +66,15 @@ function FormulaPreview({ formula, stats, rank }) {
         </div>
       ) : (
         base.value !== null && (
-          <p className="text-sm text-green-400">기대값: <span className="font-bold">{base.value}</span></p>
+          <p className="text-sm text-emerald-400">기대값 <span className="font-bold">{base.value}</span></p>
         )
       )}
 
       {base.warnings.map((w, i) => (
-        <p key={i} className={`text-xs ${w.includes('운영진') ? 'text-orange-400' : 'text-yellow-400'}`}>⚠ {w}</p>
+        <p key={i} className={`text-xs ${w.includes('운영진') ? 'text-amber-400' : 'text-amber-300'}`}>⚠ {w}</p>
       ))}
       {base.infos.map((info, i) => (
-        <p key={i} className="text-xs text-gray-500 italic">ℹ {info}</p>
+        <p key={i} className="text-xs text-slate-600 italic">ℹ {info}</p>
       ))}
     </div>
   );
@@ -91,66 +91,74 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
   };
 
   return (
-    <div className={`rounded-lg border p-3 space-y-2 ${
-      effect.confirmed ? 'bg-gray-700/40 border-green-800/60' : 'bg-gray-700/60 border-gray-600'
+    <div className={`rounded-xl border p-3 space-y-2 transition-colors ${
+      effect.confirmed
+        ? 'bg-emerald-950/30 border-emerald-800/40'
+        : 'bg-slate-800/40 border-white/8'
     }`}>
-      <div className="flex items-center gap-1 flex-wrap">
-        <span className="text-xs text-gray-400 shrink-0">효과 {index + 1}</span>
+      {/* Header */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[10px] text-slate-600 font-mono shrink-0">효과 {index + 1}</span>
         {effect.type && (
-          <span className="text-xs bg-blue-900/60 text-blue-300 px-1.5 py-0.5 rounded border border-blue-800/60 shrink-0">
+          <span className="text-[11px] bg-cyan-950/50 text-cyan-300/80 px-1.5 py-0.5 rounded border border-cyan-800/30 shrink-0">
             {EFFECT_TYPE_LABEL[effect.type] ?? effect.type}
           </span>
         )}
         {effect.confirmed && (
-          <span className="text-xs bg-green-900/60 text-green-300 px-1.5 py-0.5 rounded border border-green-800/60 shrink-0">확정됨</span>
+          <span className="text-[11px] bg-emerald-950/50 text-emerald-300/80 px-1.5 py-0.5 rounded border border-emerald-800/30 shrink-0">확정됨</span>
         )}
         <div className="flex gap-1 ml-auto shrink-0">
           <button onClick={onMoveUp} disabled={index === 0}
-            className="w-6 h-6 flex items-center justify-center rounded bg-gray-600 hover:bg-gray-500 text-gray-300 text-xs disabled:opacity-30 disabled:cursor-not-allowed">↑</button>
+            className="w-6 h-6 flex items-center justify-center rounded-lg bg-slate-700/50 hover:bg-slate-600/60 text-slate-400 text-xs disabled:opacity-20 disabled:cursor-not-allowed transition-colors">↑</button>
           <button onClick={onMoveDown} disabled={index === total - 1}
-            className="w-6 h-6 flex items-center justify-center rounded bg-gray-600 hover:bg-gray-500 text-gray-300 text-xs disabled:opacity-30 disabled:cursor-not-allowed">↓</button>
+            className="w-6 h-6 flex items-center justify-center rounded-lg bg-slate-700/50 hover:bg-slate-600/60 text-slate-400 text-xs disabled:opacity-20 disabled:cursor-not-allowed transition-colors">↓</button>
           <button onClick={onDelete}
-            className="w-6 h-6 flex items-center justify-center rounded bg-red-900/60 hover:bg-red-800 text-red-300 text-xs">✕</button>
+            className="w-6 h-6 flex items-center justify-center rounded-lg bg-rose-950/50 hover:bg-rose-900/60 text-rose-400/80 text-xs transition-colors">✕</button>
         </div>
       </div>
 
+      {/* Generated text */}
       {hasText && (
-        <div className={`rounded p-2 text-xs font-mono break-all whitespace-pre-wrap ${
-          effect.confirmed ? 'bg-gray-900 text-green-300 border border-green-900/60' : 'bg-gray-800 text-blue-300 border border-gray-700'
+        <div className={`rounded-lg p-2 text-xs font-mono break-all whitespace-pre-wrap ${
+          effect.confirmed
+            ? 'bg-slate-950/60 text-emerald-300/90 border border-emerald-900/30'
+            : 'bg-slate-900/60 text-cyan-300/80 border border-slate-700/40'
         }`}>
           {effect.generatedText}
         </div>
       )}
 
+      {/* Warnings */}
       {warnings.length > 0 && (
         <div className="space-y-0.5">
           {warnings.map((w, i) => (
-            <p key={i} className={`text-xs ${w.includes('운영진') ? 'text-orange-400' : 'text-yellow-400'}`}>⚠ {w}</p>
+            <p key={i} className={`text-xs ${w.includes('운영진') ? 'text-amber-400' : 'text-amber-300'}`}>⚠ {w}</p>
           ))}
         </div>
       )}
 
+      {/* Actions */}
       {!effect.confirmed ? (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1.5">
           <button onClick={() => setModalOpen(true)}
-            className="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 text-white rounded text-xs font-medium transition-colors">
+            className="px-3 py-1.5 bg-cyan-900/40 hover:bg-cyan-800/50 border border-cyan-800/40 text-cyan-300 rounded-lg text-xs font-medium transition-colors">
             블럭 선택
           </button>
           {hasText && (
             <button onClick={() => onUpdate({ ...effect, confirmed: true })}
-              className="px-3 py-1.5 bg-green-700 hover:bg-green-600 text-white rounded text-xs font-medium transition-colors">
+              className="px-3 py-1.5 bg-emerald-900/40 hover:bg-emerald-800/50 border border-emerald-800/40 text-emerald-300 rounded-lg text-xs font-medium transition-colors">
               확정
             </button>
           )}
         </div>
       ) : (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1.5">
           <button onClick={() => setModalOpen(true)}
-            className="px-3 py-1.5 bg-blue-800 hover:bg-blue-700 text-blue-200 rounded text-xs font-medium transition-colors">
+            className="px-3 py-1.5 bg-slate-700/50 hover:bg-slate-600/60 border border-slate-600/40 text-slate-300 rounded-lg text-xs font-medium transition-colors">
             편집
           </button>
           <button onClick={() => onUpdate({ ...effect, confirmed: false })}
-            className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 text-gray-200 rounded text-xs font-medium transition-colors">
+            className="px-3 py-1.5 bg-slate-700/40 hover:bg-slate-600/50 border border-slate-600/30 text-slate-400 rounded-lg text-xs font-medium transition-colors">
             확정 해제
           </button>
         </div>
@@ -167,6 +175,9 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
     </div>
   );
 }
+
+const inputCls = "w-full min-w-0 bg-slate-800/60 text-slate-100 rounded-lg px-3 py-1.5 text-sm border border-slate-700/50 focus:border-cyan-500/50 outline-none placeholder:text-slate-600 transition-colors";
+const selectCls = "w-full bg-slate-800/60 text-slate-100 rounded-lg px-3 py-1.5 text-sm border border-slate-700/50 focus:border-cyan-500/50 outline-none transition-colors";
 
 export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
   const [skill, setSkill] = useState(() => {
@@ -188,8 +199,7 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
   };
 
   const appendOperator = (op) => {
-    const spaced = ` ${op} `;
-    setSkill(s => ({ ...s, formula: s.formula + spaced }));
+    setSkill(s => ({ ...s, formula: s.formula + ` ${op} ` }));
   };
 
   const applyQuickCombo = (formula) => {
@@ -218,36 +228,41 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
     });
   };
 
-  const tokenErrors     = validateFormula(skill.formula);
-  const structureWarns  = validateFormulaStructure(skill.formula);
-  const needsTarget     = hasTargetReference(skill.formula);
+  const tokenErrors    = validateFormula(skill.formula);
+  const structureWarns = validateFormulaStructure(skill.formula);
+  const needsTarget    = hasTargetReference(skill.formula);
   const allFormulaErrors = [...tokenErrors, ...structureWarns];
 
-  const inputCls  = "w-full min-w-0 bg-gray-700 text-white rounded px-2 py-1.5 text-sm border border-gray-600 focus:border-yellow-400 outline-none";
-  const selectCls = "w-full bg-gray-700 text-white rounded px-2 py-1.5 text-sm border border-gray-600 focus:border-yellow-400 outline-none";
-
   return (
-    <div className="bg-gray-800 rounded-lg p-4 space-y-4">
-      <h2 className="text-lg font-bold text-yellow-400">
-        {editingSkill ? '스킬 편집' : '스킬 메이커'}
-      </h2>
+    <div className="bg-slate-900/70 backdrop-blur-sm rounded-2xl border border-white/10 p-5 shadow-xl shadow-black/30 space-y-4">
+
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-slate-600 font-mono tracking-widest">05</span>
+        <h2 className="text-sm font-semibold text-slate-300 tracking-wide uppercase">
+          {editingSkill ? '스킬 편집' : '스킬 메이커'}
+        </h2>
+        {editingSkill && (
+          <span className="ml-1 text-[11px] text-violet-300/70 bg-violet-900/20 border border-violet-800/30 rounded px-1.5 py-0.5">편집 중</span>
+        )}
+      </div>
 
       {/* 스킬명 */}
       <label className="flex flex-col gap-1">
-        <span className="text-xs text-gray-400">스킬 이름</span>
+        <span className="text-[11px] text-slate-500 tracking-wide">스킬 이름</span>
         <input className={inputCls} value={skill.name} onChange={field('name')} placeholder="스킬 이름" />
       </label>
 
       {/* 계통 / 계열 */}
       <div className="grid grid-cols-2 gap-2">
         <label className="flex flex-col gap-1">
-          <span className="text-xs text-gray-400">계통</span>
+          <span className="text-[11px] text-slate-500 tracking-wide">계통</span>
           <select className={selectCls} value={skill.tradition} onChange={field('tradition')}>
             {SKILL_TRADITIONS.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-xs text-gray-400">계열</span>
+          <span className="text-[11px] text-slate-500 tracking-wide">계열</span>
           <select className={selectCls} value={skill.series} onChange={field('series')}>
             {SKILL_SERIES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -255,109 +270,108 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
       </div>
 
       {/* 랭크 */}
-      <div className="space-y-1">
-        <span className="text-xs text-gray-400">랭크</span>
+      <div className="space-y-1.5">
+        <span className="text-[11px] text-slate-500 tracking-wide">랭크</span>
         <div className="flex flex-wrap gap-1">
           {SKILL_RANKS.map(({ rank, value }) => (
             <button
               key={rank}
               onClick={() => setSkill(s => ({ ...s, rank }))}
-              className={`px-2 py-0.5 rounded text-xs font-bold border transition-colors ${
+              className={`px-2 py-0.5 rounded-lg text-xs font-bold border transition-all ${
                 skill.rank === rank
-                  ? 'bg-yellow-500 text-gray-900 border-yellow-400'
-                  : 'bg-gray-700 text-gray-300 border-gray-600 hover:border-yellow-500'
+                  ? 'bg-amber-400/80 text-slate-900 border-amber-400/60 shadow-sm shadow-amber-400/20'
+                  : 'bg-slate-800/60 text-slate-400 border-slate-700/50 hover:border-amber-400/40 hover:text-slate-200'
               }`}
             >
-              {rank} <span className="opacity-60">({value})</span>
+              {rank} <span className="opacity-50 font-normal">({value})</span>
             </button>
           ))}
         </div>
       </div>
 
       {/* ── 계산식 섹션 ── */}
-      <div className="space-y-3 bg-gray-750 rounded-lg border border-gray-700 p-3">
-        <span className="text-xs font-semibold text-yellow-400 tracking-wide uppercase">계산식</span>
+      <div className="space-y-3 bg-slate-800/20 rounded-xl border border-white/8 p-4">
+        <span className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">계산식</span>
 
-        {/* 입력창 */}
         <input
-          className={inputCls + (allFormulaErrors.length > 0 ? ' border-red-500' : '')}
+          className={`${inputCls}${allFormulaErrors.length > 0 ? ' border-rose-500/50' : ''}`}
           value={skill.formula}
           onChange={field('formula')}
           placeholder="예: d20 + 랭크 + 근력"
         />
 
-        {/* 검증 메시지 */}
+        {/* 검증 */}
         {allFormulaErrors.length > 0 && (
           <div className="space-y-0.5">
             {allFormulaErrors.map((e, i) => (
-              <p key={i} className="text-xs text-red-400">⚠ {e}</p>
+              <p key={i} className="text-xs text-rose-400">⚠ {e}</p>
             ))}
           </div>
         )}
         {needsTarget && allFormulaErrors.length === 0 && (
-          <p className="text-xs text-orange-400">⚠ 대상 참조 포함 — 조건 칸에 "대상 지정 필요"를 추가하세요.</p>
+          <p className="text-xs text-amber-400">⚠ 대상 참조 포함 — 조건 칸에 "대상 지정 필요"를 추가하세요.</p>
         )}
 
-        {/* [블럭 추가] */}
-        <div className="space-y-1">
-          <p className="text-xs text-gray-500 font-medium">블럭 추가</p>
+        {/* 블럭 추가 */}
+        <div className="space-y-1.5">
+          <p className="text-[10px] text-slate-600 tracking-widest uppercase">블럭 추가</p>
           <button
             onClick={() => setFormulaModalOpen(true)}
-            className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-gray-900 font-semibold rounded text-xs transition-colors"
+            className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-200 rounded-lg text-xs font-semibold transition-colors"
           >
             블럭 선택
           </button>
         </div>
 
-        {/* [연산자] */}
-        <div className="space-y-1">
-          <p className="text-xs text-gray-500 font-medium">연산자</p>
-          <div className="flex flex-wrap gap-1">
+        {/* 연산자 */}
+        <div className="space-y-1.5">
+          <p className="text-[10px] text-slate-600 tracking-widest uppercase">연산자</p>
+          <div className="flex flex-wrap gap-1.5">
             {OPERATORS.map(({ op, label, tip }) => (
               <button
                 key={op}
                 onClick={() => appendOperator(op)}
                 title={tip}
-                className="min-w-[2.5rem] px-2 py-1.5 bg-gray-700 hover:bg-gray-600 border border-gray-600 hover:border-yellow-500 text-white font-mono font-bold rounded text-sm transition-colors"
+                className="min-w-[2.75rem] px-2 py-1.5 bg-slate-800/60 hover:bg-slate-700/70 border border-slate-700/50 hover:border-amber-400/30 text-slate-300 font-mono font-bold rounded-lg text-sm transition-colors"
               >
                 {label}
-                <span className="block text-gray-500 font-sans font-normal" style={{ fontSize: '9px', lineHeight: '1' }}>{tip}</span>
+                <span className="block text-slate-600 font-sans font-normal" style={{ fontSize: '9px', lineHeight: '1.2' }}>{tip}</span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* [빠른 조합] */}
-        <div className="space-y-1">
-          <p className="text-xs text-gray-500 font-medium">빠른 조합</p>
+        {/* 빠른 조합 */}
+        <div className="space-y-1.5">
+          <p className="text-[10px] text-slate-600 tracking-widest uppercase">빠른 조합</p>
           <div className="flex flex-wrap gap-1">
             {QUICK_COMBOS.map(({ label, formula }) => (
               <button
                 key={label}
                 onClick={() => applyQuickCombo(formula)}
                 title={formula}
-                className="px-2 py-1 bg-gray-700 hover:bg-yellow-700/60 border border-gray-600 hover:border-yellow-600 text-gray-300 hover:text-yellow-200 rounded text-xs transition-colors"
+                className="px-2 py-1 bg-slate-800/40 hover:bg-violet-900/30 border border-slate-700/40 hover:border-violet-600/40 text-slate-400 hover:text-violet-300 rounded-lg text-xs transition-colors"
               >
                 {label}
               </button>
             ))}
           </div>
-          <p className="text-xs text-gray-600 italic">누르면 현재 계산식이 해당 조합으로 교체됩니다.</p>
+          <p className="text-[10px] text-slate-700 italic">누르면 현재 계산식이 교체됩니다.</p>
         </div>
 
-        {/* [계산 미리보기] */}
+        {/* 미리보기 */}
         <FormulaPreview formula={skill.formula} stats={stats} rank={skill.rank} />
       </div>
 
-      {/* 효과 목록 */}
+      {/* ── 효과 목록 ── */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-gray-400">효과 목록</span>
-          <span className="text-xs text-gray-500">{skill.effects.length}개</span>
+          <span className="text-[11px] text-slate-500 tracking-wide">효과 목록</span>
+          <span className="text-[11px] text-slate-600 font-mono">{skill.effects.length}개</span>
         </div>
 
         {skill.effects.length === 0 && (
-          <p className="text-xs text-gray-600 italic py-1">효과가 없습니다. 아래 버튼으로 추가하세요.</p>
+          <p className="text-xs text-slate-700 italic py-1">효과가 없습니다. 아래 버튼으로 추가하세요.</p>
         )}
 
         <div className="space-y-2">
@@ -377,7 +391,7 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
 
         <button
           onClick={addEffect}
-          className="w-full py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded border border-dashed border-gray-500 hover:border-blue-400 text-sm transition-colors"
+          className="w-full py-1.5 bg-slate-800/40 hover:bg-slate-700/50 text-slate-500 hover:text-slate-300 rounded-xl border border-dashed border-slate-700/50 hover:border-cyan-700/40 text-sm transition-colors"
         >
           + 효과 추가
         </button>
@@ -385,17 +399,17 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
 
       {/* 조건 / 대가 / 설명 */}
       <label className="flex flex-col gap-1">
-        <span className="text-xs text-gray-400">조건</span>
+        <span className="text-[11px] text-slate-500 tracking-wide">조건</span>
         <input className={inputCls} value={skill.condition} onChange={field('condition')} placeholder="발동 조건 (예: 대상에게 공격 적중 시)" />
       </label>
 
       <label className="flex flex-col gap-1">
-        <span className="text-xs text-gray-400">대가</span>
+        <span className="text-[11px] text-slate-500 tracking-wide">대가</span>
         <input className={inputCls} value={skill.cost} onChange={field('cost')} placeholder="사용 대가 (예: 이면침식 +1)" />
       </label>
 
       <label className="flex flex-col gap-1">
-        <span className="text-xs text-gray-400">설명</span>
+        <span className="text-[11px] text-slate-500 tracking-wide">설명</span>
         <textarea
           className={`${inputCls} h-16 resize-none`}
           value={skill.description}
@@ -408,14 +422,14 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
       <div className="flex gap-2 pt-1">
         <button
           onClick={() => onSave(skill)}
-          className="flex-1 py-2 bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-bold rounded text-sm transition-colors"
+          className="flex-1 py-2 bg-amber-400/80 hover:bg-amber-400/90 text-slate-900 font-bold rounded-xl text-sm transition-colors shadow-sm shadow-amber-400/20"
         >
           {editingSkill ? '스킬 수정' : '스킬 추가'}
         </button>
         {editingSkill && (
           <button
             onClick={onCancel}
-            className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm transition-colors"
+            className="px-4 py-2 bg-slate-700/50 hover:bg-slate-600/60 border border-slate-600/40 text-slate-300 rounded-xl text-sm transition-colors"
           >
             취소
           </button>

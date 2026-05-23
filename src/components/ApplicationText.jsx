@@ -14,15 +14,19 @@ function CopyBlock({ title, text }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-gray-300 min-w-0 truncate">{title}</h3>
+        <h3 className="text-xs font-semibold text-slate-400 tracking-wide uppercase min-w-0 truncate">{title}</h3>
         <button
           onClick={handleCopy}
-          className={`text-xs px-3 py-1 rounded font-medium transition-colors shrink-0 ${copied ? 'bg-green-600 text-white' : 'bg-gray-600 hover:bg-gray-500 text-gray-200'}`}
+          className={`text-[11px] px-3 py-1 rounded-lg font-medium transition-all shrink-0 border ${
+            copied
+              ? 'bg-emerald-900/40 text-emerald-300 border-emerald-800/40'
+              : 'bg-slate-800/60 hover:bg-slate-700/60 text-slate-400 hover:text-slate-200 border-slate-700/50'
+          }`}
         >
-          {copied ? '복사됨!' : '복사'}
+          {copied ? '복사됨 ✓' : '복사'}
         </button>
       </div>
-      <pre className="bg-gray-900 rounded p-3 text-xs text-gray-300 whitespace-pre-wrap overflow-x-auto leading-relaxed border border-gray-700">
+      <pre className="bg-slate-950/80 rounded-xl text-xs text-cyan-100/80 whitespace-pre-wrap overflow-x-auto leading-relaxed border border-cyan-900/30 p-4 font-mono">
         {text}
       </pre>
     </div>
@@ -65,23 +69,29 @@ export default function ApplicationText({ char, stats, abilities, proficiencies,
   ].join('\n');
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4 space-y-4">
-      <h2 className="text-lg font-bold text-yellow-400">신청 텍스트</h2>
+    <div className="bg-slate-900/70 backdrop-blur-sm rounded-2xl border border-white/10 p-5 shadow-xl shadow-black/30 space-y-5">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-slate-600 font-mono tracking-widest">—</span>
+        <h2 className="text-sm font-semibold text-slate-300 tracking-wide uppercase">신청 텍스트</h2>
+      </div>
+
       <CopyBlock title="캐릭터 신청" text={charText} />
+
       {skills.length > 0 && (
         <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-gray-400 border-t border-gray-700 pt-3">스킬 신청</h3>
+          <div className="border-t border-white/8 pt-1" />
           {skills.map(sk => (
             <CopyBlock
               key={sk.id}
-              title={`${sk.name || '(이름 없음)'} [${sk.tradition}·${sk.series}·${sk.rank}]`}
+              title={`${sk.name || '(이름 없음)'} · ${sk.tradition} · ${sk.series} · ${sk.rank}`}
               text={buildSkillText(sk)}
             />
           ))}
         </div>
       )}
+
       {skills.length === 0 && (
-        <p className="text-xs text-gray-500">스킬을 추가하면 스킬 신청 텍스트가 여기에 표시됩니다.</p>
+        <p className="text-xs text-slate-600 italic">스킬을 추가하면 스킬 신청 텍스트가 여기에 표시됩니다.</p>
       )}
     </div>
   );
