@@ -5,25 +5,19 @@ import { PROFICIENCY_NAMES } from '../data/proficiencies';
 
 function CopyBlock({ title, text }) {
   const [copied, setCopied] = useState(false);
-
   const handleCopy = () => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
   };
-
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-300">{title}</h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-gray-300 min-w-0 truncate">{title}</h3>
         <button
           onClick={handleCopy}
-          className={`text-xs px-3 py-1 rounded font-medium transition-colors shrink-0 ${
-            copied
-              ? 'bg-green-600 text-white'
-              : 'bg-gray-600 hover:bg-gray-500 text-gray-200'
-          }`}
+          className={`text-xs px-3 py-1 rounded font-medium transition-colors shrink-0 ${copied ? 'bg-green-600 text-white' : 'bg-gray-600 hover:bg-gray-500 text-gray-200'}`}
         >
           {copied ? '복사됨!' : '복사'}
         </button>
@@ -36,7 +30,9 @@ function CopyBlock({ title, text }) {
 }
 
 function buildSkillText(sk) {
-  const effectLines = sk.effectLines ?? [];
+  const effectLines = (sk.effects ?? [])
+    .map(e => e.generatedText)
+    .filter(Boolean);
   const effectBlock = effectLines.length > 0
     ? '효과:\n' + effectLines.join('\n')
     : '효과:';
@@ -71,9 +67,7 @@ export default function ApplicationText({ char, stats, abilities, proficiencies,
   return (
     <div className="bg-gray-800 rounded-lg p-4 space-y-4">
       <h2 className="text-lg font-bold text-yellow-400">신청 텍스트</h2>
-
       <CopyBlock title="캐릭터 신청" text={charText} />
-
       {skills.length > 0 && (
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-gray-400 border-t border-gray-700 pt-3">스킬 신청</h3>
@@ -86,7 +80,6 @@ export default function ApplicationText({ char, stats, abilities, proficiencies,
           ))}
         </div>
       )}
-
       {skills.length === 0 && (
         <p className="text-xs text-gray-500">스킬을 추가하면 스킬 신청 텍스트가 여기에 표시됩니다.</p>
       )}
