@@ -17,6 +17,7 @@ import SkillList from './components/SkillList';
 import ApplicationText from './components/ApplicationText';
 import SaveLoad from './components/SaveLoad';
 import Checklist from './components/Checklist';
+import ValidationPanel from './components/ValidationPanel';
 
 // ── persistence ──────────────────────────────────────────
 const STORAGE_KEY = 'aporia-builder-save-v1';
@@ -253,6 +254,7 @@ export default function App() {
           {rightTab === '요약' && (
             <div className="space-y-3">
               <CharacterSummary char={char} stats={stats} />
+              <ValidationPanel char={char} remaining={remaining} skills={skills} />
               <ActionDetail stats={stats} abilities={abilities} proficiencies={proficiencies} />
             </div>
           )}
