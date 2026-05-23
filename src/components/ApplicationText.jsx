@@ -19,7 +19,7 @@ function CopyBlock({ title, text }) {
         <h3 className="text-sm font-semibold text-gray-300">{title}</h3>
         <button
           onClick={handleCopy}
-          className={`text-xs px-3 py-1 rounded font-medium transition-colors ${
+          className={`text-xs px-3 py-1 rounded font-medium transition-colors shrink-0 ${
             copied
               ? 'bg-green-600 text-white'
               : 'bg-gray-600 hover:bg-gray-500 text-gray-200'
@@ -33,6 +33,26 @@ function CopyBlock({ title, text }) {
       </pre>
     </div>
   );
+}
+
+function buildSkillText(sk) {
+  const effectLines = sk.effectLines ?? [];
+  const effectBlock = effectLines.length > 0
+    ? '효과:\n' + effectLines.join('\n')
+    : '효과:';
+
+  return [
+    '!스킬신청',
+    `이름: ${sk.name}`,
+    `계통: ${sk.tradition}`,
+    `계열: ${sk.series}`,
+    `랭크: ${sk.rank}`,
+    `계산식: ${sk.formula}`,
+    effectBlock,
+    `조건: ${sk.condition}`,
+    `대가: ${sk.cost}`,
+    `설명: ${sk.description}`,
+  ].join('\n');
 }
 
 export default function ApplicationText({ char, stats, abilities, proficiencies, skills }) {
@@ -55,29 +75,15 @@ export default function ApplicationText({ char, stats, abilities, proficiencies,
       <CopyBlock title="캐릭터 신청" text={charText} />
 
       {skills.length > 0 && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           <h3 className="text-sm font-semibold text-gray-400 border-t border-gray-700 pt-3">스킬 신청</h3>
-          {skills.map(sk => {
-            const skillText = [
-              '!스킬신청',
-              `이름: ${sk.name}`,
-              `계통: ${sk.tradition}`,
-              `계열: ${sk.series}`,
-              `랭크: ${sk.rank}`,
-              `계산식: ${sk.formula}`,
-              `효과: ${sk.effect}`,
-              `조건: ${sk.condition}`,
-              `대가: ${sk.cost}`,
-              `설명: ${sk.description}`,
-            ].join('\n');
-            return (
-              <CopyBlock
-                key={sk.id}
-                title={`${sk.name || '(이름 없음)'} [${sk.tradition}·${sk.series}·${sk.rank}]`}
-                text={skillText}
-              />
-            );
-          })}
+          {skills.map(sk => (
+            <CopyBlock
+              key={sk.id}
+              title={`${sk.name || '(이름 없음)'} [${sk.tradition}·${sk.series}·${sk.rank}]`}
+              text={buildSkillText(sk)}
+            />
+          ))}
         </div>
       )}
 

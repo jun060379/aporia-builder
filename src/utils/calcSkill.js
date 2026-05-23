@@ -70,20 +70,24 @@ export function previewFormula(formula, stats, rank) {
 const AUTO_COMMANDS = ['상태템플릿부여', '스택증가'];
 const NUMERIC_KEYWORDS = ['수치:', '횟수:', '최대:'];
 
-export function validateEffect(effect) {
+export function validateEffectLine(line) {
   const warnings = [];
-  if (!effect.trim()) return warnings;
-
-  const hasAutoCmd = AUTO_COMMANDS.some(cmd => effect.includes(cmd));
-  const hasNumeric = NUMERIC_KEYWORDS.some(kw => effect.includes(kw));
-  const hasStatStack = AUTO_COMMANDS.some(cmd => effect.includes(cmd));
-
-  if (hasStatStack && !hasNumeric) {
-    warnings.push('상태/스택 효과인데 수치, 횟수, 최대값이 없습니다.');
+  if (!line.trim()) {
+    warnings.push('빈 효과입니다.');
+    return warnings;
   }
 
+  const trimmed = line.trim();
+  const hasAutoCmd = AUTO_COMMANDS.some(cmd => trimmed.startsWith(cmd));
+  const hasNumeric = NUMERIC_KEYWORDS.some(kw => trimmed.includes(kw));
+  const isStateOrStack = AUTO_COMMANDS.some(cmd => trimmed.includes(cmd));
+
   if (!hasAutoCmd) {
-    warnings.push('운영진 수동 검수 대상입니다.');
+    warnings.push('자동 처리 명령이 아니면 운영진 수동 검수 대상입니다.');
+  }
+
+  if (isStateOrStack && !hasNumeric) {
+    warnings.push('상태/스택 효과에는 수치, 횟수, 최대값을 권장합니다.');
   }
 
   return warnings;
