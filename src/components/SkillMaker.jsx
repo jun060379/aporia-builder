@@ -1,6 +1,12 @@
 import { useState, useEffect } from 'react';
 import { SKILL_TRADITIONS, SKILL_SERIES, SKILL_RANKS, defaultSkill, makeEffect } from '../data/skillRanks';
-import { validateFormula, previewFormula, hasTargetReference, getEffectWarnings } from '../utils/calcSkill';
+import {
+  validateFormula,
+  validateFormulaStructure,
+  previewFormula,
+  hasTargetReference,
+  getEffectWarnings,
+} from '../utils/calcSkill';
 import FormulaBlockModal from './FormulaBlockModal';
 import EffectBlockModal from './EffectBlockModal';
 
@@ -11,6 +17,68 @@ const EFFECT_TYPE_LABEL = {
   stack:        '스택 변경',
   free:         '자유 입력',
 };
+
+const OPERATORS = [
+  { op: '+', label: '+', tip: '더하기' },
+  { op: '-', label: '-', tip: '빼기' },
+  { op: '*', label: '*', tip: '곱하기' },
+  { op: '/', label: '/', tip: '나누기' },
+  { op: '(',  label: '(',  tip: '우선 계산할 묶음 시작' },
+  { op: ')',  label: ')',  tip: '우선 계산할 묶음 끝' },
+];
+
+const QUICK_COMBOS = [
+  { label: '기본 공격식',       formula: 'd20 + 랭크 + 근력' },
+  { label: '민첩 공격식',       formula: 'd20 + 랭크 + 민첩' },
+  { label: '감각 공격식',       formula: 'd20 + 랭크 + 감각' },
+  { label: '지능 판정식',       formula: 'd20 + 랭크 + 지능' },
+  { label: '스택 강화식',       formula: 'd20 + 랭크 + 스택_이름 * 2' },
+  { label: '대상 상태 강화식',  formula: 'd20 + 랭크 + 대상상태_상태_수치 * 2' },
+];
+
+function FormulaPreview({ formula, stats, rank }) {
+  if (!formula.trim()) return null;
+
+  const base = previewFormula(formula, stats, rank);
+  const hasDbVar = /이면침식/.test(formula);
+
+  const침식0 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 0 }) : null;
+  const침식6 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 6 }) : null;
+  const침식9 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 9 }) : null;
+
+  const show = base.value !== null || base.warnings.length > 0;
+  if (!show) return null;
+
+  return (
+    <div className="bg-gray-900 rounded-lg border border-gray-700 p-3 space-y-2">
+      <p className="text-xs font-semibold text-gray-400">계산 미리보기 (기대값 기준)</p>
+
+      {hasDbVar ? (
+        <div className="grid grid-cols-3 gap-2">
+          {[[침식0, '침식 0'], [침식6, '침식 6'], [침식9, '침식 9']].map(([res, lbl]) => (
+            <div key={lbl} className="bg-gray-800 rounded p-2 text-center">
+              <p className="text-xs text-gray-500 mb-0.5">{lbl}</p>
+              <p className={`text-sm font-bold ${res?.value !== null ? 'text-green-400' : 'text-red-400'}`}>
+                {res?.value !== null ? res.value : '오류'}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        base.value !== null && (
+          <p className="text-sm text-green-400">기대값: <span className="font-bold">{base.value}</span></p>
+        )
+      )}
+
+      {base.warnings.map((w, i) => (
+        <p key={i} className={`text-xs ${w.includes('운영진') ? 'text-orange-400' : 'text-yellow-400'}`}>⚠ {w}</p>
+      ))}
+      {base.infos.map((info, i) => (
+        <p key={i} className="text-xs text-gray-500 italic">ℹ {info}</p>
+      ))}
+    </div>
+  );
+}
 
 function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMoveDown }) {
   const [modalOpen, setModalOpen] = useState(false);
@@ -26,7 +94,6 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
     <div className={`rounded-lg border p-3 space-y-2 ${
       effect.confirmed ? 'bg-gray-700/40 border-green-800/60' : 'bg-gray-700/60 border-gray-600'
     }`}>
-      {/* Header row */}
       <div className="flex items-center gap-1 flex-wrap">
         <span className="text-xs text-gray-400 shrink-0">효과 {index + 1}</span>
         {effect.type && (
@@ -47,7 +114,6 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
         </div>
       </div>
 
-      {/* Generated text preview */}
       {hasText && (
         <div className={`rounded p-2 text-xs font-mono break-all whitespace-pre-wrap ${
           effect.confirmed ? 'bg-gray-900 text-green-300 border border-green-900/60' : 'bg-gray-800 text-blue-300 border border-gray-700'
@@ -56,7 +122,6 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
         </div>
       )}
 
-      {/* Warnings */}
       {warnings.length > 0 && (
         <div className="space-y-0.5">
           {warnings.map((w, i) => (
@@ -65,7 +130,6 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
         </div>
       )}
 
-      {/* Action buttons */}
       {!effect.confirmed ? (
         <div className="flex flex-wrap gap-1">
           <button onClick={() => setModalOpen(true)}
@@ -123,6 +187,15 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
     setFormulaModalOpen(false);
   };
 
+  const appendOperator = (op) => {
+    const spaced = ` ${op} `;
+    setSkill(s => ({ ...s, formula: s.formula + spaced }));
+  };
+
+  const applyQuickCombo = (formula) => {
+    setSkill(s => ({ ...s, formula }));
+  };
+
   const addEffect = () => {
     setSkill(s => ({ ...s, effects: [...s.effects, makeEffect()] }));
   };
@@ -145,12 +218,12 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
     });
   };
 
-  const formulaErrors   = validateFormula(skill.formula);
+  const tokenErrors     = validateFormula(skill.formula);
+  const structureWarns  = validateFormulaStructure(skill.formula);
   const needsTarget     = hasTargetReference(skill.formula);
-  const { value: formulaPreview, warnings: formulaWarnings, infos: formulaInfos }
-    = previewFormula(skill.formula, stats, skill.rank);
+  const allFormulaErrors = [...tokenErrors, ...structureWarns];
 
-  const inputCls  = "w-full bg-gray-700 text-white rounded px-2 py-1.5 text-sm border border-gray-600 focus:border-yellow-400 outline-none";
+  const inputCls  = "w-full min-w-0 bg-gray-700 text-white rounded px-2 py-1.5 text-sm border border-gray-600 focus:border-yellow-400 outline-none";
   const selectCls = "w-full bg-gray-700 text-white rounded px-2 py-1.5 text-sm border border-gray-600 focus:border-yellow-400 outline-none";
 
   return (
@@ -201,44 +274,79 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
         </div>
       </div>
 
-      {/* 계산식 */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-gray-400">계산식</span>
-          <button
-            onClick={() => setFormulaModalOpen(true)}
-            className="px-2 py-1 bg-yellow-600 hover:bg-yellow-500 text-gray-900 font-semibold rounded text-xs transition-colors"
-          >
-            + 블럭 선택
-          </button>
-        </div>
+      {/* ── 계산식 섹션 ── */}
+      <div className="space-y-3 bg-gray-750 rounded-lg border border-gray-700 p-3">
+        <span className="text-xs font-semibold text-yellow-400 tracking-wide uppercase">계산식</span>
+
+        {/* 입력창 */}
         <input
-          className={inputCls}
+          className={inputCls + (allFormulaErrors.length > 0 ? ' border-red-500' : '')}
           value={skill.formula}
           onChange={field('formula')}
-          placeholder="예: 랭크 + 근력 * 2 + d20"
+          placeholder="예: d20 + 랭크 + 근력"
         />
-        {formulaErrors.length > 0 && (
+
+        {/* 검증 메시지 */}
+        {allFormulaErrors.length > 0 && (
           <div className="space-y-0.5">
-            {formulaErrors.map((e, i) => <p key={i} className="text-xs text-red-400">⚠ {e}</p>)}
+            {allFormulaErrors.map((e, i) => (
+              <p key={i} className="text-xs text-red-400">⚠ {e}</p>
+            ))}
           </div>
         )}
-        {needsTarget && formulaErrors.length === 0 && (
+        {needsTarget && allFormulaErrors.length === 0 && (
           <p className="text-xs text-orange-400">⚠ 대상 참조 포함 — 조건 칸에 "대상 지정 필요"를 추가하세요.</p>
         )}
-        {formulaWarnings.length > 0 && formulaErrors.length === 0 && (
-          <div className="space-y-0.5">
-            {formulaWarnings.map((w, i) => <p key={i} className="text-xs text-orange-400">⚠ {w}</p>)}
+
+        {/* [블럭 추가] */}
+        <div className="space-y-1">
+          <p className="text-xs text-gray-500 font-medium">블럭 추가</p>
+          <button
+            onClick={() => setFormulaModalOpen(true)}
+            className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-gray-900 font-semibold rounded text-xs transition-colors"
+          >
+            블럭 선택
+          </button>
+        </div>
+
+        {/* [연산자] */}
+        <div className="space-y-1">
+          <p className="text-xs text-gray-500 font-medium">연산자</p>
+          <div className="flex flex-wrap gap-1">
+            {OPERATORS.map(({ op, label, tip }) => (
+              <button
+                key={op}
+                onClick={() => appendOperator(op)}
+                title={tip}
+                className="min-w-[2.5rem] px-2 py-1.5 bg-gray-700 hover:bg-gray-600 border border-gray-600 hover:border-yellow-500 text-white font-mono font-bold rounded text-sm transition-colors"
+              >
+                {label}
+                <span className="block text-gray-500 font-sans font-normal" style={{ fontSize: '9px', lineHeight: '1' }}>{tip}</span>
+              </button>
+            ))}
           </div>
-        )}
-        {formulaInfos.map((info, i) => (
-          <p key={i} className="text-xs text-gray-500 italic">ℹ {info}</p>
-        ))}
-        {formulaPreview !== null && formulaErrors.length === 0 && (
-          <div className="text-xs text-green-400 bg-gray-900 rounded px-2 py-1 border border-gray-700">
-            기대값 프리뷰: <span className="font-bold">{formulaPreview}</span>
+        </div>
+
+        {/* [빠른 조합] */}
+        <div className="space-y-1">
+          <p className="text-xs text-gray-500 font-medium">빠른 조합</p>
+          <div className="flex flex-wrap gap-1">
+            {QUICK_COMBOS.map(({ label, formula }) => (
+              <button
+                key={label}
+                onClick={() => applyQuickCombo(formula)}
+                title={formula}
+                className="px-2 py-1 bg-gray-700 hover:bg-yellow-700/60 border border-gray-600 hover:border-yellow-600 text-gray-300 hover:text-yellow-200 rounded text-xs transition-colors"
+              >
+                {label}
+              </button>
+            ))}
           </div>
-        )}
+          <p className="text-xs text-gray-600 italic">누르면 현재 계산식이 해당 조합으로 교체됩니다.</p>
+        </div>
+
+        {/* [계산 미리보기] */}
+        <FormulaPreview formula={skill.formula} stats={stats} rank={skill.rank} />
       </div>
 
       {/* 효과 목록 */}
@@ -314,7 +422,6 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
         )}
       </div>
 
-      {/* Formula Modal */}
       {formulaModalOpen && (
         <FormulaBlockModal
           onInsert={insertFormula}

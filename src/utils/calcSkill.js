@@ -35,11 +35,40 @@ export function validateFormula(formula) {
   return [];
 }
 
+export function validateFormulaStructure(formula) {
+  if (!formula.trim()) return [];
+  const f = formula.trim();
+  const warns = [];
+
+  if (/[+\-*/]\s*$/.test(f)) {
+    warns.push('계산식이 연산자로 끝납니다.');
+  }
+
+  if (/[+\-*/]\s*[+\-*/]/.test(f)) {
+    warns.push('연산자가 연속되어 있습니다.');
+  }
+
+  let depth = 0;
+  let bad = false;
+  for (const ch of f) {
+    if (ch === '(') depth++;
+    if (ch === ')') { depth--; if (depth < 0) { bad = true; break; } }
+  }
+  if (bad) warns.push('괄호가 잘못 닫혔습니다.');
+  else if (depth > 0) warns.push('괄호가 닫히지 않았습니다.');
+
+  if (/\(\s*\)/.test(f)) {
+    warns.push('빈 괄호가 있습니다.');
+  }
+
+  return warns;
+}
+
 export function hasTargetReference(formula) {
   return /대상상태_|대상스택_/.test(formula);
 }
 
-export function previewFormula(formula, stats, rank) {
+export function previewFormula(formula, stats, rank, dbOverrides = {}) {
   if (!formula.trim()) return { value: null, warnings: [], infos: [] };
 
   const warnings = [];
@@ -85,10 +114,13 @@ export function previewFormula(formula, stats, rank) {
   }
   if (hasDbRef) {
     for (const v of DB_VARS) {
-      expr = expr.replace(new RegExp(v, 'g'), '0');
+      const val = dbOverrides[v] ?? 0;
+      expr = expr.replace(new RegExp(v, 'g'), String(val));
     }
-    infos.push('DB 변수는 실제 사용 시 캐릭터 DB 값을 참조합니다.');
-    warnings.push('고급 DB 변수 사용 — 운영진 검수 대상입니다.');
+    if (!Object.keys(dbOverrides).length) {
+      infos.push('DB 변수는 실제 사용 시 캐릭터 DB 값을 참조합니다.');
+      warnings.push('고급 DB 변수 사용 — 운영진 검수 대상입니다.');
+    }
   }
 
   try {
