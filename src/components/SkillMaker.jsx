@@ -170,12 +170,21 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
   );
 }
 
+const HELP_ITEMS = [
+  { title: '기본 형식', desc: 'd20 + 랭크 + 스탯 (예: d20 + 랭크 + 근력)이 기본 판정식입니다.' },
+  { title: '효과 줄 단위 처리', desc: '효과는 블럭 단위로 등록되며, 각 블럭이 독립적인 효과로 신청됩니다.' },
+  { title: '자유 입력 검수', desc: '자유 입력(free) 효과는 운영진 수동 검수 대상입니다. 가능하면 템플릿을 사용하세요.' },
+  { title: '대상 참조 변수', desc: '대상상태_ 또는 대상스택_ 변수를 쓰는 경우, 조건 칸에 "대상 지정 필요"를 명시해야 합니다.' },
+  { title: '이면침식 변수', desc: '이면침식 변수를 포함하면 침식 0/6/9 기대값이 미리보기에 자동 표시됩니다.' },
+];
+
 export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
   const [skill, setSkill] = useState(() => {
     const s = editingSkill || defaultSkill();
     return { ...s, effects: s.effects ?? [] };
   });
   const [formulaModalOpen, setFormulaModalOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
     const s = editingSkill || defaultSkill();
@@ -228,15 +237,48 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
     <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-slate-200/70 shadow-lg shadow-violet-100/20 p-5 space-y-4">
 
       {/* Header */}
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] text-violet-300 font-mono tracking-widest">05</span>
-        <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">
-          {editingSkill ? '스킬 편집' : '스킬 메이커'}
-        </h2>
-        {editingSkill && (
-          <span className="ml-1 text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">편집 중</span>
-        )}
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] text-violet-300 font-mono tracking-widest">05</span>
+            <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">
+              {editingSkill ? '스킬 편집' : '스킬 메이커'}
+            </h2>
+            {editingSkill && (
+              <span className="text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">편집 중</span>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-400 leading-relaxed">스킬의 판정식과 효과를 신청 양식에 맞춰 제작합니다.</p>
+        </div>
+        <button
+          onClick={() => setHelpOpen(v => !v)}
+          className={`shrink-0 text-[11px] px-2.5 py-1 rounded-lg border font-medium transition-colors ${
+            helpOpen
+              ? 'bg-amber-50 border-amber-200 text-amber-700'
+              : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-amber-300 hover:text-amber-600'
+          }`}
+        >
+          {helpOpen ? '도움말 닫기' : '? 도움말'}
+        </button>
       </div>
+
+      {/* 도움말 박스 */}
+      {helpOpen && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+          <p className="text-[10px] text-amber-600 font-semibold uppercase tracking-widest">스킬 메이커 도움말</p>
+          <ul className="space-y-2">
+            {HELP_ITEMS.map(({ title, desc }) => (
+              <li key={title} className="flex gap-2 text-xs">
+                <span className="text-amber-500 shrink-0 mt-0.5">•</span>
+                <span>
+                  <span className="font-semibold text-amber-800">{title}:</span>{' '}
+                  <span className="text-amber-700 leading-relaxed">{desc}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* 스킬명 */}
       <label className="flex flex-col gap-1">

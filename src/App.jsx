@@ -3,6 +3,7 @@ import { defaultStats, STAT_NAMES, getStatValue } from './data/stats';
 import { defaultAbilities } from './data/abilities';
 import { defaultProficiencies } from './data/proficiencies';
 import { getLevelInfo } from './data/levels';
+import { calcStatCost, calcAbilityCost, calcProficiencyCost, calcSkillsCost } from './utils/calcBudget';
 
 import CharacterForm from './components/CharacterForm';
 import StatEditor from './components/StatEditor';
@@ -15,6 +16,7 @@ import SkillMaker from './components/SkillMaker';
 import SkillList from './components/SkillList';
 import ApplicationText from './components/ApplicationText';
 import SaveLoad from './components/SaveLoad';
+import Checklist from './components/Checklist';
 
 // ── persistence ──────────────────────────────────────────
 const STORAGE_KEY = 'aporia-builder-save-v1';
@@ -32,11 +34,7 @@ function buildSaveData(char, stats, abilities, proficiencies, skills) {
   return {
     version: 1,
     savedAt: new Date().toISOString(),
-    char,
-    stats,
-    abilities,
-    proficiencies,
-    skills,
+    char, stats, abilities, proficiencies, skills,
   };
 }
 
@@ -76,7 +74,6 @@ function CharacterSummary({ char, stats }) {
         <span className="text-[10px] text-violet-300 font-mono tracking-widest">—</span>
         <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">캐릭터 요약</h2>
       </div>
-
       <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm mb-4">
         <span className="text-slate-400">이름</span>
         <span className="text-slate-900 font-semibold">{char.name || '—'}</span>
@@ -89,7 +86,6 @@ function CharacterSummary({ char, stats }) {
         <span className="text-slate-400">성장예산</span>
         <span className="text-slate-700">{levelInfo.budget}</span>
       </div>
-
       <div className="border-t border-slate-100 pt-3">
         <p className="text-[10px] text-slate-400 uppercase tracking-widest mb-2">스탯</p>
         <div className="grid grid-cols-5 gap-1.5">
@@ -108,19 +104,26 @@ function CharacterSummary({ char, stats }) {
 
 // ── main app ─────────────────────────────────────────────
 export default function App() {
-  // ── initial state from localStorage ──
   const saved = loadFromStorage();
 
-  const [char, setChar] = useState(saved?.char ?? DEFAULT_CHAR);
-  const [stats, setStats] = useState(saved?.stats ?? defaultStats());
-  const [abilities, setAbilities] = useState(saved?.abilities ?? defaultAbilities());
+  const [char, setChar]           = useState(saved?.char          ?? DEFAULT_CHAR);
+  const [stats, setStats]         = useState(saved?.stats         ?? defaultStats());
+  const [abilities, setAbilities] = useState(saved?.abilities     ?? defaultAbilities());
   const [proficiencies, setProficiencies] = useState(saved?.proficiencies ?? defaultProficiencies());
-  const [skills, setSkills] = useState(saved?.skills ?? []);
+  const [skills, setSkills]       = useState(saved?.skills        ?? []);
   const [editingSkill, setEditingSkill] = useState(null);
-  const [lastSaved, setLastSaved] = useState(saved?.savedAt ?? null);
+  const [lastSaved, setLastSaved] = useState(saved?.savedAt       ?? null);
 
   const [leftTab, setLeftTab]   = useState('캐릭터');
   const [rightTab, setRightTab] = useState('요약');
+
+  // derived budget
+  const { budget } = getLevelInfo(char.exp);
+  const remaining = budget
+    - calcStatCost(stats)
+    - calcAbilityCost(abilities)
+    - calcProficiencyCost(proficiencies)
+    - calcSkillsCost(skills);
 
   // ── auto-save ──
   useEffect(() => {
@@ -188,7 +191,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50 to-violet-100 text-slate-900 relative">
-      {/* ambient light blobs */}
       <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
         <div className="absolute -top-32 -left-32 w-96 h-96 bg-amber-100/60 rounded-full blur-3xl" />
         <div className="absolute bottom-0 right-0 w-96 h-96 bg-violet-200/50 rounded-full blur-3xl" />
@@ -260,7 +262,10 @@ export default function App() {
           )}
 
           {rightTab === '신청텍스트' && (
-            <ApplicationText char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
+            <div className="space-y-3">
+              <Checklist remaining={remaining} skills={skills} />
+              <ApplicationText char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
+            </div>
           )}
 
           {rightTab === '저장' && (

@@ -27,10 +27,11 @@ export default function ProficiencyEditor({ proficiencies, onChange }) {
 
   return (
     <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-slate-200/70 shadow-lg shadow-violet-100/20 p-5">
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-1">
         <span className="text-[10px] text-violet-300 font-mono tracking-widest">04</span>
         <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">숙련</h2>
       </div>
+      <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">액션 판정의 안정성과 고점을 높입니다. 숙련 수치는 액션 배율에 영향을 줍니다.</p>
       <div>
         {PROFICIENCY_NAMES.map(name => (
           <Stepper
