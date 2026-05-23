@@ -1,13 +1,13 @@
-const inputCls = "w-full bg-slate-800/60 text-slate-100 rounded-lg px-3 py-1.5 text-sm border border-slate-700/50 focus:border-cyan-500/50 outline-none placeholder:text-slate-600 transition-colors";
+const inputCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
 
 export default function CharacterForm({ char, onChange }) {
   const field = (key) => (e) => onChange({ ...char, [key]: e.target.value });
 
   return (
-    <div className="bg-slate-900/70 backdrop-blur-sm rounded-2xl border border-white/10 p-5 shadow-xl shadow-black/30">
+    <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-slate-200/70 shadow-lg shadow-violet-100/20 p-5">
       <div className="flex items-center gap-2 mb-4">
-        <span className="text-[10px] text-slate-600 font-mono tracking-widest">01</span>
-        <h2 className="text-sm font-semibold text-slate-300 tracking-wide uppercase">기본 정보</h2>
+        <span className="text-[10px] text-violet-300 font-mono tracking-widest">01</span>
+        <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">기본 정보</h2>
       </div>
 
       <div className="grid grid-cols-2 gap-2.5">

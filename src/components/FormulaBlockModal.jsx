@@ -4,28 +4,28 @@ import { ABILITY_NAMES } from '../data/abilities';
 import { PROFICIENCY_NAMES } from '../data/proficiencies';
 
 const CATEGORIES = [
-  { id: 'd6',      label: 'd6',         group: '기본' },
-  { id: 'd20',     label: 'd20',        group: '기본' },
-  { id: '2d6',     label: '2d6',        group: '기본' },
-  { id: '랭크',    label: '랭크',       group: '기본' },
-  { id: '스탯',    label: '스탯',       group: '참조' },
-  { id: '기능',    label: '기능',       group: '참조' },
-  { id: '숙련',    label: '숙련',       group: '참조' },
+  { id: 'd6',       label: 'd6',          group: '기본' },
+  { id: 'd20',      label: 'd20',         group: '기본' },
+  { id: '2d6',      label: '2d6',         group: '기본' },
+  { id: '랭크',     label: '랭크',        group: '기본' },
+  { id: '스탯',     label: '스탯',        group: '참조' },
+  { id: '기능',     label: '기능',        group: '참조' },
+  { id: '숙련',     label: '숙련',        group: '참조' },
   { id: '자신상태', label: '자신의 상태', group: '상태/스택' },
   { id: '대상상태', label: '대상의 상태', group: '상태/스택' },
   { id: '자신스택', label: '자신의 스택', group: '상태/스택' },
   { id: '대상스택', label: '대상의 스택', group: '상태/스택' },
-  { id: '고급변수', label: '고급 변수',  group: '고급' },
+  { id: '고급변수', label: '고급 변수',   group: '고급' },
 ];
 
 const DESCRIPTIONS = {
-  'd6':      '1d6 판정을 계산식에 추가합니다. 기대값 프리뷰에서는 3.5로 계산됩니다.',
-  'd20':     '1d20 판정을 계산식에 추가합니다. 기대값 프리뷰에서는 10.5로 계산됩니다.',
-  '2d6':     '2d6 판정을 계산식에 추가합니다. 기대값 프리뷰에서는 7로 계산됩니다.',
-  '랭크':    '현재 스킬의 랭크값을 참조합니다. F=1, E=10, D=20, C=30, B=40, A=50, S=70, U=80, EX=100.',
-  '스탯':    '현재 캐릭터의 스탯 내부값을 참조합니다. 예: 감각 A → 30.',
-  '기능':    '현재 캐릭터의 기능 수치(0~5)를 참조합니다.',
-  '숙련':    '현재 캐릭터의 숙련 수치(0~5)를 참조합니다.',
+  'd6':       '1d6 판정을 계산식에 추가합니다. 기대값 프리뷰에서는 3.5로 계산됩니다.',
+  'd20':      '1d20 판정을 계산식에 추가합니다. 기대값 프리뷰에서는 10.5로 계산됩니다.',
+  '2d6':      '2d6 판정을 계산식에 추가합니다. 기대값 프리뷰에서는 7로 계산됩니다.',
+  '랭크':     '현재 스킬의 랭크값을 참조합니다. F=1, E=10, D=20, C=30, B=40, A=50, S=70, U=80, EX=100.',
+  '스탯':     '현재 캐릭터의 스탯 내부값을 참조합니다. 예: 감각 A → 30.',
+  '기능':     '현재 캐릭터의 기능 수치(0~5)를 참조합니다.',
+  '숙련':     '현재 캐릭터의 숙련 수치(0~5)를 참조합니다.',
   '자신상태': '스킬 사용자 자신에게 걸린 상태를 참조합니다. 상태_출혈_수치는 자신에게 걸린 출혈 수치 합계입니다.',
   '대상상태': '스킬 대상에게 걸린 상태를 참조합니다. 대상 지정이 필요한 스킬에서만 정상 동작합니다.',
   '자신스택': '스킬 사용자 자신에게 쌓인 스택값을 참조합니다. 예: 스택_혈인.',
@@ -62,7 +62,7 @@ function generateToken(category, params) {
 
 const groups = [...new Set(CATEGORIES.map(c => c.group))];
 
-const inputCls = "w-full min-w-0 bg-slate-800/60 text-slate-100 rounded-lg px-3 py-1.5 text-sm border border-slate-700/50 focus:border-amber-400/50 outline-none placeholder:text-slate-600 transition-colors";
+const inputCls = "w-full min-w-0 bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
 
 function BtnSel({ active, onClick, children }) {
   return (
@@ -70,8 +70,8 @@ function BtnSel({ active, onClick, children }) {
       onClick={onClick}
       className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
         active
-          ? 'bg-amber-400/80 text-slate-900 border-amber-400/60'
-          : 'bg-slate-800/60 text-slate-400 border-slate-700/50 hover:border-amber-400/40 hover:text-slate-200'
+          ? 'bg-violet-600 text-white border-violet-600 shadow-sm shadow-violet-200'
+          : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-violet-300 hover:text-violet-700 hover:bg-violet-50'
       }`}
     >
       {children}
@@ -91,22 +91,21 @@ export default function FormulaBlockModal({ onInsert, onClose }) {
   const changeCategory = (cat) => { setCategory(cat); setParams({}); };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-sm p-2 sm:p-4">
-      <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl shadow-black/50">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-sm p-2 sm:p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl shadow-slate-300/50">
 
-        <div className="sticky top-0 bg-slate-900 border-b border-white/10 px-5 py-3.5 flex items-center justify-between z-10">
+        <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-3.5 flex items-center justify-between z-10">
           <div>
-            <h3 className="text-sm font-semibold text-amber-200">계산식 블럭 선택</h3>
-            <p className="text-[10px] text-slate-500 mt-0.5">Formula Block</p>
+            <h3 className="text-sm font-semibold text-slate-800">계산식 블럭 선택</h3>
+            <p className="text-[10px] text-slate-400 mt-0.5">Formula Block</p>
           </div>
-          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-800/60 text-slate-400 hover:text-slate-200 text-sm transition-colors">✕</button>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 text-sm transition-colors">✕</button>
         </div>
 
         <div className="p-5 space-y-4">
-          {/* Category by group */}
           {groups.map(g => (
             <div key={g} className="space-y-1.5">
-              <span className="text-[10px] text-slate-600 font-mono tracking-widest uppercase">{g}</span>
+              <span className="text-[10px] text-slate-400 font-mono tracking-widest uppercase">{g}</span>
               <div className="flex flex-wrap gap-1">
                 {CATEGORIES.filter(c => c.group === g).map(c => (
                   <BtnSel key={c.id} active={category === c.id} onClick={() => changeCategory(c.id)}>
@@ -117,12 +116,10 @@ export default function FormulaBlockModal({ onInsert, onClose }) {
             </div>
           ))}
 
-          {/* Description */}
-          <div className="bg-slate-800/40 rounded-xl border border-white/6 p-3 text-xs text-slate-400 leading-relaxed">
+          <div className="bg-slate-50 rounded-xl border border-slate-100 p-3 text-xs text-slate-500 leading-relaxed">
             {DESCRIPTIONS[category]}
           </div>
 
-          {/* Inputs */}
           {category === '스탯' && (
             <div className="space-y-1.5">
               <span className="text-[11px] text-slate-500">스탯 선택</span>
@@ -171,7 +168,7 @@ export default function FormulaBlockModal({ onInsert, onClose }) {
                 </div>
               </div>
               {needsTarget && (
-                <p className="text-xs text-amber-400">⚠ 대상 지정이 필요한 스킬에서만 정상 동작합니다.</p>
+                <p className="text-xs text-amber-600">⚠ 대상 지정이 필요한 스킬에서만 정상 동작합니다.</p>
               )}
             </div>
           )}
@@ -183,7 +180,7 @@ export default function FormulaBlockModal({ onInsert, onClose }) {
                 <input className={inputCls} value={params.stackName || ''} onChange={e => setParam('stackName', e.target.value)} placeholder="예: 혈인, 표식" />
               </label>
               {needsTarget && (
-                <p className="text-xs text-amber-400">⚠ 대상 지정이 필요한 스킬에서만 정상 동작합니다.</p>
+                <p className="text-xs text-amber-600">⚠ 대상 지정이 필요한 스킬에서만 정상 동작합니다.</p>
               )}
             </div>
           )}
@@ -196,30 +193,28 @@ export default function FormulaBlockModal({ onInsert, onClose }) {
                   <BtnSel key={v} active={params.variable === v} onClick={() => setParam('variable', v)}>{v}</BtnSel>
                 ))}
               </div>
-              <p className="text-xs text-amber-400">⚠ 운영진 검수 대상입니다.</p>
+              <p className="text-xs text-amber-600">⚠ 운영진 검수 대상입니다.</p>
             </div>
           )}
 
-          {/* Preview */}
-          <div className="bg-slate-950/60 rounded-xl border border-white/8 p-3">
-            <p className="text-[10px] text-slate-600 uppercase tracking-widest mb-1.5">삽입 미리보기</p>
-            <p className="text-sm font-mono text-emerald-300/90 break-all">{token || '(값을 선택 또는 입력하세요)'}</p>
+          <div className="bg-indigo-50 rounded-xl border border-indigo-100 p-3">
+            <p className="text-[10px] text-indigo-400 uppercase tracking-widest mb-1.5">삽입 미리보기</p>
+            <p className="text-sm font-mono text-indigo-700 break-all">{token || '(값을 선택 또는 입력하세요)'}</p>
           </div>
 
-          {/* Actions */}
           <div className="flex gap-2">
             <button
               onClick={() => canInsert && onInsert(token)}
               disabled={!canInsert}
               className={`flex-1 py-2 rounded-xl font-bold text-sm transition-colors ${
                 canInsert
-                  ? 'bg-amber-400/80 hover:bg-amber-400/90 text-slate-900 shadow-sm shadow-amber-400/20'
-                  : 'bg-slate-800/40 text-slate-600 cursor-not-allowed'
+                  ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-sm shadow-violet-200'
+                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
               }`}
             >
               삽입
             </button>
-            <button onClick={onClose} className="px-4 py-2 bg-slate-800/60 hover:bg-slate-700/60 border border-slate-700/50 text-slate-400 rounded-xl text-sm transition-colors">
+            <button onClick={onClose} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 rounded-xl text-sm transition-colors">
               취소
             </button>
           </div>

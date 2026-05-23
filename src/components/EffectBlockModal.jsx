@@ -9,11 +9,11 @@ const EFFECT_TYPES = [
 ];
 
 const DESCRIPTIONS = {
-  template:     '미리 정의된 상태 템플릿을 자신 또는 대상에게 부여합니다. 출혈, 구속, 보호막 등 자주 쓰는 효과를 빠르게 만들 때 사용합니다.',
-  custom:       '템플릿이 아닌 직접 정의 상태를 부여합니다. 운영진 검수가 필요한 고급 효과입니다.',
+  template:     '미리 정의된 상태 템플릿을 자신 또는 대상에게 부여합니다.',
+  custom:       '직접 정의 상태를 부여합니다. 운영진 검수가 필요합니다.',
   statusRemove: '자신 또는 대상에게 걸린 특정 상태를 해제합니다.',
   stack:        '자신 또는 대상의 스택을 증가, 감소, 설정합니다.',
-  free:         '자동 생성 블럭으로 만들 수 없는 효과를 직접 입력합니다. 운영진 수동 검수 대상입니다.',
+  free:         '자동 블럭으로 만들 수 없는 효과를 직접 입력합니다. 운영진 수동 검수 대상입니다.',
 };
 
 const TEMPLATE_NAMES = ['출혈', '구속', '보호막', '취약', '쇠약', '강화', '직접입력'];
@@ -88,7 +88,7 @@ function getModalWarnings(type, params) {
   return warns;
 }
 
-const inputCls = "w-full min-w-0 bg-slate-800/60 text-slate-100 rounded-lg px-3 py-1.5 text-sm border border-slate-700/50 focus:border-cyan-500/50 outline-none placeholder:text-slate-600 transition-colors";
+const inputCls = "w-full min-w-0 bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/20 outline-none placeholder:text-slate-400 transition-colors";
 
 function BtnSel({ active, onClick, children }) {
   return (
@@ -96,8 +96,8 @@ function BtnSel({ active, onClick, children }) {
       onClick={onClick}
       className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
         active
-          ? 'bg-cyan-500/30 text-cyan-200 border-cyan-500/40'
-          : 'bg-slate-800/60 text-slate-400 border-slate-700/50 hover:border-cyan-500/30 hover:text-slate-200'
+          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-200'
+          : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-700 hover:bg-indigo-50'
       }`}
     >
       {children}
@@ -153,21 +153,20 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
   const canInsert = text !== '';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-sm p-2 sm:p-4">
-      <div className="bg-slate-900 rounded-2xl border border-white/10 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl shadow-black/50">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-sm p-2 sm:p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl shadow-slate-300/50">
 
-        <div className="sticky top-0 bg-slate-900 border-b border-white/10 px-5 py-3.5 flex items-center justify-between z-10">
+        <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-3.5 flex items-center justify-between z-10">
           <div>
-            <h3 className="text-sm font-semibold text-cyan-300">효과 블럭 선택</h3>
-            <p className="text-[10px] text-slate-500 mt-0.5">Effect Block</p>
+            <h3 className="text-sm font-semibold text-slate-800">효과 블럭 선택</h3>
+            <p className="text-[10px] text-slate-400 mt-0.5">Effect Block</p>
           </div>
-          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-800/60 text-slate-400 hover:text-slate-200 text-sm transition-colors">✕</button>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 text-sm transition-colors">✕</button>
         </div>
 
         <div className="p-5 space-y-4">
-          {/* Type picker */}
           <div className="space-y-1.5">
-            <span className="text-[10px] text-slate-600 uppercase tracking-widest">효과 종류</span>
+            <span className="text-[10px] text-slate-400 uppercase tracking-widest">효과 종류</span>
             <div className="flex flex-wrap gap-1">
               {EFFECT_TYPES.map(et => (
                 <BtnSel key={et.id} active={type === et.id} onClick={() => changeType(et.id)}>
@@ -177,8 +176,7 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
             </div>
           </div>
 
-          {/* Description */}
-          <div className="bg-slate-800/40 rounded-xl border border-white/6 p-3 text-xs text-slate-400 leading-relaxed">
+          <div className="bg-slate-50 rounded-xl border border-slate-100 p-3 text-xs text-slate-500 leading-relaxed">
             {DESCRIPTIONS[type]}
           </div>
 
@@ -306,35 +304,32 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
             </label>
           )}
 
-          {/* Warnings */}
           {warns.length > 0 && (
             <div className="space-y-1">
               {warns.map((w, i) => (
-                <p key={i} className={`text-xs ${w.includes('운영진') ? 'text-amber-400' : 'text-amber-300'}`}>⚠ {w}</p>
+                <p key={i} className="text-xs text-amber-600">⚠ {w}</p>
               ))}
             </div>
           )}
 
-          {/* Preview */}
-          <div className="bg-slate-950/60 rounded-xl border border-white/8 p-3">
-            <p className="text-[10px] text-slate-600 uppercase tracking-widest mb-1.5">생성 미리보기</p>
-            <p className="text-sm font-mono text-cyan-300/90 break-all whitespace-pre-wrap">{text || '(값을 입력하세요)'}</p>
+          <div className="bg-indigo-50 rounded-xl border border-indigo-100 p-3">
+            <p className="text-[10px] text-indigo-400 uppercase tracking-widest mb-1.5">생성 미리보기</p>
+            <p className="text-sm font-mono text-indigo-700 break-all whitespace-pre-wrap">{text || '(값을 입력하세요)'}</p>
           </div>
 
-          {/* Actions */}
           <div className="flex gap-2">
             <button
               onClick={() => canInsert && onInsert(type, params, text)}
               disabled={!canInsert}
               className={`flex-1 py-2 rounded-xl font-bold text-sm transition-colors ${
                 canInsert
-                  ? 'bg-cyan-500/30 hover:bg-cyan-500/40 border border-cyan-500/40 text-cyan-200'
-                  : 'bg-slate-800/40 text-slate-600 cursor-not-allowed'
+                  ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shadow-indigo-200'
+                  : 'bg-slate-100 text-slate-400 cursor-not-allowed'
               }`}
             >
               삽입
             </button>
-            <button onClick={onClose} className="px-4 py-2 bg-slate-800/60 hover:bg-slate-700/60 border border-slate-700/50 text-slate-400 rounded-xl text-sm transition-colors">
+            <button onClick={onClose} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 rounded-xl text-sm transition-colors">
               취소
             </button>
           </div>

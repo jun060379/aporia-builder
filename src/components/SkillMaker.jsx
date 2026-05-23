@@ -36,29 +36,28 @@ const QUICK_COMBOS = [
   { label: '대상 상태 강화식',  formula: 'd20 + 랭크 + 대상상태_상태_수치 * 2' },
 ];
 
+const inputCls = "w-full min-w-0 bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
+const selectCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 outline-none transition-colors";
+
 function FormulaPreview({ formula, stats, rank }) {
   if (!formula.trim()) return null;
-
   const base = previewFormula(formula, stats, rank);
   const hasDbVar = /이면침식/.test(formula);
-
-  const침식0 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 0 }) : null;
-  const침식6 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 6 }) : null;
-  const침식9 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 9 }) : null;
-
+  const 침식0 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 0 }) : null;
+  const 침식6 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 6 }) : null;
+  const 침식9 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 9 }) : null;
   const show = base.value !== null || base.warnings.length > 0;
   if (!show) return null;
 
   return (
-    <div className="bg-slate-950/60 rounded-xl border border-white/8 p-3 space-y-2">
-      <p className="text-[10px] text-slate-600 uppercase tracking-widest">계산 미리보기</p>
-
+    <div className="bg-indigo-50 rounded-xl border border-indigo-100 p-3 space-y-2">
+      <p className="text-[10px] text-indigo-400 uppercase tracking-widest">계산 미리보기</p>
       {hasDbVar ? (
         <div className="grid grid-cols-3 gap-2">
           {[[침식0, '침식 0'], [침식6, '침식 6'], [침식9, '침식 9']].map(([res, lbl]) => (
-            <div key={lbl} className="bg-slate-800/60 rounded-lg p-2 text-center">
-              <p className="text-[10px] text-slate-600 mb-0.5">{lbl}</p>
-              <p className={`text-sm font-bold ${res?.value !== null ? 'text-emerald-400' : 'text-rose-400'}`}>
+            <div key={lbl} className="bg-white rounded-lg p-2 text-center border border-indigo-100">
+              <p className="text-[10px] text-slate-400 mb-0.5">{lbl}</p>
+              <p className={`text-sm font-bold ${res?.value !== null ? 'text-emerald-600' : 'text-rose-600'}`}>
                 {res?.value !== null ? res.value : '오류'}
               </p>
             </div>
@@ -66,15 +65,14 @@ function FormulaPreview({ formula, stats, rank }) {
         </div>
       ) : (
         base.value !== null && (
-          <p className="text-sm text-emerald-400">기대값 <span className="font-bold">{base.value}</span></p>
+          <p className="text-sm text-emerald-700">기대값 <span className="font-bold">{base.value}</span></p>
         )
       )}
-
       {base.warnings.map((w, i) => (
-        <p key={i} className={`text-xs ${w.includes('운영진') ? 'text-amber-400' : 'text-amber-300'}`}>⚠ {w}</p>
+        <p key={i} className="text-xs text-amber-600">⚠ {w}</p>
       ))}
       {base.infos.map((info, i) => (
-        <p key={i} className="text-xs text-slate-600 italic">ℹ {info}</p>
+        <p key={i} className="text-xs text-slate-400 italic">ℹ {info}</p>
       ))}
     </div>
   );
@@ -93,60 +91,56 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
   return (
     <div className={`rounded-xl border p-3 space-y-2 transition-colors ${
       effect.confirmed
-        ? 'bg-emerald-950/30 border-emerald-800/40'
-        : 'bg-slate-800/40 border-white/8'
+        ? 'bg-emerald-50 border-emerald-200'
+        : 'bg-slate-50 border-slate-200'
     }`}>
-      {/* Header */}
       <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[10px] text-slate-600 font-mono shrink-0">효과 {index + 1}</span>
+        <span className="text-[10px] text-slate-400 font-mono shrink-0">효과 {index + 1}</span>
         {effect.type && (
-          <span className="text-[11px] bg-cyan-950/50 text-cyan-300/80 px-1.5 py-0.5 rounded border border-cyan-800/30 shrink-0">
+          <span className="text-[11px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded border border-indigo-200 shrink-0">
             {EFFECT_TYPE_LABEL[effect.type] ?? effect.type}
           </span>
         )}
         {effect.confirmed && (
-          <span className="text-[11px] bg-emerald-950/50 text-emerald-300/80 px-1.5 py-0.5 rounded border border-emerald-800/30 shrink-0">확정됨</span>
+          <span className="text-[11px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200 shrink-0">확정됨</span>
         )}
         <div className="flex gap-1 ml-auto shrink-0">
           <button onClick={onMoveUp} disabled={index === 0}
-            className="w-6 h-6 flex items-center justify-center rounded-lg bg-slate-700/50 hover:bg-slate-600/60 text-slate-400 text-xs disabled:opacity-20 disabled:cursor-not-allowed transition-colors">↑</button>
+            className="w-6 h-6 flex items-center justify-center rounded-lg bg-white hover:bg-slate-100 text-slate-400 text-xs border border-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">↑</button>
           <button onClick={onMoveDown} disabled={index === total - 1}
-            className="w-6 h-6 flex items-center justify-center rounded-lg bg-slate-700/50 hover:bg-slate-600/60 text-slate-400 text-xs disabled:opacity-20 disabled:cursor-not-allowed transition-colors">↓</button>
+            className="w-6 h-6 flex items-center justify-center rounded-lg bg-white hover:bg-slate-100 text-slate-400 text-xs border border-slate-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">↓</button>
           <button onClick={onDelete}
-            className="w-6 h-6 flex items-center justify-center rounded-lg bg-rose-950/50 hover:bg-rose-900/60 text-rose-400/80 text-xs transition-colors">✕</button>
+            className="w-6 h-6 flex items-center justify-center rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-500 text-xs border border-rose-200 transition-colors">✕</button>
         </div>
       </div>
 
-      {/* Generated text */}
       {hasText && (
         <div className={`rounded-lg p-2 text-xs font-mono break-all whitespace-pre-wrap ${
           effect.confirmed
-            ? 'bg-slate-950/60 text-emerald-300/90 border border-emerald-900/30'
-            : 'bg-slate-900/60 text-cyan-300/80 border border-slate-700/40'
+            ? 'bg-white text-emerald-700 border border-emerald-200'
+            : 'bg-white text-indigo-700 border border-indigo-100'
         }`}>
           {effect.generatedText}
         </div>
       )}
 
-      {/* Warnings */}
       {warnings.length > 0 && (
         <div className="space-y-0.5">
           {warnings.map((w, i) => (
-            <p key={i} className={`text-xs ${w.includes('운영진') ? 'text-amber-400' : 'text-amber-300'}`}>⚠ {w}</p>
+            <p key={i} className="text-xs text-amber-600">⚠ {w}</p>
           ))}
         </div>
       )}
 
-      {/* Actions */}
       {!effect.confirmed ? (
         <div className="flex flex-wrap gap-1.5">
           <button onClick={() => setModalOpen(true)}
-            className="px-3 py-1.5 bg-cyan-900/40 hover:bg-cyan-800/50 border border-cyan-800/40 text-cyan-300 rounded-lg text-xs font-medium transition-colors">
+            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-lg text-xs font-medium transition-colors">
             블럭 선택
           </button>
           {hasText && (
             <button onClick={() => onUpdate({ ...effect, confirmed: true })}
-              className="px-3 py-1.5 bg-emerald-900/40 hover:bg-emerald-800/50 border border-emerald-800/40 text-emerald-300 rounded-lg text-xs font-medium transition-colors">
+              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-medium transition-colors">
               확정
             </button>
           )}
@@ -154,11 +148,11 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
       ) : (
         <div className="flex flex-wrap gap-1.5">
           <button onClick={() => setModalOpen(true)}
-            className="px-3 py-1.5 bg-slate-700/50 hover:bg-slate-600/60 border border-slate-600/40 text-slate-300 rounded-lg text-xs font-medium transition-colors">
+            className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 rounded-lg text-xs font-medium transition-colors">
             편집
           </button>
           <button onClick={() => onUpdate({ ...effect, confirmed: false })}
-            className="px-3 py-1.5 bg-slate-700/40 hover:bg-slate-600/50 border border-slate-600/30 text-slate-400 rounded-lg text-xs font-medium transition-colors">
+            className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-500 rounded-lg text-xs font-medium transition-colors">
             확정 해제
           </button>
         </div>
@@ -175,9 +169,6 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
     </div>
   );
 }
-
-const inputCls = "w-full min-w-0 bg-slate-800/60 text-slate-100 rounded-lg px-3 py-1.5 text-sm border border-slate-700/50 focus:border-cyan-500/50 outline-none placeholder:text-slate-600 transition-colors";
-const selectCls = "w-full bg-slate-800/60 text-slate-100 rounded-lg px-3 py-1.5 text-sm border border-slate-700/50 focus:border-cyan-500/50 outline-none transition-colors";
 
 export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
   const [skill, setSkill] = useState(() => {
@@ -234,16 +225,16 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
   const allFormulaErrors = [...tokenErrors, ...structureWarns];
 
   return (
-    <div className="bg-slate-900/70 backdrop-blur-sm rounded-2xl border border-white/10 p-5 shadow-xl shadow-black/30 space-y-4">
+    <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-slate-200/70 shadow-lg shadow-violet-100/20 p-5 space-y-4">
 
       {/* Header */}
       <div className="flex items-center gap-2">
-        <span className="text-[10px] text-slate-600 font-mono tracking-widest">05</span>
-        <h2 className="text-sm font-semibold text-slate-300 tracking-wide uppercase">
+        <span className="text-[10px] text-violet-300 font-mono tracking-widest">05</span>
+        <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">
           {editingSkill ? '스킬 편집' : '스킬 메이커'}
         </h2>
         {editingSkill && (
-          <span className="ml-1 text-[11px] text-violet-300/70 bg-violet-900/20 border border-violet-800/30 rounded px-1.5 py-0.5">편집 중</span>
+          <span className="ml-1 text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">편집 중</span>
         )}
       </div>
 
@@ -279,8 +270,8 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
               onClick={() => setSkill(s => ({ ...s, rank }))}
               className={`px-2 py-0.5 rounded-lg text-xs font-bold border transition-all ${
                 skill.rank === rank
-                  ? 'bg-amber-400/80 text-slate-900 border-amber-400/60 shadow-sm shadow-amber-400/20'
-                  : 'bg-slate-800/60 text-slate-400 border-slate-700/50 hover:border-amber-400/40 hover:text-slate-200'
+                  ? 'bg-amber-400 text-white border-amber-400 shadow-sm shadow-amber-200/50'
+                  : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-amber-300 hover:text-amber-700 hover:bg-amber-50'
               }`}
             >
               {rank} <span className="opacity-50 font-normal">({value})</span>
@@ -290,34 +281,33 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
       </div>
 
       {/* ── 계산식 섹션 ── */}
-      <div className="space-y-3 bg-slate-800/20 rounded-xl border border-white/8 p-4">
-        <span className="text-[10px] text-slate-500 uppercase tracking-widest font-semibold">계산식</span>
+      <div className="space-y-3 bg-slate-50 rounded-xl border border-slate-200 p-4">
+        <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">계산식</span>
 
         <input
-          className={`${inputCls}${allFormulaErrors.length > 0 ? ' border-rose-500/50' : ''}`}
+          className={`${inputCls}${allFormulaErrors.length > 0 ? ' border-rose-400 focus:border-rose-400 focus:ring-rose-400/20' : ''}`}
           value={skill.formula}
           onChange={field('formula')}
           placeholder="예: d20 + 랭크 + 근력"
         />
 
-        {/* 검증 */}
         {allFormulaErrors.length > 0 && (
           <div className="space-y-0.5">
             {allFormulaErrors.map((e, i) => (
-              <p key={i} className="text-xs text-rose-400">⚠ {e}</p>
+              <p key={i} className="text-xs text-rose-600">⚠ {e}</p>
             ))}
           </div>
         )}
         {needsTarget && allFormulaErrors.length === 0 && (
-          <p className="text-xs text-amber-400">⚠ 대상 참조 포함 — 조건 칸에 "대상 지정 필요"를 추가하세요.</p>
+          <p className="text-xs text-amber-600">⚠ 대상 참조 포함 — 조건 칸에 "대상 지정 필요"를 추가하세요.</p>
         )}
 
         {/* 블럭 추가 */}
         <div className="space-y-1.5">
-          <p className="text-[10px] text-slate-600 tracking-widest uppercase">블럭 추가</p>
+          <p className="text-[10px] text-slate-400 tracking-widest uppercase">블럭 추가</p>
           <button
             onClick={() => setFormulaModalOpen(true)}
-            className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-200 rounded-lg text-xs font-semibold transition-colors"
+            className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-semibold transition-colors shadow-sm shadow-violet-200"
           >
             블럭 선택
           </button>
@@ -325,17 +315,17 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
 
         {/* 연산자 */}
         <div className="space-y-1.5">
-          <p className="text-[10px] text-slate-600 tracking-widest uppercase">연산자</p>
+          <p className="text-[10px] text-slate-400 tracking-widest uppercase">연산자</p>
           <div className="flex flex-wrap gap-1.5">
             {OPERATORS.map(({ op, label, tip }) => (
               <button
                 key={op}
                 onClick={() => appendOperator(op)}
                 title={tip}
-                className="min-w-[2.75rem] px-2 py-1.5 bg-slate-800/60 hover:bg-slate-700/70 border border-slate-700/50 hover:border-amber-400/30 text-slate-300 font-mono font-bold rounded-lg text-sm transition-colors"
+                className="min-w-[2.75rem] px-2 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 hover:border-violet-300 text-slate-700 font-mono font-bold rounded-lg text-sm transition-colors"
               >
                 {label}
-                <span className="block text-slate-600 font-sans font-normal" style={{ fontSize: '9px', lineHeight: '1.2' }}>{tip}</span>
+                <span className="block text-slate-400 font-sans font-normal" style={{ fontSize: '9px', lineHeight: '1.2' }}>{tip}</span>
               </button>
             ))}
           </div>
@@ -343,23 +333,22 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
 
         {/* 빠른 조합 */}
         <div className="space-y-1.5">
-          <p className="text-[10px] text-slate-600 tracking-widest uppercase">빠른 조합</p>
+          <p className="text-[10px] text-slate-400 tracking-widest uppercase">빠른 조합</p>
           <div className="flex flex-wrap gap-1">
             {QUICK_COMBOS.map(({ label, formula }) => (
               <button
                 key={label}
                 onClick={() => applyQuickCombo(formula)}
                 title={formula}
-                className="px-2 py-1 bg-slate-800/40 hover:bg-violet-900/30 border border-slate-700/40 hover:border-violet-600/40 text-slate-400 hover:text-violet-300 rounded-lg text-xs transition-colors"
+                className="px-2 py-1 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 text-slate-500 hover:text-indigo-700 rounded-lg text-xs transition-colors"
               >
                 {label}
               </button>
             ))}
           </div>
-          <p className="text-[10px] text-slate-700 italic">누르면 현재 계산식이 교체됩니다.</p>
+          <p className="text-[10px] text-slate-400 italic">누르면 현재 계산식이 교체됩니다.</p>
         </div>
 
-        {/* 미리보기 */}
         <FormulaPreview formula={skill.formula} stats={stats} rank={skill.rank} />
       </div>
 
@@ -367,11 +356,11 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-slate-500 tracking-wide">효과 목록</span>
-          <span className="text-[11px] text-slate-600 font-mono">{skill.effects.length}개</span>
+          <span className="text-[11px] text-slate-400 font-mono">{skill.effects.length}개</span>
         </div>
 
         {skill.effects.length === 0 && (
-          <p className="text-xs text-slate-700 italic py-1">효과가 없습니다. 아래 버튼으로 추가하세요.</p>
+          <p className="text-xs text-slate-400 italic py-1">효과가 없습니다. 아래 버튼으로 추가하세요.</p>
         )}
 
         <div className="space-y-2">
@@ -391,7 +380,7 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
 
         <button
           onClick={addEffect}
-          className="w-full py-1.5 bg-slate-800/40 hover:bg-slate-700/50 text-slate-500 hover:text-slate-300 rounded-xl border border-dashed border-slate-700/50 hover:border-cyan-700/40 text-sm transition-colors"
+          className="w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-xl border border-dashed border-slate-300 hover:border-indigo-300 text-sm transition-colors"
         >
           + 효과 추가
         </button>
@@ -422,14 +411,14 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
       <div className="flex gap-2 pt-1">
         <button
           onClick={() => onSave(skill)}
-          className="flex-1 py-2 bg-amber-400/80 hover:bg-amber-400/90 text-slate-900 font-bold rounded-xl text-sm transition-colors shadow-sm shadow-amber-400/20"
+          className="flex-1 py-2 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl text-sm transition-colors shadow-sm shadow-violet-200"
         >
           {editingSkill ? '스킬 수정' : '스킬 추가'}
         </button>
         {editingSkill && (
           <button
             onClick={onCancel}
-            className="px-4 py-2 bg-slate-700/50 hover:bg-slate-600/60 border border-slate-600/40 text-slate-300 rounded-xl text-sm transition-colors"
+            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 rounded-xl text-sm transition-colors"
           >
             취소
           </button>

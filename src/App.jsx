@@ -20,17 +20,17 @@ const TABS_RIGHT = ['요약', '액션표', '신청텍스트'];
 
 function TabBar({ tabs, active, onChange, variant = 'warm' }) {
   const activeClass = variant === 'warm'
-    ? 'bg-amber-400/15 text-amber-200 border border-amber-400/25'
-    : 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/25';
+    ? 'bg-amber-50 text-amber-700 border border-amber-200 shadow-sm'
+    : 'bg-violet-50 text-violet-700 border border-violet-200 shadow-sm';
 
   return (
-    <div className="flex gap-1 bg-slate-900/60 backdrop-blur-sm rounded-xl p-1 border border-white/8">
+    <div className="flex gap-1 bg-white/70 backdrop-blur-sm rounded-xl border border-slate-200/70 p-1 shadow-sm">
       {tabs.map(tab => (
         <button
           key={tab}
           onClick={() => onChange(tab)}
           className={`flex-1 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
-            active === tab ? activeClass : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+            active === tab ? activeClass : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'
           }`}
         >
           {tab}
@@ -43,33 +43,33 @@ function TabBar({ tabs, active, onChange, variant = 'warm' }) {
 function CharacterSummary({ char, stats }) {
   const levelInfo = getLevelInfo(char.exp);
   return (
-    <div className="bg-slate-900/70 backdrop-blur-sm rounded-2xl border border-white/10 p-5 shadow-xl shadow-black/30">
+    <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-indigo-100/70 shadow-lg shadow-violet-100/30 p-5">
       <div className="flex items-center gap-2 mb-4">
-        <span className="text-[10px] text-slate-600 font-mono tracking-widest">—</span>
-        <h2 className="text-sm font-semibold text-slate-300 tracking-wide uppercase">캐릭터 요약</h2>
+        <span className="text-[10px] text-violet-300 font-mono tracking-widest">—</span>
+        <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">캐릭터 요약</h2>
       </div>
 
       <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm mb-4">
-        <span className="text-slate-500">이름</span>
-        <span className="text-slate-100 font-semibold">{char.name || '—'}</span>
-        <span className="text-slate-500">종족</span>
-        <span className="text-slate-200">{char.race || '—'}</span>
-        <span className="text-slate-500">경험치</span>
-        <span className="text-slate-200">{char.exp}</span>
-        <span className="text-slate-500">레벨</span>
-        <span className="text-amber-300 font-bold">Lv.{levelInfo.level}</span>
-        <span className="text-slate-500">성장예산</span>
-        <span className="text-slate-200">{levelInfo.budget}</span>
+        <span className="text-slate-400">이름</span>
+        <span className="text-slate-900 font-semibold">{char.name || '—'}</span>
+        <span className="text-slate-400">종족</span>
+        <span className="text-slate-700">{char.race || '—'}</span>
+        <span className="text-slate-400">경험치</span>
+        <span className="text-slate-700">{char.exp}</span>
+        <span className="text-slate-400">레벨</span>
+        <span className="text-amber-600 font-bold">Lv.{levelInfo.level}</span>
+        <span className="text-slate-400">성장예산</span>
+        <span className="text-slate-700">{levelInfo.budget}</span>
       </div>
 
-      <div className="border-t border-white/8 pt-3">
-        <p className="text-[10px] text-slate-600 uppercase tracking-widest mb-2">스탯</p>
+      <div className="border-t border-slate-100 pt-3">
+        <p className="text-[10px] text-slate-400 uppercase tracking-widest mb-2">스탯</p>
         <div className="grid grid-cols-5 gap-1.5">
           {STAT_NAMES.map(s => (
-            <div key={s} className="text-center bg-slate-800/50 rounded-lg py-1.5">
-              <div className="text-[10px] text-slate-500 mb-0.5">{s}</div>
-              <div className="text-sm font-bold text-amber-300">{stats[s]}</div>
-              <div className="text-[10px] text-slate-500">{getStatValue(stats[s])}</div>
+            <div key={s} className="text-center bg-slate-50 rounded-xl py-2 border border-slate-100">
+              <div className="text-[10px] text-slate-400 mb-0.5">{s}</div>
+              <div className="text-sm font-bold text-amber-600">{stats[s]}</div>
+              <div className="text-[10px] text-slate-400">{getStatValue(stats[s])}</div>
             </div>
           ))}
         </div>
@@ -112,19 +112,27 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-violet-950 text-slate-100">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50 to-violet-100 text-slate-900 relative">
+      {/* ambient light blobs */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <div className="absolute -top-32 -left-32 w-96 h-96 bg-amber-100/60 rounded-full blur-3xl" />
+        <div className="absolute bottom-0 right-0 w-96 h-96 bg-violet-200/50 rounded-full blur-3xl" />
+        <div className="absolute top-1/2 left-1/3 w-64 h-64 bg-indigo-100/40 rounded-full blur-2xl" />
+      </div>
 
       {/* ── 헤더 ── */}
-      <header className="bg-slate-950/80 backdrop-blur-md border-b border-white/10 sticky top-0 z-20">
+      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/70 sticky top-0 z-20 shadow-sm shadow-slate-100/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-1">
           <div>
             <div className="flex items-baseline gap-2.5">
-              <h1 className="text-2xl font-bold tracking-tight text-amber-200">APORIA</h1>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-violet-700 to-indigo-600 bg-clip-text text-transparent">
+                APORIA
+              </h1>
               <span className="text-slate-400 text-base font-light tracking-widest">BUILDER</span>
             </div>
-            <p className="text-[11px] text-slate-500 tracking-widest mt-0.5">Everyday / Unreality Character Sheet</p>
+            <p className="text-[11px] text-slate-400 tracking-widest mt-0.5">Everyday / Unreality Character Sheet</p>
           </div>
-          <p className="text-xs text-slate-600 italic hidden sm:block">
+          <p className="text-xs text-slate-400 italic hidden sm:block">
             돌아갈 일상이 있기에, 이면은 더욱 선명해진다.
           </p>
         </div>
@@ -140,19 +148,13 @@ export default function App() {
             <div className="space-y-3">
               <CharacterForm char={char} onChange={setChar} />
               <StatEditor stats={stats} onChange={setStats} />
-              <BudgetSummary
-                char={char} stats={stats}
-                abilities={abilities} proficiencies={proficiencies} skills={skills}
-              />
+              <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
             </div>
           )}
 
           {leftTab === '기능/숙련' && (
             <div className="space-y-3">
-              <BudgetSummary
-                char={char} stats={stats}
-                abilities={abilities} proficiencies={proficiencies} skills={skills}
-              />
+              <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
               <AbilityEditor abilities={abilities} onChange={setAbilities} />
               <ProficiencyEditor proficiencies={proficiencies} onChange={setProficiencies} />
             </div>
@@ -160,21 +162,9 @@ export default function App() {
 
           {leftTab === '스킬' && (
             <div className="space-y-3">
-              <BudgetSummary
-                char={char} stats={stats}
-                abilities={abilities} proficiencies={proficiencies} skills={skills}
-              />
-              <SkillMaker
-                editingSkill={editingSkill}
-                stats={stats}
-                onSave={handleSaveSkill}
-                onCancel={handleCancelEdit}
-              />
-              <SkillList
-                skills={skills}
-                onEdit={handleEditSkill}
-                onRemove={handleRemoveSkill}
-              />
+              <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
+              <SkillMaker editingSkill={editingSkill} stats={stats} onSave={handleSaveSkill} onCancel={handleCancelEdit} />
+              <SkillList skills={skills} onEdit={handleEditSkill} onRemove={handleRemoveSkill} />
             </div>
           )}
         </div>
@@ -195,11 +185,7 @@ export default function App() {
           )}
 
           {rightTab === '신청텍스트' && (
-            <ApplicationText
-              char={char} stats={stats}
-              abilities={abilities} proficiencies={proficiencies}
-              skills={skills}
-            />
+            <ApplicationText char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
           )}
         </div>
       </div>
