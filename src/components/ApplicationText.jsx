@@ -35,6 +35,7 @@ function CopyBlock({ title, text }) {
 
 function buildSkillText(sk) {
   const effectLines = (sk.effects ?? [])
+    .filter(e => e.confirmed)
     .map(e => e.generatedText)
     .filter(Boolean);
   const effectBlock = effectLines.length > 0

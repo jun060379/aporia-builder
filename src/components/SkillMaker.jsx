@@ -194,7 +194,11 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
   const field = (key) => (e) => setSkill(s => ({ ...s, [key]: e.target.value }));
 
   const insertFormula = (token) => {
-    setSkill(s => ({ ...s, formula: s.formula + token }));
+    setSkill(s => {
+      const prev = s.formula;
+      const sep = prev.length > 0 && !prev.endsWith(' ') ? ' ' : '';
+      return { ...s, formula: prev + sep + token };
+    });
     setFormulaModalOpen(false);
   };
 
