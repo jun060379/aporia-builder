@@ -13,33 +13,32 @@ function diffColor(label) {
   return DIFF_COLOR_MAP[label] ?? 'text-slate-500';
 }
 
-export default function ActionTable({ stats, abilities, proficiencies }) {
-  const actions = calcAllActions(stats, abilities, proficiencies);
-  const damage = actions.filter(a => a.isDamage);
-  const other  = actions.filter(a => !a.isDamage);
+const ACTION_CATEGORIES = [
+  { label: '피해 액션', accent: 'rose',   names: ['참격', '관통', '타격', '격투', '사격'] },
+  { label: '대응 액션', accent: 'indigo', names: ['방어', '회피', '저항'] },
+  { label: '탐색 액션', accent: 'teal',   names: ['조사', '해석', '은신', '추적'] },
+  { label: '사회 액션', accent: 'violet', names: ['설득'] },
+];
 
-  return (
-    <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-indigo-100/70 shadow-lg shadow-violet-100/20 p-5">
-      <div className="flex items-center gap-2 mb-5">
-        <span className="text-[10px] text-violet-300 font-mono tracking-widest">—</span>
-        <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">액션 계산</h2>
-      </div>
-      <div className="space-y-5">
-        <Section title="피해 액션" accent="rose" actions={damage} />
-        <Section title="비피해 액션" accent="indigo" actions={other} />
-      </div>
-    </div>
-  );
-}
+const ACCENT = {
+  rose:   { title: 'text-rose-500',   divider: 'border-rose-100' },
+  indigo: { title: 'text-indigo-500', divider: 'border-indigo-100' },
+  teal:   { title: 'text-teal-500',   divider: 'border-teal-100' },
+  violet: { title: 'text-violet-500', divider: 'border-violet-100' },
+};
 
-function Section({ title, accent, actions }) {
-  const titleCls = accent === 'rose' ? 'text-rose-500' : 'text-indigo-500';
-  const dividerCls = accent === 'rose' ? 'border-rose-100' : 'border-indigo-100';
+function Section({ category, actions }) {
+  const catActions = category.names
+    .map(n => actions.find(a => a.name === n))
+    .filter(Boolean);
+  if (!catActions.length) return null;
+
+  const { title: titleCls, divider: dividerCls } = ACCENT[category.accent] ?? ACCENT.indigo;
 
   return (
     <div>
       <div className={`flex items-center gap-2 mb-2 pb-1.5 border-b ${dividerCls}`}>
-        <h3 className={`text-xs font-semibold tracking-widest uppercase ${titleCls}`}>{title}</h3>
+        <h3 className={`text-xs font-semibold tracking-widest uppercase ${titleCls}`}>{category.label}</h3>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -52,7 +51,7 @@ function Section({ title, accent, actions }) {
             </tr>
           </thead>
           <tbody>
-            {actions.map(a => {
+            {catActions.map(a => {
               const { diceCount, expected } = a.result;
               const diff = getDifficultyLabel(expected);
               return (
@@ -66,6 +65,24 @@ function Section({ title, accent, actions }) {
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+export default function ActionTable({ stats, abilities, proficiencies }) {
+  const actions = calcAllActions(stats, abilities, proficiencies);
+
+  return (
+    <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-indigo-100/70 shadow-lg shadow-violet-100/20 p-5">
+      <div className="flex items-center gap-2 mb-5">
+        <span className="text-[10px] text-violet-300 font-mono tracking-widest">—</span>
+        <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">액션 계산</h2>
+      </div>
+      <div className="space-y-5">
+        {ACTION_CATEGORIES.map(cat => (
+          <Section key={cat.label} category={cat} actions={actions} />
+        ))}
       </div>
     </div>
   );

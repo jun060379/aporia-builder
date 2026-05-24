@@ -25,14 +25,17 @@ export default function CharacterForm({ char, onChange }) {
           <input type="number" min="0" className={inputCls} value={char.exp} onChange={field('exp')} />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-slate-500 tracking-wide">일상점</span>
-          <input className={inputCls} value={char.dailyPoints} onChange={field('dailyPoints')} placeholder="—" />
-        </label>
-        <label className="flex flex-col gap-1 col-span-2">
           <span className="text-[11px] text-slate-500 tracking-wide">이면침식</span>
-          <input className={inputCls} value={char.erosion} onChange={field('erosion')} placeholder="—" />
+          <input type="number" min="0" max="10" className={inputCls} value={char.erosion} onChange={field('erosion')} placeholder="0" />
         </label>
       </div>
+
+      <p className="text-[11px] text-amber-700 mt-2.5 leading-relaxed bg-amber-50 rounded-xl px-3 py-1.5 border border-amber-100">
+        이면침식은 스킬 최종값 배율에 영향을 주며, 10에 도달하면 로스트 처리됩니다.
+      </p>
+      <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
+        별명은 디스코드 서버 별명 기준으로 자동 등록됩니다.
+      </p>
     </div>
   );
 }

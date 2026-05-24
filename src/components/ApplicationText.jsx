@@ -38,9 +38,10 @@ function buildSkillText(sk) {
     .filter(e => e.confirmed)
     .map(e => e.generatedText)
     .filter(Boolean);
+
   const effectBlock = effectLines.length > 0
     ? '효과:\n' + effectLines.join('\n')
-    : '효과:';
+    : '효과:\n없음';
 
   return [
     '!스킬신청',
@@ -65,8 +66,7 @@ export default function ApplicationText({ char, stats, abilities, proficiencies,
     ...STAT_NAMES.map(s => `${s}: ${stats[s]}`),
     ...ABILITY_NAMES.map(a => `${a}: ${abilities[a]}`),
     ...PROFICIENCY_NAMES.map(p => `${p}: ${proficiencies[p]}`),
-    `일상점: ${char.dailyPoints}`,
-    `이면침식: ${char.erosion}`,
+    `이면침식: ${char.erosion || '0'}`,
   ].join('\n');
 
   return (

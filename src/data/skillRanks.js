@@ -16,7 +16,7 @@ export function getRankValue(rank) {
   return RANK_MAP[rank] ?? 1;
 }
 
-export const SKILL_TRADITIONS = ['마술', '주술', '신성', '혈계', '요력', '특수'];
+export const SKILL_TRADITIONS = ['마술', '주술', '신성', '마법', '혈계', '요력', '특수'];
 export const SKILL_SERIES = ['화력', '방호', '치유', '재생', '간섭', '강화', '특수'];
 
 export function makeEffect(overrides = {}) {

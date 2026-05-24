@@ -39,7 +39,7 @@ function buildSaveData(char, stats, abilities, proficiencies, skills) {
   };
 }
 
-const DEFAULT_CHAR = { name: '', race: '', exp: '0', dailyPoints: '', erosion: '' };
+const DEFAULT_CHAR = { name: '', race: '', exp: '0', erosion: '0' };
 
 // ── tabs ─────────────────────────────────────────────────
 const TABS_LEFT  = ['캐릭터', '기능/숙련', '스킬'];
