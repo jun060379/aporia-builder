@@ -6,6 +6,7 @@ import { getLevelByNumber } from './data/levels';
 import { calcStatCost, calcAbilityCost, calcProficiencyCost, calcSkillsCost } from './utils/calcBudget';
 
 import CharacterForm from './components/CharacterForm';
+import PresetPanel from './components/PresetPanel';
 import StatEditor from './components/StatEditor';
 import AbilityEditor from './components/AbilityEditor';
 import ProficiencyEditor from './components/ProficiencyEditor';
@@ -188,6 +189,12 @@ export default function App() {
     setEditingSkill(null);
   };
 
+  const handleApplyPreset = useCallback((presetStats, presetAbilities, presetProfs) => {
+    setStats(presetStats);
+    setAbilities(presetAbilities);
+    setProficiencies(presetProfs);
+  }, []);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50 to-violet-100 text-slate-900 relative">
       <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
@@ -223,14 +230,15 @@ export default function App() {
           {leftTab === '캐릭터' && (
             <div className="space-y-3">
               <CharacterForm char={char} onChange={setChar} />
+              <PresetPanel onApply={handleApplyPreset} />
               <StatEditor stats={stats} onChange={setStats} />
-              <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
+              <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} editingSkill={editingSkill} />
             </div>
           )}
 
           {leftTab === '기능/숙련' && (
             <div className="space-y-3">
-              <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
+              <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} editingSkill={editingSkill} />
               <AbilityEditor abilities={abilities} onChange={setAbilities} />
               <ProficiencyEditor proficiencies={proficiencies} onChange={setProficiencies} />
             </div>
@@ -238,7 +246,7 @@ export default function App() {
 
           {leftTab === '스킬' && (
             <div className="space-y-3">
-              <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
+              <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} editingSkill={editingSkill} />
               <SkillMaker editingSkill={editingSkill} stats={stats} onSave={handleSaveSkill} onCancel={handleCancelEdit} />
               <SkillList skills={skills} onEdit={handleEditSkill} onRemove={handleRemoveSkill} />
             </div>
@@ -252,7 +260,7 @@ export default function App() {
           {rightTab === '요약' && (
             <div className="space-y-3">
               <CharacterSummary char={char} stats={stats} />
-              <ValidationPanel char={char} remaining={remaining} skills={skills} />
+              <ValidationPanel char={char} remaining={remaining} skills={skills} stats={stats} abilities={abilities} proficiencies={proficiencies} editingSkill={editingSkill} />
               <ActionDetail stats={stats} abilities={abilities} proficiencies={proficiencies} />
             </div>
           )}

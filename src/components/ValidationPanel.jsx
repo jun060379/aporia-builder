@@ -1,33 +1,75 @@
 import { validateFormula, validateFormulaStructure, hasTargetReference, getEffectWarnings } from '../utils/calcSkill';
+import { calcAllActions } from '../utils/calcAction';
+import { RANK_MAP } from '../data/skillRanks';
 
 const HIGH_RANKS = ['S', 'U', 'EX'];
 
-function buildIssues(char, remaining, skills) {
+function buildIssues(char, remaining, skills, stats, abilities, proficiencies, editingSkill) {
   const issues = [];
 
-  // 1. 성장예산
+  // 1. 성장예산 초과
   if (remaining < 0) {
     issues.push({ type: 'err', label: '성장예산 초과', detail: `${Math.abs(remaining)}pt 초과. 왼쪽 패널 → 성장예산을 확인하세요.` });
   } else {
     issues.push({ type: 'ok', label: `성장예산 정상`, detail: `잔여 ${remaining}pt` });
   }
 
-  // 2. 캐릭터 이름
+  // 2. 스킬 포함 예상 초과
+  if (editingSkill) {
+    const editingCost = RANK_MAP[editingSkill.rank] ?? 1;
+    if (remaining - editingCost < 0) {
+      issues.push({
+        type: 'warn',
+        label: '스킬 포함 예산 초과 예상',
+        detail: '현재 작성 중인 스킬까지 승인될 경우 성장예산을 초과합니다.',
+      });
+    }
+  }
+
+  // 3. 캐릭터 이름
   if (!char.name?.trim()) {
     issues.push({ type: 'err', label: '캐릭터 이름 없음', detail: '기본 정보 탭에서 이름을 입력하세요.' });
   } else {
     issues.push({ type: 'ok', label: `캐릭터 이름 확인됨`, detail: char.name });
   }
 
+  // 4. 주력 액션 기대값 / 핵심 기능·숙련 체크
+  if (stats && abilities && proficiencies) {
+    const allActions = calcAllActions(stats, abilities, proficiencies);
+    const maxExpected = Math.max(...allActions.map(a => a.result.expected));
+    if (maxExpected < 15) {
+      issues.push({
+        type: 'warn',
+        label: '주력 액션 낮음',
+        detail: '주력 액션이 낮습니다. 초보자라면 프리셋 사용을 권장합니다.',
+      });
+    } else {
+      const bestAction = allActions.reduce((best, a) =>
+        a.result.expected > best.result.expected ? a : best
+      );
+      const allMultZero = bestAction.mult.every(({ key }) => {
+        if (key.endsWith('숙련')) return (proficiencies[key] ?? 0) === 0;
+        return (abilities[key] ?? 0) === 0;
+      });
+      if (allMultZero) {
+        issues.push({
+          type: 'warn',
+          label: '핵심 기능·숙련 미배분',
+          detail: '선택한 액션의 핵심 기능 또는 숙련이 낮습니다.',
+        });
+      }
+    }
+  }
+
   if (skills.length === 0) return issues;
 
-  // 3. 스킬명 비어 있음
+  // 5. 스킬명 비어 있음
   const noName = skills.filter(sk => !sk.name?.trim());
   if (noName.length > 0) {
     issues.push({ type: 'warn', label: `이름 없는 스킬 ${noName.length}개`, detail: '스킬 메이커에서 스킬 이름을 입력하세요.' });
   }
 
-  // 4. 계산식 경고
+  // 6. 계산식 경고
   skills.forEach(sk => {
     const n = sk.name?.trim() || '(이름 없음)';
     if (!sk.formula?.trim()) {
@@ -38,7 +80,7 @@ function buildIssues(char, remaining, skills) {
     }
   });
 
-  // 5. 대상 참조 — 조건 미명시
+  // 7. 대상 참조 — 조건 미명시
   skills.forEach(sk => {
     if (hasTargetReference(sk.formula ?? '') && !/대상/.test(sk.condition ?? '')) {
       const n = sk.name?.trim() || '(이름 없음)';
@@ -50,7 +92,7 @@ function buildIssues(char, remaining, skills) {
     }
   });
 
-  // 6. 고랭크 심사 필요
+  // 8. 고랭크 심사 필요
   skills.forEach(sk => {
     if (HIGH_RANKS.includes(sk.rank)) {
       const n = sk.name?.trim() || '(이름 없음)';
@@ -62,7 +104,7 @@ function buildIssues(char, remaining, skills) {
     }
   });
 
-  // 7 & 8. 효과 경고 (스택 최대값, 구속 저항 등)
+  // 9. 효과 경고
   skills.forEach(sk => {
     const n = sk.name?.trim() || '(이름 없음)';
     (sk.effects ?? []).forEach(ef => {
@@ -92,8 +134,8 @@ function IssueRow({ type, label, detail }) {
   );
 }
 
-export default function ValidationPanel({ char, remaining, skills }) {
-  const issues = buildIssues(char, remaining, skills);
+export default function ValidationPanel({ char, remaining, skills, stats, abilities, proficiencies, editingSkill }) {
+  const issues = buildIssues(char, remaining, skills, stats, abilities, proficiencies, editingSkill);
   const errors   = issues.filter(i => i.type === 'err');
   const warnings = issues.filter(i => i.type === 'warn');
   const oks      = issues.filter(i => i.type === 'ok');
@@ -102,7 +144,6 @@ export default function ValidationPanel({ char, remaining, skills }) {
   return (
     <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-slate-200/70 shadow-lg shadow-violet-100/20 p-5 space-y-4">
 
-      {/* 헤더 + 요약 뱃지 */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-violet-300 font-mono tracking-widest">—</span>
@@ -127,7 +168,6 @@ export default function ValidationPanel({ char, remaining, skills }) {
         </div>
       </div>
 
-      {/* 통과 배너 */}
       {allClear && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-center">
           <p className="text-sm font-bold text-emerald-700">모든 항목 이상 없음</p>
@@ -135,7 +175,6 @@ export default function ValidationPanel({ char, remaining, skills }) {
         </div>
       )}
 
-      {/* 오류 */}
       {errors.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-[10px] text-rose-500 font-semibold uppercase tracking-widest">오류 — 수정 필요</p>
@@ -143,7 +182,6 @@ export default function ValidationPanel({ char, remaining, skills }) {
         </div>
       )}
 
-      {/* 경고 */}
       {warnings.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-[10px] text-amber-500 font-semibold uppercase tracking-widest">경고 — 확인 권장</p>
@@ -151,7 +189,6 @@ export default function ValidationPanel({ char, remaining, skills }) {
         </div>
       )}
 
-      {/* 정상 항목 */}
       {oks.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-[10px] text-emerald-500 font-semibold uppercase tracking-widest">정상</p>
