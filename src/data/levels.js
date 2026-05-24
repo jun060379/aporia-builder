@@ -22,3 +22,8 @@ export function getLevelInfo(exp) {
   }
   return current;
 }
+
+export function getLevelByNumber(level) {
+  const num = parseInt(level, 10) || 1;
+  return LEVEL_TABLE.find(r => r.level === num) ?? LEVEL_TABLE[0];
+}

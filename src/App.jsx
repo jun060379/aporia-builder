@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { defaultStats, STAT_NAMES, getStatValue } from './data/stats';
 import { defaultAbilities } from './data/abilities';
 import { defaultProficiencies } from './data/proficiencies';
-import { getLevelInfo } from './data/levels';
+import { getLevelByNumber } from './data/levels';
 import { calcStatCost, calcAbilityCost, calcProficiencyCost, calcSkillsCost } from './utils/calcBudget';
 
 import CharacterForm from './components/CharacterForm';
@@ -39,7 +39,7 @@ function buildSaveData(char, stats, abilities, proficiencies, skills) {
   };
 }
 
-const DEFAULT_CHAR = { name: '', race: '', exp: '0', erosion: '0' };
+const DEFAULT_CHAR = { name: '', race: '', level: '1', erosion: '0' };
 
 // ── tabs ─────────────────────────────────────────────────
 const TABS_LEFT  = ['캐릭터', '기능/숙련', '스킬'];
@@ -68,7 +68,7 @@ function TabBar({ tabs, active, onChange, variant = 'warm' }) {
 }
 
 function CharacterSummary({ char, stats }) {
-  const levelInfo = getLevelInfo(char.exp);
+  const levelInfo = getLevelByNumber(char.level);
   return (
     <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-indigo-100/70 shadow-lg shadow-violet-100/20 p-5">
       <div className="flex items-center gap-2 mb-4">
@@ -80,12 +80,10 @@ function CharacterSummary({ char, stats }) {
         <span className="text-slate-900 font-semibold">{char.name || '—'}</span>
         <span className="text-slate-400">종족</span>
         <span className="text-slate-700">{char.race || '—'}</span>
-        <span className="text-slate-400">경험치</span>
-        <span className="text-slate-700">{char.exp}</span>
-        <span className="text-slate-400">레벨</span>
-        <span className="text-amber-600 font-bold">Lv.{levelInfo.level}</span>
+        <span className="text-slate-400">빌드 레벨</span>
+        <span className="text-amber-600 font-bold">Lv.{levelInfo.level} 기준</span>
         <span className="text-slate-400">성장예산</span>
-        <span className="text-slate-700">{levelInfo.budget}</span>
+        <span className="text-slate-700">{levelInfo.budget}pt</span>
       </div>
       <div className="border-t border-slate-100 pt-3">
         <p className="text-[10px] text-slate-400 uppercase tracking-widest mb-2">스탯</p>
@@ -119,7 +117,7 @@ export default function App() {
   const [rightTab, setRightTab] = useState('요약');
 
   // derived budget
-  const { budget } = getLevelInfo(char.exp);
+  const { budget } = getLevelByNumber(char.level);
   const remaining = budget
     - calcStatCost(stats)
     - calcAbilityCost(abilities)

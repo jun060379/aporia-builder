@@ -1,4 +1,4 @@
-import { getLevelInfo } from '../data/levels';
+import { getLevelByNumber } from '../data/levels';
 import { calcStatCost, calcAbilityCost, calcProficiencyCost, calcSkillsCost } from '../utils/calcBudget';
 
 function MiniCard({ label, value }) {
@@ -11,7 +11,7 @@ function MiniCard({ label, value }) {
 }
 
 export default function BudgetSummary({ char, stats, abilities, proficiencies, skills }) {
-  const { level, budget } = getLevelInfo(char.exp);
+  const { level, budget } = getLevelByNumber(char.level);
   const statCost  = calcStatCost(stats);
   const ablCost   = calcAbilityCost(abilities);
   const profCost  = calcProficiencyCost(proficiencies);
@@ -27,7 +27,7 @@ export default function BudgetSummary({ char, stats, abilities, proficiencies, s
           <span className="text-[10px] text-violet-300 font-mono tracking-widest">—</span>
           <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">성장예산</h2>
         </div>
-        <span className="text-xs text-slate-400 font-mono">Lv.{level} · {budget}pt</span>
+        <span className="text-xs text-slate-400 font-mono">Lv.{level} 기준 · {budget}pt</span>
       </div>
 
       <div className="grid grid-cols-4 gap-1.5 mb-3">
