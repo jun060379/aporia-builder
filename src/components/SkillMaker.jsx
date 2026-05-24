@@ -7,6 +7,9 @@ import {
   hasTargetReference,
   getEffectWarnings,
 } from '../utils/calcSkill';
+import { STAT_NAMES } from '../data/stats';
+import { ABILITY_NAMES } from '../data/abilities';
+import { PROFICIENCY_NAMES } from '../data/proficiencies';
 import FormulaBlockModal from './FormulaBlockModal';
 import EffectBlockModal from './EffectBlockModal';
 
@@ -34,6 +37,15 @@ const QUICK_COMBOS = [
   { label: '지능 판정식',       formula: 'd20 + 랭크 + 지능' },
   { label: '스택 강화식',       formula: 'd20 + 랭크 + 스택_이름 * 2' },
   { label: '대상 상태 강화식',  formula: 'd20 + 랭크 + 대상상태_상태_수치 * 2' },
+];
+
+const FORMULA_CATEGORIES = [
+  { id: '기본',     tokens: ['d6', 'd20', '2d6', 'd100', '랭크'] },
+  { id: '스탯',     tokens: STAT_NAMES },
+  { id: '기능',     tokens: ABILITY_NAMES },
+  { id: '숙련',     tokens: PROFICIENCY_NAMES },
+  { id: '상태/스택', tokens: ['상태_출혈_수치', '대상상태_출혈_수치', '스택_혈인', '대상스택_표식'] },
+  { id: '고급',     tokens: ['현재체력', '최대체력', '이면침식', '일상점'] },
 ];
 
 const inputCls = "w-full min-w-0 bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
@@ -184,6 +196,7 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
     return { ...s, effects: s.effects ?? [] };
   });
   const [formulaModalOpen, setFormulaModalOpen] = useState(false);
+  const [formulaCat, setFormulaCat] = useState('기본');
   const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
@@ -232,10 +245,10 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
     });
   };
 
-  const tokenErrors    = validateFormula(skill.formula);
-  const structureWarns = validateFormulaStructure(skill.formula);
-  const needsTarget    = hasTargetReference(skill.formula);
-  const allFormulaErrors = [...tokenErrors, ...structureWarns];
+  const tokenErrors     = validateFormula(skill.formula);
+  const structureWarns  = validateFormulaStructure(skill.formula);
+  const needsTarget     = hasTargetReference(skill.formula);
+  const allFormulaIssues = [...tokenErrors, ...structureWarns];
 
   return (
     <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-slate-200/70 shadow-lg shadow-violet-100/20 p-5 space-y-4">
@@ -331,31 +344,63 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
         <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">계산식</span>
 
         <input
-          className={`${inputCls}${allFormulaErrors.length > 0 ? ' border-rose-400 focus:border-rose-400 focus:ring-rose-400/20' : ''}`}
+          className={`${inputCls}${allFormulaIssues.length > 0 ? ' border-amber-400 focus:border-amber-400 focus:ring-amber-400/20' : ''}`}
           value={skill.formula}
           onChange={field('formula')}
           placeholder="예: d20 + 랭크 + 근력"
         />
 
-        {allFormulaErrors.length > 0 && (
+        {allFormulaIssues.length > 0 && (
           <div className="space-y-0.5">
-            {allFormulaErrors.map((e, i) => (
-              <p key={i} className="text-xs text-rose-600">⚠ {e}</p>
+            {allFormulaIssues.map((e, i) => (
+              <p key={i} className="text-xs text-amber-600">⚠ {e}</p>
             ))}
           </div>
         )}
-        {needsTarget && allFormulaErrors.length === 0 && (
-          <p className="text-xs text-amber-600">⚠ 대상 참조 포함 — 조건 칸에 "대상 지정 필요"를 추가하세요.</p>
+        {needsTarget && (
+          <p className="text-xs text-amber-600">⚠ 이 계산식은 대상 지정이 필요합니다. 사용 예: !스킬 스킬명 대상:대상별명</p>
         )}
 
-        {/* 블럭 추가 */}
-        <div className="space-y-1.5">
-          <p className="text-[10px] text-slate-400 tracking-widest uppercase">블럭 추가</p>
+        {/* 빠른 삽입 (카테고리별) */}
+        <div className="space-y-2">
+          <p className="text-[10px] text-slate-400 tracking-widest uppercase">빠른 삽입</p>
+          <div className="flex flex-wrap gap-1">
+            {FORMULA_CATEGORIES.map(cat => (
+              <button
+                key={cat.id}
+                onClick={() => setFormulaCat(cat.id)}
+                className={`px-2 py-0.5 rounded-lg text-[11px] font-medium border transition-colors ${
+                  formulaCat === cat.id
+                    ? 'bg-violet-600 text-white border-violet-600 shadow-sm shadow-violet-200/50'
+                    : 'bg-white text-slate-500 border-slate-200 hover:border-violet-300 hover:text-violet-700'
+                }`}
+              >
+                {cat.id}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {FORMULA_CATEGORIES.find(c => c.id === formulaCat)?.tokens.map(token => (
+              <button
+                key={token}
+                onClick={() => insertFormula(token)}
+                className="px-2 py-1 bg-white hover:bg-violet-50 border border-slate-200 hover:border-violet-300 text-slate-600 hover:text-violet-700 rounded-lg text-[11px] font-mono transition-colors"
+              >
+                {token}
+              </button>
+            ))}
+          </div>
+          {formulaCat === '상태/스택' && (
+            <p className="text-[10px] text-amber-600">⚠ 예시 토큰입니다. 직접 편집하거나 아래 고급 블럭 선택기로 커스텀하세요.</p>
+          )}
+          {formulaCat === '고급' && (
+            <p className="text-[10px] text-amber-600">⚠ 고급 변수는 캐릭터 DB를 참조합니다. 운영진 검수 대상입니다.</p>
+          )}
           <button
             onClick={() => setFormulaModalOpen(true)}
-            className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-semibold transition-colors shadow-sm shadow-violet-200"
+            className="text-[11px] px-2.5 py-1 bg-white border border-dashed border-slate-300 text-slate-400 hover:text-violet-700 hover:border-violet-300 hover:bg-violet-50 rounded-lg transition-colors"
           >
-            블럭 선택
+            + 고급 블럭 선택기
           </button>
         </div>
 

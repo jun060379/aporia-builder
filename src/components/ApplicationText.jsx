@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { STAT_NAMES } from '../data/stats';
 import { ABILITY_NAMES } from '../data/abilities';
 import { PROFICIENCY_NAMES } from '../data/proficiencies';
+import { normalizeFormula } from '../utils/calcSkill';
 
 function CopyBlock({ title, text }) {
   const [copied, setCopied] = useState(false);
@@ -49,7 +50,7 @@ function buildSkillText(sk) {
     `계통: ${sk.tradition}`,
     `계열: ${sk.series}`,
     `랭크: ${sk.rank}`,
-    `계산식: ${sk.formula}`,
+    `계산식: ${normalizeFormula(sk.formula)}`,
     effectBlock,
     `조건: ${sk.condition}`,
     `대가: ${sk.cost}`,

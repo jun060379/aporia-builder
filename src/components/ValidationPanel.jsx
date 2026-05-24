@@ -27,14 +27,14 @@ function buildIssues(char, remaining, skills) {
     issues.push({ type: 'warn', label: `이름 없는 스킬 ${noName.length}개`, detail: '스킬 메이커에서 스킬 이름을 입력하세요.' });
   }
 
-  // 4. 계산식 오류
+  // 4. 계산식 경고
   skills.forEach(sk => {
     const n = sk.name?.trim() || '(이름 없음)';
     if (!sk.formula?.trim()) {
-      issues.push({ type: 'err', label: `계산식 없음`, detail: `스킬 [${n}]의 계산식을 입력하세요.` });
+      issues.push({ type: 'warn', label: `계산식 없음 [${n}]`, detail: '계산식이 비어 있습니다. 스킬 메이커에서 계산식을 입력하세요.' });
     } else {
-      const errs = [...validateFormula(sk.formula), ...validateFormulaStructure(sk.formula)];
-      errs.forEach(e => issues.push({ type: 'err', label: `계산식 오류 [${n}]`, detail: e }));
+      const msgs = [...validateFormula(sk.formula), ...validateFormulaStructure(sk.formula)];
+      msgs.forEach(m => issues.push({ type: 'warn', label: `계산식 경고 [${n}]`, detail: m }));
     }
   });
 
@@ -67,7 +67,6 @@ function buildIssues(char, remaining, skills) {
     const n = sk.name?.trim() || '(이름 없음)';
     (sk.effects ?? []).forEach(ef => {
       getEffectWarnings(ef)
-        .filter(w => !w.includes('수동 검수'))
         .forEach(w => issues.push({ type: 'warn', label: `[${n}] ${w}` }));
     });
   });
