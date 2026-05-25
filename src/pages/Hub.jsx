@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useAuth } from '../auth/AuthContext.jsx';
 
 const CARDS = [
   {
@@ -28,31 +29,70 @@ const CARDS = [
 ];
 
 export default function Hub() {
+  const { user, profile, isAdmin, signOut, loading } = useAuth();
+
+  const displayName = profile?.display_name || user?.email || '';
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-amber-50/40 via-white to-violet-50/40 text-slate-800 relative overflow-hidden">
-      {/* 배경 블러 액센트 (Builder와 동일 톤) */}
       <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
         <div className="absolute -top-32 -left-32 w-96 h-96 bg-amber-100/60 rounded-full blur-3xl" />
         <div className="absolute bottom-0 right-0 w-96 h-96 bg-violet-200/50 rounded-full blur-3xl" />
         <div className="absolute top-1/2 left-1/3 w-64 h-64 bg-indigo-100/40 rounded-full blur-2xl" />
       </div>
 
-      {/* ── 헤더 ── */}
       <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/70 sticky top-0 z-20 shadow-sm shadow-slate-100/80">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4">
-          <div className="flex items-baseline gap-2.5">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-violet-700 to-indigo-600 bg-clip-text text-transparent">
-              APORIA
-            </h1>
-            <span className="text-slate-400 text-base font-light tracking-widest">PORTAL</span>
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-baseline gap-2.5">
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-violet-700 to-indigo-600 bg-clip-text text-transparent">
+                APORIA
+              </h1>
+              <span className="text-slate-400 text-base font-light tracking-widest">PORTAL</span>
+            </div>
+            <p className="text-[11px] text-slate-400 tracking-widest mt-0.5">
+              Everyday / Unreality Operation Hub
+            </p>
           </div>
-          <p className="text-[11px] text-slate-400 tracking-widest mt-0.5">
-            Everyday / Unreality Operation Hub
-          </p>
+
+          <div className="flex items-center gap-2 ml-auto">
+            {loading ? (
+              <span className="text-xs text-slate-400">로딩 중…</span>
+            ) : user ? (
+              <>
+                <span className="hidden sm:inline text-xs text-slate-500">{displayName}</span>
+                {isAdmin && (
+                  <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700 border border-violet-200">
+                    관리자
+                  </span>
+                )}
+                <button
+                  onClick={signOut}
+                  className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 active:scale-[0.98] transition"
+                >
+                  로그아웃
+                </button>
+              </>
+            ) : (
+              <>
+                <Link
+                  to="/login"
+                  className="inline-flex items-center rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm shadow-violet-200 hover:from-violet-700 hover:to-indigo-700 active:scale-[0.98] transition"
+                >
+                  로그인
+                </Link>
+                <Link
+                  to="/signup"
+                  className="inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 active:scale-[0.98] transition"
+                >
+                  회원가입
+                </Link>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
-      {/* ── 본문 ── */}
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
         <section className="mb-8 sm:mb-10">
           <p className="text-sm sm:text-base text-slate-600 leading-relaxed">

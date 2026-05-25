@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 
-export default function PlaceholderPage({ title, body }) {
+export default function PlaceholderPage({ title, body, extra }) {
   return (
     <div className="min-h-screen bg-gradient-to-b from-amber-50/40 via-white to-violet-50/40 text-slate-800 relative overflow-hidden">
       <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
@@ -34,7 +34,8 @@ export default function PlaceholderPage({ title, body }) {
             {body}
           </p>
 
-          <div className="mt-8">
+          <div className="mt-8 flex flex-wrap gap-3">
+            {extra}
             <Link
               to="/"
               className="inline-flex items-center rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 active:scale-[0.98] transition"
