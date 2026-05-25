@@ -22,16 +22,21 @@ export default function Signup() {
       return;
     }
     setSubmitting(true);
-    const { data, error: err } = await signUp(email.trim(), password, displayName.trim());
-    setSubmitting(false);
-    if (err) {
-      setError(err.message || '회원가입에 실패했습니다.');
-      return;
-    }
-    if (data?.session) {
-      navigate('/');
-    } else {
-      setNotice('가입이 완료되었습니다. 이메일 인증이 필요할 수 있습니다. 인증 후 로그인 페이지에서 로그인하세요.');
+    try {
+      const { data, error: err } = await signUp(email.trim(), password, displayName.trim());
+      if (err) {
+        setError(err.message || '회원가입에 실패했습니다.');
+        return;
+      }
+      if (data?.session) {
+        navigate('/');
+      } else {
+        setNotice('가입이 완료되었습니다. 이메일 인증이 필요할 수 있습니다. 인증 후 로그인 페이지에서 로그인해주세요.');
+      }
+    } catch (err) {
+      setError(err?.message || '회원가입 중 오류가 발생했습니다.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -85,7 +90,7 @@ export default function Signup() {
           disabled={submitting}
           className="w-full rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm shadow-violet-200 hover:from-violet-700 hover:to-indigo-700 active:scale-[0.98] transition disabled:opacity-60"
         >
-          {submitting ? '가입 중…' : '회원가입'}
+          {submitting ? '처리 중...' : '회원가입'}
         </button>
       </form>
 

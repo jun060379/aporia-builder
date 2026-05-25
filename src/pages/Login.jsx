@@ -19,13 +19,18 @@ export default function Login() {
       return;
     }
     setSubmitting(true);
-    const { error: err } = await signIn(email.trim(), password);
-    setSubmitting(false);
-    if (err) {
-      setError(err.message || '로그인에 실패했습니다.');
-      return;
+    try {
+      const { error: err } = await signIn(email.trim(), password);
+      if (err) {
+        setError(err.message || '로그인에 실패했습니다.');
+        return;
+      }
+      navigate('/');
+    } catch (err) {
+      setError(err?.message || '로그인 중 오류가 발생했습니다.');
+    } finally {
+      setSubmitting(false);
     }
-    navigate('/');
   };
 
   return (
@@ -63,7 +68,7 @@ export default function Login() {
           disabled={submitting}
           className="w-full rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm shadow-violet-200 hover:from-violet-700 hover:to-indigo-700 active:scale-[0.98] transition disabled:opacity-60"
         >
-          {submitting ? '로그인 중…' : '로그인'}
+          {submitting ? '처리 중...' : '로그인'}
         </button>
       </form>
 
