@@ -128,6 +128,45 @@ export async function updateApplicationStatus({ id, status, reviewComment }) {
   }
 }
 
+/**
+ * 관리자 전용: 승인 = 서버 API(/api/approve-application) 호출 →
+ * Apps Script Webhook으로 실제 등록 → 성공 시 Supabase status=approved.
+ */
+export async function approveApplicationViaApi({ id, reviewComment }) {
+  try {
+    ensureSupabase();
+    const { data: sessionData, error: sErr } = await withTimeout(
+      supabase.auth.getSession(),
+      REQ_TIMEOUT_MS,
+    );
+    if (sErr) return { ok: false, error: sErr.message || '세션을 가져올 수 없습니다.' };
+    const accessToken = sessionData?.session?.access_token;
+    if (!accessToken) return { ok: false, error: '로그인이 필요합니다.' };
+
+    const resp = await withTimeout(
+      fetch('/api/approve-application', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ applicationId: id, reviewComment: reviewComment ?? '' }),
+      }),
+      30000,
+    );
+
+    let json = null;
+    try { json = await resp.json(); } catch { /* noop */ }
+
+    if (!resp.ok || !json || json.ok !== true) {
+      return { ok: false, error: json?.error || `요청 실패 (HTTP ${resp.status})` };
+    }
+    return { ok: true, message: json.message, registeredType: json.registeredType, registeredKey: json.registeredKey };
+  } catch (e) {
+    return { ok: false, error: e?.message || '승인 요청 중 오류가 발생했습니다.' };
+  }
+}
+
 // ───── 표시용 라벨 ─────
 export const TYPE_LABEL = {
   character_data: '캐릭터 데이터',

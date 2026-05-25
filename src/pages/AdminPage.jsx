@@ -9,6 +9,7 @@ import AdminCategoryTabs, { ADMIN_CATEGORIES } from '../components/AdminCategory
 import {
   getAdminApplications,
   updateApplicationStatus,
+  approveApplicationViaApi,
   TYPE_LABEL,
   STATUS_LABEL,
   STATUS_BADGE_CLASS,
@@ -219,14 +220,25 @@ function AdminApplicationCard({ item, expanded, onToggle, onAfterUpdate }) {
     setError('');
     setBusy(true);
     try {
-      const { error: err } = await updateApplicationStatus({
-        id: item.id,
-        status,
-        reviewComment: reviewComment.trim() || null,
-      });
-      if (err) {
-        setError(err.message || '상태 변경에 실패했습니다.');
-        return;
+      if (status === 'approved') {
+        const result = await approveApplicationViaApi({
+          id: item.id,
+          reviewComment: reviewComment.trim(),
+        });
+        if (!result.ok) {
+          setError(result.error || '승인 처리에 실패했습니다.');
+          return;
+        }
+      } else {
+        const { error: err } = await updateApplicationStatus({
+          id: item.id,
+          status,
+          reviewComment: reviewComment.trim() || null,
+        });
+        if (err) {
+          setError(err.message || '상태 변경에 실패했습니다.');
+          return;
+        }
       }
       await onAfterUpdate();
     } catch (e) {
