@@ -10,10 +10,16 @@ export const ENEMY_TARGET_MODES = ['none', 'optional', 'required'];
 
 export const EFFECT_PREFIXES = ['상태템플릿부여', '스택증가', '스택감소', '피해', '회복'];
 
+export function isEffectLineAutoApplicable(line) {
+  const t = (line || '').trim();
+  if (!t) return true;
+  return EFFECT_PREFIXES.some((p) => t.startsWith(p));
+}
+
 export function isEffectAutoApplicable(effect) {
-  const e = (effect || '').trim();
-  if (!e) return true; // empty allowed
-  return EFFECT_PREFIXES.some((p) => e.startsWith(p));
+  const s = String(effect ?? '');
+  if (!s.trim()) return true; // empty allowed
+  return s.split('\n').every((line) => isEffectLineAutoApplicable(line));
 }
 
 export function buildEnemyTemplateText(p) {

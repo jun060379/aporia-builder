@@ -1,14 +1,20 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { createApplication } from '../lib/applications';
 import {
   ENEMY_SKILL_CATEGORIES,
   ENEMY_SKILL_RANKS,
   ENEMY_OWNER_TYPES,
   ENEMY_TARGET_MODES,
-  EFFECT_PREFIXES,
   buildEnemySkillText,
   isEffectAutoApplicable,
 } from '../lib/enemyText';
+import EnemySkillEffectBuilder from './EnemySkillEffectBuilder.jsx';
+import EnemySkillEffectPreview from './EnemySkillEffectPreview.jsx';
+
+const RANK_VALUES = [
+  ['F', 1], ['E', 10], ['D', 20], ['C', 30],
+  ['B', 40], ['A', 50], ['S', 70], ['U', 80], ['EX', 100],
+];
 
 function Field({ label, required, hint, children }) {
   return (
@@ -40,8 +46,25 @@ export default function EnemySkillForm() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
+  const effectRef = useRef(null);
   const keyHasSpace = useMemo(() => /\s/.test(skillKey), [skillKey]);
-  const effectWarn = useMemo(() => !isEffectAutoApplicable(effect), [effect]);
+
+  const previewPayload = useMemo(() => ({
+    skill_key: skillKey.trim(),
+    owner_type: ownerType,
+    owner_key: ownerKey.trim(),
+    name: name.trim(),
+    category,
+    rank,
+    formula: formula.trim(),
+    effect,
+    target_mode: targetMode,
+    memo,
+  }), [skillKey, ownerType, ownerKey, name, category, rank, formula, effect, targetMode, memo]);
+
+  const previewOutput = useMemo(() => {
+    try { return buildEnemySkillText(previewPayload); } catch { return ''; }
+  }, [previewPayload]);
 
   function reset() {
     setSkillKey('');
@@ -77,18 +100,7 @@ export default function EnemySkillForm() {
       return setError('자동 적용 가능한 효과 문법이 아닙니다.');
     }
 
-    const payload = {
-      skill_key: sk,
-      owner_type: ownerType,
-      owner_key: ownerKey.trim(),
-      name: nm,
-      category,
-      rank,
-      formula: formula.trim(),
-      effect,
-      target_mode: targetMode,
-      memo,
-    };
+    const payload = { ...previewPayload, skill_key: sk, name: nm, formula: formula.trim() };
     const outputText = buildEnemySkillText(payload);
 
     setSubmitting(true);
@@ -114,6 +126,7 @@ export default function EnemySkillForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+      {/* 기본 정보 */}
       <section className="space-y-3">
         <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">기본 정보</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -160,31 +173,59 @@ export default function EnemySkillForm() {
         </div>
       </section>
 
-      <section className="space-y-3">
-        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">계산 / 효과</h3>
+      {/* 계산식 */}
+      <section className="space-y-2">
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">계산식</h3>
         <Field label="계산식 (formula)" required>
-          <input value={formula} onChange={(e) => setFormula(e.target.value)} className={inputCls} placeholder="ex) d20 + 랭크" />
+          <input
+            value={formula}
+            onChange={(e) => setFormula(e.target.value)}
+            className={inputCls}
+            placeholder="ex) d20 + 랭크"
+          />
         </Field>
-        <Field
-          label="효과 (effect)"
-          hint={`자동 적용 가능 접두어: ${EFFECT_PREFIXES.join(' / ')}`}
-        >
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600 space-y-1">
+          <div className="font-medium text-slate-700">계산식 예시</div>
+          <div className="font-mono text-slate-600">d20 + 랭크 · 3d6 + 랭크 · 5d6 + 3</div>
+          <div className="text-slate-500 mt-1">
+            랭크 값: {RANK_VALUES.map(([r, v]) => `${r}=${v}`).join(', ')}
+          </div>
+        </div>
+      </section>
+
+      {/* 효과 제작 */}
+      <section className="space-y-2">
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">효과 제작</h3>
+        <EnemySkillEffectBuilder value={effect} onChange={setEffect} textareaRef={effectRef} />
+        <Field label="효과 (effect)">
           <textarea
+            ref={effectRef}
             value={effect}
             onChange={(e) => setEffect(e.target.value)}
-            rows={3}
-            className={`${inputCls} ${effectWarn ? 'border-amber-400' : ''}`}
+            rows={4}
+            className={inputCls}
             placeholder="비워두면 효과 없음으로 저장됩니다."
           />
-          {effectWarn && (
-            <span className="block text-[11px] text-amber-600">
-              자동 적용 가능한 효과 문법이 아닙니다. ({EFFECT_PREFIXES.join(', ')} 중 하나로 시작해야 합니다.)
-            </span>
-          )}
         </Field>
+        <div>
+          <div className="text-[11px] font-medium text-slate-500 mb-1">효과 미리보기</div>
+          <EnemySkillEffectPreview value={effect} />
+        </div>
+      </section>
+
+      {/* 메모 */}
+      <section>
         <Field label="메모 (memo)">
           <textarea value={memo} onChange={(e) => setMemo(e.target.value)} rows={2} className={inputCls} />
         </Field>
+      </section>
+
+      {/* 등록 명령어 미리보기 */}
+      <section className="space-y-2">
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">등록 명령어 미리보기</h3>
+        <pre className="bg-slate-800 text-slate-100 rounded-xl border border-slate-700 p-3 text-[11px] whitespace-pre-wrap overflow-x-auto leading-relaxed font-mono">
+          {previewOutput}
+        </pre>
       </section>
 
       {error && (

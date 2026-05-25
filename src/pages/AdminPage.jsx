@@ -5,6 +5,7 @@ import PlaceholderPage from './PlaceholderPage.jsx';
 import CharacterApplicationView from '../components/CharacterApplicationView.jsx';
 import EnemyTemplateApplicationView from '../components/EnemyTemplateApplicationView.jsx';
 import EnemySkillApplicationView from '../components/EnemySkillApplicationView.jsx';
+import AdminCategoryTabs, { ADMIN_CATEGORIES } from '../components/AdminCategoryTabs.jsx';
 import {
   getAdminApplications,
   updateApplicationStatus,
@@ -13,13 +14,17 @@ import {
   STATUS_BADGE_CLASS,
 } from '../lib/applications.js';
 
-const FILTERS = [
+const STATUS_FILTERS = [
   { key: 'all', label: '전체' },
   { key: 'pending', label: '대기중' },
   { key: 'approved', label: '승인됨' },
   { key: 'rejected', label: '반려됨' },
   { key: 'needs_revision', label: '수정 요청' },
 ];
+
+function categoryTypeOf(catKey) {
+  return ADMIN_CATEGORIES.find((c) => c.key === catKey)?.type ?? null;
+}
 
 function formatDate(iso) {
   if (!iso) return '';
@@ -40,6 +45,7 @@ export default function AdminPage() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [category, setCategory] = useState('all');
   const [filter, setFilter] = useState('all');
   const [expandedId, setExpandedId] = useState(null);
 
@@ -59,10 +65,31 @@ export default function AdminPage() {
     if (isAdmin) refresh();
   }, [isAdmin, refresh]);
 
+  const categoryCounts = useMemo(() => {
+    const c = { all: items.length, character_data: 0, enemy_template: 0, enemy_skill: 0 };
+    for (const it of items) {
+      if (c[it.type] !== undefined) c[it.type] += 1;
+    }
+    return c;
+  }, [items]);
+
+  const byCategory = useMemo(() => {
+    const t = categoryTypeOf(category);
+    return t ? items.filter((it) => it.type === t) : items;
+  }, [items, category]);
+
+  const statusCounts = useMemo(() => {
+    const c = { all: byCategory.length, pending: 0, approved: 0, rejected: 0, needs_revision: 0 };
+    for (const it of byCategory) {
+      if (c[it.status] !== undefined) c[it.status] += 1;
+    }
+    return c;
+  }, [byCategory]);
+
   const filtered = useMemo(() => {
-    if (filter === 'all') return items;
-    return items.filter((it) => it.status === filter);
-  }, [items, filter]);
+    if (filter === 'all') return byCategory;
+    return byCategory.filter((it) => it.status === filter);
+  }, [byCategory, filter]);
 
   if (authLoading) {
     return <PlaceholderPage title="관리자 페이지" body="권한 확인 중입니다…" />;
@@ -126,20 +153,32 @@ export default function AdminPage() {
           </button>
         </div>
 
-        <div className="flex flex-wrap gap-2 mb-5">
-          {FILTERS.map((f) => (
-            <button
-              key={f.key}
-              onClick={() => setFilter(f.key)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-medium border transition ${
-                filter === f.key
-                  ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-transparent shadow-sm shadow-violet-200'
-                  : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
+        <div className="space-y-2 mb-5">
+          <AdminCategoryTabs value={category} onChange={setCategory} counts={categoryCounts} />
+          <div className="flex gap-2 overflow-x-auto -mx-1 px-1 pb-1">
+            {STATUS_FILTERS.map((f) => {
+              const active = filter === f.key;
+              const n = statusCounts[f.key];
+              return (
+                <button
+                  key={f.key}
+                  onClick={() => setFilter(f.key)}
+                  className={`shrink-0 inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium border transition ${
+                    active
+                      ? 'bg-slate-800 text-white border-transparent'
+                      : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
+                  <span>{f.label}</span>
+                  {typeof n === 'number' && (
+                    <span className={`rounded-full px-1.5 text-[10px] ${active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                      {n}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {error && (
