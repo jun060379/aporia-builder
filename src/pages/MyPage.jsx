@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import PlaceholderPage from './PlaceholderPage.jsx';
+import CharacterApplicationView from '../components/CharacterApplicationView.jsx';
 import {
   getMyApplications,
   TYPE_LABEL,
@@ -119,37 +120,89 @@ export default function MyPage() {
 
         <div className="space-y-3">
           {items.map((it) => (
-            <article
-              key={it.id}
-              className="bg-white/85 backdrop-blur-sm rounded-2xl border border-slate-200/70 shadow-sm shadow-slate-100 p-4 sm:p-5"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h3 className="text-base font-semibold text-slate-800 truncate">{it.title || '(제목 없음)'}</h3>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 border border-slate-200">
-                      {TYPE_LABEL[it.type] || it.type}
-                    </span>
-                    <span>제출: {formatDate(it.created_at)}</span>
-                  </div>
-                </div>
-                <span
-                  className={`shrink-0 inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${STATUS_BADGE_CLASS[it.status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}
-                >
-                  {STATUS_LABEL[it.status] || it.status}
-                </span>
-              </div>
-
-              {it.review_comment && (
-                <div className="mt-3 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-700 whitespace-pre-wrap">
-                  <div className="text-[10px] text-slate-400 mb-1 uppercase tracking-wider">검수 코멘트</div>
-                  {it.review_comment}
-                </div>
-              )}
-            </article>
+            <MyApplicationCard key={it.id} item={it} />
           ))}
         </div>
       </main>
+    </div>
+  );
+}
+
+function MyApplicationCard({ item }) {
+  const [open, setOpen] = useState(false);
+  const shortComment = useMemo(() => {
+    if (!item.review_comment) return '';
+    const t = String(item.review_comment).replace(/\s+/g, ' ').trim();
+    return t.length > 80 ? t.slice(0, 80) + '…' : t;
+  }, [item.review_comment]);
+
+  return (
+    <article className="bg-white/85 backdrop-blur-sm rounded-2xl border border-slate-200/70 shadow-sm shadow-slate-100 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full text-left p-4 sm:p-5 hover:bg-slate-50/60 transition"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-slate-800 truncate">{item.title || '(제목 없음)'}</h3>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 border border-slate-200">
+                {TYPE_LABEL[item.type] || item.type}
+              </span>
+              <span>제출: {formatDate(item.created_at)}</span>
+            </div>
+            {shortComment && (
+              <p className="mt-1.5 text-[11px] text-slate-500">
+                <span className="text-slate-400">검수 코멘트 </span>
+                {shortComment}
+              </p>
+            )}
+          </div>
+          <span
+            className={`shrink-0 inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${STATUS_BADGE_CLASS[item.status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}
+          >
+            {STATUS_LABEL[item.status] || item.status}
+          </span>
+        </div>
+      </button>
+
+      {open && (
+        <div className="border-t border-slate-200/70 p-4 sm:p-5 space-y-4 bg-slate-50/40">
+          {item.review_comment && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 whitespace-pre-wrap">
+              <div className="text-[10px] text-amber-600 mb-1 uppercase tracking-wider">검수 코멘트</div>
+              {item.review_comment}
+            </div>
+          )}
+          {item.type === 'character_data' ? (
+            <CharacterApplicationView application={item} />
+          ) : (
+            <FallbackPayloadView item={item} />
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function FallbackPayloadView({ item }) {
+  let json = '';
+  try {
+    json = JSON.stringify(item.payload, null, 2);
+  } catch {
+    json = String(item.payload);
+  }
+  return (
+    <div className="space-y-3">
+      {item.output_text && (
+        <pre className="bg-slate-800 text-slate-100 rounded-xl border border-slate-700 p-4 text-xs whitespace-pre-wrap overflow-x-auto leading-relaxed font-mono">
+          {item.output_text}
+        </pre>
+      )}
+      <pre className="bg-slate-100 text-slate-700 rounded-xl border border-slate-200 p-3 text-[11px] whitespace-pre-wrap overflow-x-auto leading-relaxed font-mono max-h-96">
+        {json}
+      </pre>
     </div>
   );
 }

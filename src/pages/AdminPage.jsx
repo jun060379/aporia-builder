@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import PlaceholderPage from './PlaceholderPage.jsx';
+import CharacterApplicationView from '../components/CharacterApplicationView.jsx';
 import {
   getAdminApplications,
   updateApplicationStatus,
@@ -233,13 +234,17 @@ function AdminApplicationCard({ item, expanded, onToggle, onAfterUpdate }) {
 
       {expanded && (
         <div className="border-t border-slate-200/70 p-4 sm:p-5 space-y-4 bg-slate-50/40">
-          {item.output_text && (
-            <section>
-              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">출력 텍스트</h4>
-              <pre className="bg-slate-800 text-slate-100 rounded-xl border border-slate-700 p-4 text-xs whitespace-pre-wrap overflow-x-auto leading-relaxed font-mono">
-                {item.output_text}
-              </pre>
-            </section>
+          {item.type === 'character_data' ? (
+            <CharacterApplicationView application={item} />
+          ) : (
+            item.output_text && (
+              <section>
+                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">출력 텍스트</h4>
+                <pre className="bg-slate-800 text-slate-100 rounded-xl border border-slate-700 p-4 text-xs whitespace-pre-wrap overflow-x-auto leading-relaxed font-mono">
+                  {item.output_text}
+                </pre>
+              </section>
+            )
           )}
 
           <section>
@@ -248,7 +253,7 @@ function AdminApplicationCard({ item, expanded, onToggle, onAfterUpdate }) {
               onClick={() => setShowPayload((v) => !v)}
               className="text-xs text-violet-600 hover:underline"
             >
-              {showPayload ? '▾ payload 접기' : '▸ payload 펼치기'}
+              {showPayload ? '▾ 원본 JSON 숨기기' : '▸ 원본 JSON 보기'}
             </button>
             {showPayload && (
               <pre className="mt-2 bg-slate-100 text-slate-700 rounded-xl border border-slate-200 p-3 text-[11px] whitespace-pre-wrap overflow-x-auto leading-relaxed font-mono max-h-96">
