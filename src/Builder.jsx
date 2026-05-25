@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { defaultStats, STAT_NAMES, getStatValue } from './data/stats';
 import { defaultAbilities } from './data/abilities';
 import { defaultProficiencies } from './data/proficiencies';
@@ -215,9 +216,17 @@ export default function App() {
             </div>
             <p className="text-[11px] text-slate-400 tracking-widest mt-0.5">Everyday / Unreality Character Sheet</p>
           </div>
-          <p className="text-xs text-slate-400 italic hidden sm:block">
-            돌아갈 일상이 있기에, 이면은 더욱 선명해진다.
-          </p>
+          <div className="flex items-center gap-3 ml-auto">
+            <p className="text-xs text-slate-400 italic hidden sm:block">
+              돌아갈 일상이 있기에, 이면은 더욱 선명해진다.
+            </p>
+            <Link
+              to="/"
+              className="inline-flex items-center rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm shadow-violet-200 hover:from-violet-700 hover:to-indigo-700 active:scale-[0.98] transition"
+            >
+              홈
+            </Link>
+          </div>
         </div>
       </header>
 
