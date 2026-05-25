@@ -7916,3 +7916,206 @@ function enemyTemplateDelete(parts, displayName) {
 }
 
 // ── End of Enemy System v0.3 + v0.4 ──────────────────────────────────
+// ── Aporia Portal Webhook ────────────────────────────────────────────
+// 웹 포털(/admin)에서 신청 승인 시 호출되는 Webhook.
+// 기존 Discord 명령어 처리(doGet/handleCommand)와 분리되어 있다.
+
+const APORIA_PORTAL_SOURCE  = "aporia-portal";
+const APORIA_PORTAL_SECRET_PROP = "APORIA_PORTAL_SECRET";
+
+function doPost(e) {
+  // 1) JSON 파싱 시도. 실패하면 — 향후 Discord webhook 등록 시를 위해 — 안전하게 무시.
+  var raw = "";
+  try { raw = (e && e.postData && e.postData.contents) || ""; } catch (_) { raw = ""; }
+
+  var body = null;
+  if (raw) {
+    try { body = JSON.parse(raw); } catch (_) { body = null; }
+  }
+
+  // 2) 포털 Webhook 분기 (source 매칭)
+  if (body && body.source === APORIA_PORTAL_SOURCE) {
+    try {
+      return returnJson(handlePortalWebhook(body));
+    } catch (err) {
+      return returnJson({
+        ok: false,
+        error: "[Apps Script 예외] " + (err && err.message ? err.message : String(err))
+      });
+    }
+  }
+
+  // 3) 포털이 아닌 요청 — 기존 Discord 명령어 흐름이 doPost를 쓰지 않으므로 단순 응답.
+  //    (향후 다른 webhook이 추가될 때 여기서 분기하면 됨)
+  return returnJson({ ok: false, error: "Unsupported request" });
+}
+
+function returnJson(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function handlePortalWebhook(body) {
+  // secret 검증
+  var expected = "";
+  try {
+    expected = PropertiesService.getScriptProperties().getProperty(APORIA_PORTAL_SECRET_PROP) || "";
+  } catch (_) { expected = ""; }
+
+  var provided = String((body && body.secret) || "");
+  if (!expected || provided !== expected) {
+    return { ok: false, error: "Unauthorized" };
+  }
+
+  var action      = String((body && body.action) || "");
+  var application = (body && body.application) || null;
+
+  // 로그
+  try {
+    Logger.log(
+      "[portal webhook] action=" + action +
+      " type=" + (application && application.type) +
+      " id="   + (application && application.id)
+    );
+    console.log("[portal webhook]", {
+      action: action,
+      type:   application && application.type,
+      id:     application && application.id
+    });
+  } catch (_) { /* noop */ }
+
+  if (action !== "approve_application") {
+    return { ok: false, error: "Unsupported action: " + action };
+  }
+  if (!application || typeof application !== "object") {
+    return { ok: false, error: "application 필드가 비어 있습니다." };
+  }
+
+  var type        = String(application.type || "");
+  var payload     = application.payload || {};
+  var outputText  = String(application.output_text || "");
+
+  if (type === "enemy_template") return registerPortalEnemyTemplate(payload, outputText, application);
+  if (type === "enemy_skill")    return registerPortalEnemySkill(payload, outputText, application);
+  if (type === "character_data") {
+    return {
+      ok: false,
+      error: "캐릭터 데이터 자동 등록은 아직 구현되지 않았습니다. 에너미 템플릿/스킬 자동 등록만 지원합니다."
+    };
+  }
+
+  return { ok: false, error: "Unsupported type: " + type };
+}
+
+function _portalLooksLikeFailure(text) {
+  var s = String(text || "");
+  return /^\[.*실패\]/.test(s) || /^\[.*오류\]/.test(s) || /^사용법:/.test(s);
+}
+
+function registerPortalEnemyTemplate(payload, outputText, application) {
+  // 1) output_text가 !에너미템플릿등록으로 시작하면 그대로 재사용 (UI/봇 동작 일치 보장)
+  // 2) 아니면 payload로부터 명령어 문자열을 재구성
+  var utterance = outputText && /^!에너미템플릿등록\b/.test(outputText)
+    ? outputText
+    : _portalBuildEnemyTemplateUtterance(payload);
+
+  if (!utterance) {
+    return { ok: false, error: "에너미 템플릿 등록 명령어를 만들 수 없습니다." };
+  }
+
+  var result;
+  try {
+    result = enemyTemplateRegister(utterance, "aporia-portal");
+  } catch (err) {
+    return { ok: false, error: "[등록 예외] " + (err && err.message ? err.message : String(err)) };
+  }
+
+  if (_portalLooksLikeFailure(result)) {
+    return { ok: false, error: String(result) };
+  }
+
+  var registeredKey = String((payload && payload.template_key) || "");
+  try {
+    Logger.log("[portal webhook] enemy_template registered key=" + registeredKey);
+  } catch (_) { /* noop */ }
+
+  return {
+    ok: true,
+    message: String(result),
+    registeredType: "enemy_template",
+    registeredKey: registeredKey
+  };
+}
+
+function registerPortalEnemySkill(payload, outputText, application) {
+  var utterance = outputText && /^!에너미스킬등록\b/.test(outputText)
+    ? outputText
+    : _portalBuildEnemySkillUtterance(payload);
+
+  if (!utterance) {
+    return { ok: false, error: "에너미 스킬 등록 명령어를 만들 수 없습니다." };
+  }
+
+  var result;
+  try {
+    result = enemySkillRegister(utterance, "aporia-portal");
+  } catch (err) {
+    return { ok: false, error: "[등록 예외] " + (err && err.message ? err.message : String(err)) };
+  }
+
+  if (_portalLooksLikeFailure(result)) {
+    return { ok: false, error: String(result) };
+  }
+
+  var registeredKey = String((payload && payload.skill_key) || "");
+  try {
+    Logger.log("[portal webhook] enemy_skill registered key=" + registeredKey);
+  } catch (_) { /* noop */ }
+
+  return {
+    ok: true,
+    message: String(result),
+    registeredType: "enemy_skill",
+    registeredKey: registeredKey
+  };
+}
+
+// payload → !에너미템플릿등록 utterance 재구성 (output_text 누락 시 안전망)
+function _portalBuildEnemyTemplateUtterance(p) {
+  if (!p) return "";
+  var parts = ["!에너미템플릿등록"];
+  parts.push("key:" + String(p.template_key || ""));
+  parts.push("이름:" + String(p.name || ""));
+  if (p.category !== undefined) parts.push("분류:" + String(p.category || ""));
+  if (p.threat   !== undefined) parts.push("위험도:" + String(p.threat || ""));
+  parts.push("체력:" + String(p.max_hp != null ? p.max_hp : ""));
+  var actions = (p.actions && typeof p.actions === "object") ? p.actions : {};
+  ENEMY_ACTION_FIELDS.forEach(function(a) {
+    var v = actions[a];
+    if (v !== undefined && v !== null && v !== "") parts.push(a + ":" + String(v));
+  });
+  if (p.rule)  parts.push("규칙:" + String(p.rule));
+  if (p.signs) parts.push("징후:" + String(p.signs));
+  if (p.memo)  parts.push("메모:" + String(p.memo));
+  return parts.join(" ");
+}
+
+// payload → !에너미스킬등록 utterance 재구성 (output_text 누락 시 안전망)
+function _portalBuildEnemySkillUtterance(p) {
+  if (!p) return "";
+  var parts = ["!에너미스킬등록"];
+  parts.push("key:" + String(p.skill_key || ""));
+  if (p.owner_type) parts.push("소유:" + String(p.owner_type));
+  if (p.owner_key)  parts.push("소유키:" + String(p.owner_key));
+  parts.push("이름:" + String(p.name || ""));
+  parts.push("계열:" + String(p.category || ""));
+  parts.push("랭크:" + String(p.rank || ""));
+  parts.push("계산식:" + String(p.formula || ""));
+  if (p.effect)      parts.push("효과:" + String(p.effect));
+  if (p.target_mode) parts.push("대상:" + String(p.target_mode));
+  if (p.memo)        parts.push("메모:" + String(p.memo));
+  return parts.join(" ");
+}
+
+// ── End of Aporia Portal Webhook ─────────────────────────────────────
