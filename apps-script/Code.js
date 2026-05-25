@@ -1,0 +1,6958 @@
+const SHEET_BOT_DB = "BOT_DB";
+const SHEET_STAT_SCALE = "STAT_SCALE";
+const SHEET_ACTION_COMPONENTS = "ACTION_COMPONENTS";
+const SHEET_RANK_SCALE = "RANK_SCALE";
+const SHEET_SKILL_PENDING = "SKILL_PENDING";
+const SHEET_SKILL_DB = "SKILL_DB";
+const SHEET_CHAR_PENDING = "CHAR_PENDING";
+const SHEET_LEVEL_TABLE = "LEVEL_TABLE";
+const SHEET_SKILL_COST = "SKILL_COST";
+const SHEET_ANCHOR_DB = "ANCHOR_DB";
+const SHEET_COMBAT_PENDING = "COMBAT_PENDING";
+const SHEET_STATUS_DB = "STATUS_DB";
+const SHEET_STACK_DB = "STACK_DB";
+const SHEET_STATUS_TEMPLATE = "STATUS_TEMPLATE";
+
+const SHEET_ENEMY_TEMPLATES = "ENEMY_TEMPLATES";
+const SHEET_ENEMIES = "ENEMIES";
+const ENEMY_ACTION_FIELDS = [
+  "참격", "관통", "타격", "격투", "사격",
+  "방어", "회피", "저항",
+  "조사", "해석", "은신", "추적", "설득"
+];
+
+const ATTACK_SKILL_TYPES = ["화력"];
+
+const ACTION_DICE_STEP = 5;
+const ACTION_DICE_SIDES = 6;
+
+const DEFAULT_DIFFICULTY = 15;
+const GREAT_RESULT_MARGIN = 10;
+const MAX_EROSION = 10;
+
+const DAMAGE_ACTIONS = [
+  "참격",
+  "관통",
+  "타격",
+  "격투",
+  "사격"
+];
+
+const STAT_FIELDS = ["근력", "민첩", "내구", "감각", "지능"];
+
+const FEATURE_FIELDS = [
+  "무기술",
+  "격투술",
+  "사격술",
+  "기동술",
+  "방어술",
+  "인내",
+  "관찰",
+  "추적술",
+  "은밀행동",
+  "지식",
+  "이면학",
+  "화술"
+];
+
+const PROF_FIELDS = [
+  "참격숙련",
+  "관통숙련",
+  "타격숙련",
+  "격투숙련",
+  "사격숙련",
+  "회피숙련",
+  "방어숙련",
+  "저항숙련",
+  "조사숙련",
+  "해석숙련",
+  "은신숙련",
+  "추적숙련",
+  "설득숙련"
+];
+
+const STAT_ORDER = ["F", "E", "D", "C", "B", "A", "S"];
+
+const STAT_COST = {
+  F: 0,
+  E: 1,
+  D: 3,
+  C: 7,
+  B: 13,
+  A: 25,
+  S: 45
+};
+
+const FEATURE_COST = {
+  0: 0,
+  1: 2,
+  2: 5,
+  3: 10,
+  4: 18,
+  5: 30
+};
+
+const PROF_COST = {
+  0: 0,
+  1: 3,
+  2: 8,
+  3: 14,
+  4: 24,
+  5: 38
+};
+
+const MAX_FEATURE = 5;
+const MAX_PROF = 5;
+
+const FALLBACK_SKILL_COST = {
+  EX: 100,
+  U: 80,
+  S: 70,
+  A: 50,
+  B: 40,
+  C: 30,
+  D: 20,
+  E: 10,
+  F: 1
+};
+
+function doGet(e) {
+  try {
+    const q = e.parameter.q || "";
+    const name = e.parameter.name || "";
+
+    const result = handleCommand(q, name);
+
+    return jsonResponse({ text: result });
+  } catch (err) {
+    return jsonResponse({
+      text:
+        "[Apps Script 오류]\n" +
+        "오류명: " + err.name + "\n" +
+        "메시지: " + err.message + "\n\n" +
+        "스택:\n" + (err.stack || "스택 정보 없음")
+    });
+  }
+}
+
+function jsonResponse(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function handleCommand(utterance, displayName) {
+  utterance = String(utterance || "").trim();
+  displayName = String(displayName || "").trim();
+
+  if (!utterance) return "명령어가 비어 있습니다.";
+
+  const parts = utterance.split(/\s+/);
+  const command = parts[0];
+
+  if (command === "!내정보") return showMyInfo(displayName);
+  if (command === "!판정") return statCheck(parts, displayName);
+  if (command === "!액션") return actionCheck(parts, displayName);
+
+  if (command === "!화력") return powerCheck(parts, "화력", displayName);
+  if (command === "!방호") return powerCheck(parts, "방호", displayName);
+  if (command === "!치유") return powerCheck(parts, "치유", displayName);
+  if (command === "!재생") return powerCheck(parts, "재생", displayName);
+  if (command === "!간섭") return powerCheck(parts, "간섭", displayName);
+  if (command === "!강화") return powerCheck(parts, "강화", displayName);
+
+  if (command === "!스킬신청") return skillSubmit(utterance, displayName);
+  if (command === "!스킬승인") return skillApprove(parts, displayName);
+  if (command === "!스킬반려") return skillReject(parts, displayName, utterance);
+  if (command === "!스킬목록") return skillList(displayName);
+  if (command === "!스킬") return skillUse(parts, displayName);
+
+  if (command === "!캐릭터신청") return characterSubmit(utterance, displayName);
+  if (command === "!캐릭터승인") return characterApprove(parts, displayName);
+  if (command === "!캐릭터반려") return characterReject(parts, displayName, utterance);
+
+  if (command === "!수정") return characterModify(parts, displayName);
+  if (command === "!성장") return characterGrow(parts, displayName);
+
+  if (command === "!관계등록") return anchorRegister(utterance, displayName);
+  if (command === "!관계수정") return anchorModify(parts, displayName);
+  if (command === "!관계목록") return anchorList(parts, displayName);
+
+  if (command === "!일상점사용") return dailyPointUse(parts, displayName);
+  if (command === "!일상점회복") return dailyPointRecover(parts, displayName);
+
+  if (command === "!침식") return erosionModify(parts, displayName);
+  if (command === "!피해") return damageApply(parts, displayName);
+  if (command === "!대응") return combatResponse(parts, displayName);
+
+  if (command === "!상태목록") return statusListCommand(parts, displayName);
+  if (command === "!상태부여") return statusAddCommand(parts, displayName);
+  if (command === "!상태해제") return statusRemoveCommand(parts, displayName);
+
+  if (command === "!스택목록") return stackListCommand(parts, displayName);
+  if (command === "!스택") return stackModifyCommand(parts, displayName);
+
+  if (command === "!상태템플릿목록") return statusTemplateListCommand(parts, displayName);
+  if (command === "!상태템플릿보기") return statusTemplateShowCommand(parts, displayName);
+  if (command === "!상태템플릿부여") return statusTemplateApplyCommand(parts, displayName);
+
+  if (command === "!에너미불러오기") return enemyLoad(parts, displayName, utterance);
+  if (command === "!에너미목록")     return enemyList(displayName);
+  if (command === "!에너미정보")     return enemyInfo(parts, displayName);
+  if (command === "!에너미삭제")     return enemyDelete(parts, displayName);
+  if (command === "!에너미피해")     return enemyDamage(parts, displayName);
+  if (command === "!에너미회복")     return enemyHeal(parts, displayName);
+  if (command === "!에너미별명")     return enemyRename(parts, displayName);
+  if (command === "!에너미공격")     return enemyAttack(parts, displayName, utterance);
+  if (command === "!에너미대응")     return enemyRespond(parts, displayName);
+
+  const dynamicName = command.replace(/^!/, "").trim();
+  
+  if (dynamicName) {
+    if (STAT_FIELDS.includes(dynamicName)) {
+      return statCheck(["!판정", dynamicName].concat(parts.slice(1)), displayName);
+    }
+  
+    const actionRows = getSheetData(SHEET_ACTION_COMPONENTS)
+      .filter(r => String(r["action"]).trim() === dynamicName);
+  
+    if (actionRows.length > 0) {
+      return actionCheck(["!액션", dynamicName].concat(parts.slice(1)), displayName);
+    }
+  }
+
+  return (
+    "알 수 없는 명령어입니다.\n\n" +
+    "사용 가능 명령어:\n" +
+    "!내정보\n" +
+    "!판정 스탯명 [난이도] [보정]\n" +
+    "!스탯명 [난이도] [보정]\n" +
+    "!액션 액션명 [난이도] [보정]\n" +
+    "!액션명 [난이도] [보정]\n" +
+    "!화력 랭크\n" +
+    "!방호 랭크\n" +
+    "!치유 랭크\n" +
+    "!재생 랭크\n" +
+    "!간섭 랭크\n" +
+    "!강화 랭크\n" +
+    "!스킬신청\n" +
+    "!스킬승인 신청번호\n" +
+    "!스킬반려 신청번호 사유\n" +
+    "!스킬목록\n" +
+    "!스킬 스킬명\n" +
+    "!캐릭터신청\n" +
+    "!캐릭터승인 신청번호\n" +
+    "!캐릭터반려 신청번호 사유\n" +
+    "!수정 캐릭터별명 항목 변경값\n" +
+    "!성장 캐릭터별명 항목\n" +
+    "!관계등록\n" +
+    "!관계수정\n" +
+    "!관계목록\n" +
+    "!일상점사용\n" +
+    "!일상점회복\n" +
+    "!관계등록\n" +
+    "!침식\n" +
+    "!피해 캐릭터별명 수치\n" +
+    "!대응 방어 [보정]\n" +
+    "!대응 회피 [보정]\n" +
+    "!대응 맞대응 액션명 [보정]\n" +
+    "!대응 맞대응 화력 랭크 [보정]\n" +
+    "!대응 맞대응 스킬 스킬명 [보정]\n" +
+    "!대응 무대응\n"
+  );
+}
+
+function getSheetData(sheetName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    throw new Error("시트를 찾을 수 없습니다: " + sheetName);
+  }
+
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return [];
+
+  const headers = values[0].map(h => String(h).trim());
+
+  return values.slice(1).map(row => {
+    const obj = {};
+    headers.forEach((header, index) => {
+      obj[header] = row[index];
+    });
+    return obj;
+  });
+}
+
+function getSheetHeaders(sheetName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    throw new Error("시트를 찾을 수 없습니다: " + sheetName);
+  }
+
+  return sheet.getRange(1, 1, 1, sheet.getLastColumn())
+    .getValues()[0]
+    .map(h => String(h).trim());
+}
+
+function findCharacter(displayName) {
+  const characters = getSheetData(SHEET_BOT_DB);
+
+  return characters.find(c => {
+    return String(c["별명"]).trim() === String(displayName).trim();
+  }) || null;
+}
+
+function findCharacterByAlias(alias) {
+  const rows = getSheetData(SHEET_BOT_DB);
+
+  return rows.find(r => {
+    return String(r["별명"]).trim() === String(alias).trim();
+  }) || null;
+}
+
+function findCharacterRowByAlias(alias) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_BOT_DB);
+
+  if (!sheet) {
+    throw new Error("시트를 찾을 수 없습니다: " + SHEET_BOT_DB);
+  }
+
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return null;
+
+  const headers = values[0].map(h => String(h).trim());
+  const aliasIndex = headers.indexOf("별명");
+
+  if (aliasIndex < 0) {
+    throw new Error("BOT_DB에 별명 열이 없습니다.");
+  }
+
+  for (let r = 1; r < values.length; r++) {
+    if (String(values[r][aliasIndex]).trim() === String(alias).trim()) {
+      const obj = {};
+      headers.forEach((h, i) => {
+        obj[h] = values[r][i];
+      });
+
+      return {
+        sheet: sheet,
+        rowIndex: r + 1,
+        headers: headers,
+        character: obj
+      };
+    }
+  }
+
+  return null;
+}
+
+function rereadCharacterRow(alias) {
+  SpreadsheetApp.flush();
+  return findCharacterRowByAlias(alias);
+}
+
+function parseStatMap(text) {
+  const map = {};
+
+  text = String(text || "")
+    .replace(/\u200B/g, "")
+    .replace(/[，、;]/g, ",")
+    .trim();
+
+  if (!text) return map;
+
+  const parts = text.split(/[,\n]/);
+
+  parts.forEach(part => {
+    part = String(part || "").trim();
+    if (!part) return;
+
+    const match = part.match(/^(.+?)\s*[:：=]\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if (!match) return;
+
+    const key = String(match[1]).trim();
+    const value = Number(match[2]);
+
+    if (key) {
+      map[key] = isNaN(value) ? 0 : value;
+    }
+  });
+
+  return map;
+}
+
+function getScaleValue(sheetName, keyColumn, valueColumn, key) {
+  const rows = getSheetData(sheetName);
+  const target = String(key).trim().toUpperCase();
+
+  const found = rows.find(r => {
+    return String(r[keyColumn]).trim().toUpperCase() === target;
+  });
+
+  if (!found) {
+    throw new Error("변환표에서 값을 찾을 수 없습니다: " + key);
+  }
+
+  return Number(found[valueColumn]);
+}
+
+function statToValue(statGrade) {
+  if (typeof statGrade === "number") return statGrade;
+
+  const key = String(statGrade).trim().toUpperCase();
+  return getScaleValue(SHEET_STAT_SCALE, "grade", "value", key);
+}
+
+function rankToValue(rank) {
+  const key = String(rank).trim().toUpperCase();
+  return getScaleValue(SHEET_RANK_SCALE, "rank", "value", key);
+}
+
+function getLevelTableRows() {
+  return getSheetData(SHEET_LEVEL_TABLE).map(r => ({
+    level: Number(r["레벨"]),
+    exp: Number(r["필요경험치"]),
+    budget: Number(r["성장예산"])
+  })).filter(r => !isNaN(r.level) && !isNaN(r.exp) && !isNaN(r.budget));
+}
+
+function getLevelFromExp(exp) {
+  exp = Number(exp || 0);
+  const rows = getLevelTableRows().sort((a, b) => a.exp - b.exp);
+
+  let result = rows.length > 0 ? rows[0].level : 1;
+
+  rows.forEach(r => {
+    if (exp >= r.exp) {
+      result = r.level;
+    }
+  });
+
+  return result;
+}
+
+function getBudgetFromLevel(level) {
+  level = Number(level || 1);
+  const rows = getLevelTableRows().sort((a, b) => a.level - b.level);
+
+  let result = rows.length > 0 ? rows[0].budget : 70;
+
+  rows.forEach(r => {
+    if (level >= r.level) {
+      result = r.budget;
+    }
+  });
+
+  return result;
+}
+
+function readCharacterLevel(character) {
+  const sheetLevel = Number(character["레벨"]);
+  if (!isNaN(sheetLevel) && sheetLevel > 0) return sheetLevel;
+
+  return getLevelFromExp(Number(character["경험치"] || 0));
+}
+
+function readCharacterBudget(character) {
+  const sheetBudget = Number(character["성장예산"]);
+  if (!isNaN(sheetBudget) && sheetBudget > 0) return sheetBudget;
+
+  const level = readCharacterLevel(character);
+  return getBudgetFromLevel(level);
+}
+
+function getDirectNumber(character, name) {
+  name = String(name || "").trim();
+
+  if (!(name in character)) {
+    return null;
+  }
+
+  const raw = character[name];
+
+  if (raw === "" || raw === null || raw === undefined) {
+    return 0;
+  }
+
+  const value = Number(String(raw).replace(/\s/g, ""));
+
+  if (isNaN(value)) {
+    return null;
+  }
+
+  return value;
+}
+
+function getCostFromTable(table, value) {
+  value = Number(value || 0);
+
+  if (!Number.isInteger(value)) {
+    throw new Error("비용표 값은 정수여야 합니다: " + value);
+  }
+
+  if (value < 0) {
+    throw new Error("비용표 값은 0 미만일 수 없습니다: " + value);
+  }
+
+  if (table[value] !== undefined) {
+    return Number(table[value]);
+  }
+
+  throw new Error("비용표에 없는 값입니다: " + value);
+}
+
+function getStatCost(grade) {
+  const g = String(grade || "E").trim().toUpperCase();
+  return Number(STAT_COST[g] || 0);
+}
+
+function getSkillCostByRank(rank) {
+  const key = String(rank || "").trim().toUpperCase();
+
+  try {
+    const rows = getSheetData(SHEET_SKILL_COST);
+
+    const found = rows.find(r => {
+      return String(r["rank"]).trim().toUpperCase() === key;
+    });
+
+    if (found) {
+      const cost = Number(found["cost"]);
+      if (!isNaN(cost)) {
+        return cost;
+      }
+    }
+  } catch (e) {
+    // SKILL_COST 시트가 없거나 깨졌을 때 fallback 사용
+  }
+
+  return Number(FALLBACK_SKILL_COST[key] || 0);
+}
+
+function calculateCharacterUsedPoints(character) {
+  let total = 0;
+
+  STAT_FIELDS.forEach(field => {
+    total += getStatCost(character[field]);
+  });
+
+  FEATURE_FIELDS.forEach(field => {
+    const value = Number(character[field] || 0);
+    total += getCostFromTable(FEATURE_COST, value);
+  });
+
+  PROF_FIELDS.forEach(field => {
+    const value = Number(character[field] || 0);
+    total += getCostFromTable(PROF_COST, value);
+  });
+
+  const alias = String(character["별명"] || "").trim();
+  const skills = getSheetData(SHEET_SKILL_DB)
+    .filter(r => String(r["소유자"]).trim() === alias);
+
+  skills.forEach(skill => {
+    total += getSkillCostByRank(skill["랭크"]);
+  });
+
+  return Math.floor(total);
+}
+
+function calculateGrowthCostDelta(character, field) {
+  const beforeUsed = calculateCharacterUsedPoints(character);
+  const nextCharacter = Object.assign({}, character);
+
+  if (STAT_FIELDS.includes(field)) {
+    const current = String(character[field] || "E").trim().toUpperCase();
+    const idx = STAT_ORDER.indexOf(current);
+
+    if (idx < 0) {
+      throw new Error("현재 스탯 등급이 올바르지 않습니다: " + current);
+    }
+
+    if (idx >= STAT_ORDER.length - 1) {
+      throw new Error(field + "은 이미 최대 등급입니다: " + current);
+    }
+
+    nextCharacter[field] = STAT_ORDER[idx + 1];
+
+  } else if (FEATURE_FIELDS.includes(field)) {
+    const current = Number(character[field] || 0);
+
+    if (!Number.isInteger(current)) {
+      throw new Error(field + " 값이 정수가 아닙니다: " + current);
+    }
+
+    if (current >= MAX_FEATURE) {
+      throw new Error(field + "은 이미 최대치입니다: " + MAX_FEATURE);
+    }
+
+    nextCharacter[field] = current + 1;
+
+  } else if (PROF_FIELDS.includes(field)) {
+    const current = Number(character[field] || 0);
+
+    if (!Number.isInteger(current)) {
+      throw new Error(field + " 값이 정수가 아닙니다: " + current);
+    }
+
+    if (current >= MAX_PROF) {
+      throw new Error(field + "은 이미 최대치입니다: " + MAX_PROF);
+    }
+
+    nextCharacter[field] = current + 1;
+
+  } else {
+    throw new Error("성장 가능한 항목이 아닙니다: " + field);
+  }
+
+  const afterUsed = calculateCharacterUsedPoints(nextCharacter);
+
+  return {
+    oldValue: character[field],
+    newValue: nextCharacter[field],
+    beforeUsed: beforeUsed,
+    afterUsed: afterUsed,
+    need: afterUsed - beforeUsed
+  };
+}
+
+function refreshCharacterBudget(alias) {
+  let rowInfo = rereadCharacterRow(alias);
+
+  if (!rowInfo) {
+    return null;
+  }
+
+  const budget = readCharacterBudget(rowInfo.character);
+  const used = calculateCharacterUsedPoints(rowInfo.character);
+  const remain = budget - used;
+
+  setCellByHeader(rowInfo, "사용점수", used);
+  setCellByHeader(rowInfo, "남은점수", remain);
+
+  rowInfo = rereadCharacterRow(alias);
+
+  return {
+    rowInfo: rowInfo,
+    budget: budget,
+    used: used,
+    remain: remain
+  };
+}
+
+function getHealthInfo(character) {
+  const maxHp = Number(character["최대체력"]);
+  const currentHp = Number(character["현재체력"]);
+
+  return {
+    maxHp: isNaN(maxHp) ? 0 : Math.floor(maxHp),
+    currentHp: isNaN(currentHp) ? 0 : Math.floor(currentHp)
+  };
+}
+
+function setCellByHeader(rowInfo, headerName, value) {
+  const columnIndex = rowInfo.headers.indexOf(headerName);
+  if (columnIndex < 0) return false;
+
+  rowInfo.sheet.getRange(rowInfo.rowIndex, columnIndex + 1).setValue(value);
+  rowInfo.character[headerName] = value;
+  return true;
+}
+
+function clampHp(value, maxHp) {
+  const v = Math.floor(Number(value));
+  const m = Math.floor(Number(maxHp));
+
+  if (isNaN(v)) return 0;
+  if (isNaN(m) || m <= 0) return Math.max(0, v);
+
+  return Math.max(0, Math.min(v, m));
+}
+
+function applyHealingToCharacter(alias, healAmount) {
+  const rowInfo = findCharacterRowByAlias(alias);
+
+  if (!rowInfo) {
+    return {
+      ok: false,
+      text: "체력 회복 적용 실패: 캐릭터를 찾을 수 없습니다."
+    };
+  }
+
+  if (!rowInfo.headers.includes("최대체력") || !rowInfo.headers.includes("현재체력")) {
+    return {
+      ok: false,
+      text: "체력 회복 적용 실패: BOT_DB에 최대체력/현재체력 열이 없습니다."
+    };
+  }
+
+  SpreadsheetApp.flush();
+  const fresh = findCharacterRowByAlias(alias);
+  const hp = getHealthInfo(fresh.character);
+
+  if (hp.maxHp <= 0) {
+    return {
+      ok: false,
+      text: "체력 회복 적용 실패: 최대체력 값이 비어 있거나 0입니다."
+    };
+  }
+
+  const heal = Math.max(0, Math.floor(Number(healAmount) || 0));
+
+  const before = hp.currentHp;
+  const after = clampHp(before + heal, hp.maxHp);
+
+  setCellByHeader(fresh, "현재체력", after);
+
+  return {
+    ok: true,
+    before: before,
+    after: after,
+    maxHp: hp.maxHp,
+    heal: heal,
+    text:
+      "[체력 회복]\n" +
+      "대상: " + alias + "\n" +
+      "회복량: " + heal + "\n" +
+      "현재체력: " + before + " → " + after + " / " + hp.maxHp
+  };
+}
+
+function processPreDamageStatuses(alias, damageAmount) {
+  let damage = Math.max(0, Math.floor(Number(damageAmount) || 0));
+  const logs = [];
+
+  const rows = getActiveStatusRows(alias);
+
+  rows.forEach(status => {
+    const code = String(status["효과코드"] || "").trim();
+    const name = String(status["상태명"] || "").trim();
+    const trigger = String(status["발동타이밍"] || "").trim();
+
+    const isVulnerable =
+      code === "vulnerable" ||
+      code === "취약" ||
+      name === "취약";
+
+    if (!isVulnerable) return;
+    if (trigger && trigger !== "피해직전" && trigger !== "전체") return;
+
+    const value = Math.max(0, Math.floor(Number(status["수치"] || 0)));
+    if (value <= 0) return;
+
+    const before = damage;
+    damage += value;
+
+    logs.push(
+      "[상태 발동: 취약]\n" +
+      "피해 증가: +" + value + "\n" +
+      "피해: " + before + " → " + damage
+    );
+
+    consumeStatusCount(status);
+  });
+
+  rows.forEach(status => {
+    if (damage <= 0) return;
+
+    const code = String(status["효과코드"] || "").trim();
+    const name = String(status["상태명"] || "").trim();
+    const trigger = String(status["발동타이밍"] || "").trim();
+
+    const isShield =
+      code === "shield" ||
+      code === "barrier" ||
+      code === "보호막" ||
+      name === "보호막";
+
+    if (!isShield) return;
+    if (trigger && trigger !== "피해직전" && trigger !== "전체") return;
+
+    const shieldValue = Math.max(0, Math.floor(Number(status["수치"] || 0)));
+    if (shieldValue <= 0) return;
+
+    const absorb = Math.min(shieldValue, damage);
+    const remainShield = shieldValue - absorb;
+    const before = damage;
+
+    damage -= absorb;
+
+    if (remainShield <= 0) {
+      updateRowById(SHEET_STATUS_DB, "id", status["id"], {
+        상태: "EXPIRED",
+        수치: 0,
+        처리일: getNowText(),
+        메모: "보호막 소진"
+      });
+    } else {
+      updateRowById(SHEET_STATUS_DB, "id", status["id"], {
+        수치: remainShield,
+        메모: "보호막 피해 흡수"
+      });
+    }
+
+    logs.push(
+      "[상태 발동: 보호막]\n" +
+      "흡수량: " + absorb + "\n" +
+      "피해: " + before + " → " + damage + "\n" +
+      "보호막: " + shieldValue + " → " + remainShield
+    );
+  });
+
+  return {
+    damage: damage,
+    text: logs.join("\n\n")
+  };
+}
+
+function applyDamageToCharacter(alias, damageAmount) {
+  const rowInfo = findCharacterRowByAlias(alias);
+
+  if (!rowInfo) {
+    return {
+      ok: false,
+      text: "피해 적용 실패: 캐릭터를 찾을 수 없습니다: " + alias
+    };
+  }
+
+  if (!rowInfo.headers.includes("최대체력") || !rowInfo.headers.includes("현재체력")) {
+    return {
+      ok: false,
+      text: "피해 적용 실패: BOT_DB에 최대체력/현재체력 열이 없습니다."
+    };
+  }
+
+  SpreadsheetApp.flush();
+
+  const fresh = findCharacterRowByAlias(alias);
+  const hp = getHealthInfo(fresh.character);
+
+  const originalDamage = Math.max(0, Math.floor(Number(damageAmount) || 0));
+  const preDamage = processPreDamageStatuses(alias, originalDamage);
+  const damage = Math.max(0, Math.floor(Number(preDamage.damage) || 0));
+
+  const before = hp.currentHp;
+  const after = Math.max(0, before - damage);
+
+  setCellByHeader(fresh, "현재체력", after);
+
+  let downText = "";
+
+  if (after <= 0 && before > 0) {
+    downText =
+      "\n\n[전투불능]\n" +
+      alias + "의 현재체력이 0이 되었습니다.\n" +
+      "기절, 중상, 행동 불능, 포획 등은 장면 맥락에 따라 처리하세요.";
+  }
+
+  const modifierText = preDamage.text
+    ? "\n\n" + preDamage.text
+    : "";
+
+  return {
+    ok: true,
+    before: before,
+    after: after,
+    maxHp: hp.maxHp,
+    originalDamage: originalDamage,
+    damage: damage,
+    modifierText: preDamage.text,
+    text:
+      "[피해 적용]\n" +
+      "대상: " + alias + "\n" +
+      "기본피해: " + originalDamage + "\n" +
+      "최종피해: " + damage + "\n" +
+      "현재체력: " + before + " → " + after + " / " + hp.maxHp +
+      modifierText +
+      downText
+  };
+}
+
+function damageApply(parts, displayName) {
+  if (parts.length < 3) {
+    return (
+      "사용법: !피해 캐릭터별명 수치\n" +
+      "예시: !피해 월하륜 13"
+    );
+  }
+
+  const alias = parts[1];
+  const amount = parts[2];
+
+  return applyDamageToCharacter(alias, amount).text;
+}
+
+function rollDie(sides) {
+  return Math.floor(Math.random() * sides) + 1;
+}
+
+function rollDice(count, sides) {
+  const rolls = [];
+
+  for (let i = 0; i < count; i++) {
+    rolls.push(rollDie(sides));
+  }
+
+  return rolls;
+}
+
+function expandDiceNotationInFormula(expr) {
+  const diceLogs = [];
+
+  expr = String(expr || "");
+
+  const replaced = expr.replace(
+    /(^|[^가-힣A-Za-z0-9_])(\d*)[dD](\d+)(?![가-힣A-Za-z0-9_])/g,
+    function(full, prefix, countText, sidesText) {
+      const count = countText ? Number(countText) : 1;
+      const sides = Number(sidesText);
+
+      if (!Number.isInteger(count) || count < 1 || count > 100) {
+        throw new Error("다이스 개수가 올바르지 않습니다: " + full.trim());
+      }
+
+      if (!Number.isInteger(sides) || sides < 2 || sides > 1000) {
+        throw new Error("다이스 면수가 올바르지 않습니다: " + full.trim());
+      }
+
+      const rolls = rollDice(count, sides);
+      const sum = rolls.reduce((a, b) => a + b, 0);
+
+      const label = (countText || "1") + "d" + sides;
+      diceLogs.push(label + " [" + rolls.join(", ") + "] = " + sum);
+
+      return prefix + String(sum);
+    }
+  );
+
+  return {
+    expression: replaced,
+    diceLogs: diceLogs
+  };
+}
+
+function formatDiceLogs(diceLogs) {
+  if (!diceLogs || diceLogs.length === 0) {
+    return "없음";
+  }
+
+  return diceLogs.join("\n");
+}
+
+function applyMods(value, mods) {
+  let result = Number(value);
+
+  mods.forEach(mod => {
+    mod = String(mod).trim();
+    if (!mod) return;
+
+    if (mod.startsWith("+")) {
+      result += Number(mod.slice(1));
+    } else if (mod.startsWith("-")) {
+      result -= Number(mod.slice(1));
+    } else if (mod.startsWith("*") || mod.startsWith("×") || mod.startsWith("x")) {
+      result *= Number(mod.slice(1));
+    }
+  });
+
+  return Math.floor(result);
+}
+
+function parseTargetAndMods(tokens) {
+  const mods = [];
+  let target = "";
+
+  tokens.forEach(token => {
+    token = String(token || "").trim();
+    if (!token) return;
+
+    if (token.startsWith("대상:") || token.startsWith("대상=")) {
+      target = token.replace(/^대상[:=]/, "").trim();
+      return;
+    }
+
+    mods.push(token);
+  });
+
+  return {
+    target: target,
+    mods: mods
+  };
+}
+
+function statCheck(parts, displayName) {
+  if (parts.length < 2) {
+    return "사용법: !판정 스탯명 [난이도] [보정]\n예시: !판정 민첩 20 +2\n단축: !민첩 20 +2";
+  }
+
+  const character = findCharacter(displayName);
+
+  if (!character) {
+    return (
+      "캐릭터를 찾을 수 없습니다.\n" +
+      "디스코드 별명: " + displayName + "\n" +
+      "BOT_DB의 별명 열과 디스코드 서버 별명이 같은지 확인하세요."
+    );
+  }
+
+  const alias = String(character["별명"]).trim();
+
+  const statusResult = processStatusBeforeCheck(alias, "스탯");
+
+  if (statusResult.blocked) {
+    return statusResult.text;
+  }
+
+  const statName = parts[1];
+
+  if (!(statName in character)) {
+    return "존재하지 않는 스탯입니다: " + statName;
+  }
+
+  const parsed = parseDifficultyAndMods(parts.slice(2));
+  const difficulty = parsed.difficulty;
+  const mods = parsed.mods;
+
+  const statGrade = character[statName];
+  const statValue = statToValue(statGrade);
+  const dice = rollDie(20);
+
+  const base = dice + statValue;
+
+  let finalValue;
+  let statusMod = {
+   value: 0,
+   delta: 0,
+   text: "",
+   before: 0,
+   after: 0
+  };
+
+  try {
+   finalValue = applyMods(base, mods);
+   statusMod = applyStatusModifierToValue(alias, finalValue, ["스탯", statName]);
+   finalValue = statusMod.value;
+  } catch (e) {
+    return (
+      "[스탯 판정 오류]\n" +
+      character["이름"] + " - " + statName + "\n\n" +
+      "보정 처리 중 오류가 발생했습니다.\n\n" +
+      "오류: " + e.message
+    );
+  }
+
+  const judged = getDifficultyResultText(finalValue, difficulty);
+
+  const statusPrefix = statusResult.text
+    ? statusResult.text + "\n\n"
+    : "";
+
+  const summary =
+    statusPrefix +
+    "[스탯 판정]\n" +
+    character["이름"] + " - " + statName + "\n\n" +
+    (statusMod.text ? "\n상태보정: " + formatSigned(statusMod.delta) + "\n" : "") +
+    "최종값: " + finalValue + "\n" +
+    "난이도: " + difficulty + "\n" +
+    "차이: " + formatSigned(judged.diff) + "\n" +
+    judged.text;
+
+  const detail =
+    statusPrefix +
+    "[스탯 판정 상세]\n" +
+    character["이름"] + " - " + statName + "\n\n" +
+    "난수: " + dice + "\n" +
+    statName + " " + statGrade + "(" + statValue + ")\n" +
+    "기본값: " + base + "\n" +
+    "보정: " + (mods.join(" ") || "없음") + "\n\n" +
+    (statusMod.text ? "\n상태보정: " + formatSigned(statusMod.delta) + "\n" : "") +
+    (statusMod.text ? "\n\n" + statusMod.text + "\n" : "") +
+    "최종값: " + finalValue + "\n" +
+    "난이도: " + difficulty + "\n" +
+    "차이: " + formatSigned(judged.diff) + "\n" +
+    judged.text;
+
+  return makeFoldedResponse(summary, detail);
+}
+
+function getComponentValue(character, component) {
+  const type = String(component["type"]).trim();
+  const name = String(component["name"]).trim();
+
+  if (type === "stat") {
+    if (!(name in character)) {
+      throw new Error("캐릭터에 해당 스탯이 없습니다: " + name);
+    }
+
+    return statToValue(character[name]);
+  }
+
+  if (type === "feature" || type === "prof") {
+    const directValue = getDirectNumber(character, name);
+
+    if (directValue !== null) {
+      return directValue;
+    }
+
+    if (type === "feature") {
+      const features = parseStatMap(character["기능"]);
+      return Number(features[name] || 0);
+    }
+
+    if (type === "prof") {
+      const profs = parseStatMap(character["숙련"]);
+      return Number(profs[name] || 0);
+    }
+  }
+
+  throw new Error("알 수 없는 component type: " + type);
+}
+
+function rollActionValueForCharacter(character, actionName, mods) {
+  mods = mods || [];
+
+  const components = getSheetData(SHEET_ACTION_COMPONENTS)
+    .filter(r => String(r["action"]).trim() === String(actionName).trim());
+
+  if (components.length === 0) {
+    throw new Error("존재하지 않는 액션입니다: " + actionName);
+  }
+
+  let baseTotal = 0;
+  let factorBonus = 0;
+  const detailLines = [];
+
+  components.forEach(c => {
+    const part = String(c["part"]).trim();
+    const name = String(c["name"]).trim();
+    const coef = Number(c["coef"]);
+
+    const value = getComponentValue(character, c);
+    const contribution = value * coef;
+
+    if (part === "base") {
+      baseTotal += contribution;
+      detailLines.push(
+        "[기초] " + name + "(" + value + ") × " + coef + " = " + round2(contribution)
+      );
+    } else if (part === "factor") {
+      factorBonus += contribution;
+      detailLines.push(
+        "[배율] " + name + "(" + value + ") × " + coef + " = " + round2(contribution)
+      );
+    }
+  });
+
+  const factor = 1 + factorBonus;
+  const rawCoef = baseTotal * factor;
+  const moddedCoef = applyMods(rawCoef, mods);
+  const finalCoef = Math.max(0, moddedCoef);
+
+  const diceCount = Math.max(1, Math.ceil(finalCoef / ACTION_DICE_STEP));
+  const rolls = rollDice(diceCount, ACTION_DICE_SIDES);
+  let sum = rolls.reduce((a, b) => a + b, 0);
+
+  const alias = String(character["별명"] || "").trim();
+  const statusMod = applyStatusModifierToValue(alias, sum, ["액션", actionName, "대응"]);
+  sum = statusMod.value;
+
+  return {
+    actionName: actionName,
+    baseTotal: baseTotal,
+    factorBonus: factorBonus,
+    factor: factor,
+    rawCoef: rawCoef,
+    finalCoef: finalCoef,
+    diceCount: diceCount,
+    rolls: rolls,
+    sum: sum,
+    statusMod: statusMod,
+    detailLines: detailLines
+  };
+}
+
+function actionCheck(parts, displayName) {
+  if (parts.length < 2) {
+    return "사용법: !액션 액션명 [난이도] [보정]\n예시: !액션 은신 18 +2\n단축: !은신 18 +2";
+  }
+
+  const character = findCharacter(displayName);
+
+  if (!character) {
+    return (
+      "캐릭터를 찾을 수 없습니다.\n" +
+      "디스코드 별명: " + displayName + "\n" +
+      "BOT_DB의 별명 열과 디스코드 서버 별명이 같은지 확인하세요."
+    );
+  }
+
+  const alias = String(character["별명"]).trim();
+
+  const statusResult = processStatusBeforeCheck(alias, "액션");
+
+  if (statusResult.blocked) {
+    return statusResult.text;
+  }
+
+  const actionName = parts[1];
+  const isDamage = isDamageAction(actionName);
+
+  const targetParsed = parseTargetAndMods(parts.slice(2));
+
+  const parsed = isDamage
+    ? { difficulty: null, mods: targetParsed.mods, target: targetParsed.target }
+    : parseDifficultyAndMods(parts.slice(2));
+
+  const difficulty = parsed.difficulty;
+  const mods = parsed.mods;
+
+  const components = getSheetData(SHEET_ACTION_COMPONENTS)
+    .filter(r => String(r["action"]).trim() === String(actionName).trim());
+
+  if (components.length === 0) {
+    return "존재하지 않는 액션입니다: " + actionName;
+  }
+
+  let baseTotal = 0;
+  let factorBonus = 0;
+  const detailLines = [];
+
+  components.forEach(c => {
+    const part = String(c["part"]).trim();
+    const name = String(c["name"]).trim();
+    const coef = Number(c["coef"]);
+
+    const value = getComponentValue(character, c);
+    const contribution = value * coef;
+
+    if (part === "base") {
+      baseTotal += contribution;
+      detailLines.push(
+        "[기초] " + name + "(" + value + ") × " + coef + " = " + round2(contribution)
+      );
+    } else if (part === "factor") {
+      factorBonus += contribution;
+      detailLines.push(
+        "[배율] " + name + "(" + value + ") × " + coef + " = " + round2(contribution)
+      );
+    }
+  });
+
+  const factor = 1 + factorBonus;
+  const rawCoef = baseTotal * factor;
+
+  let moddedCoef;
+
+  try {
+    moddedCoef = applyMods(rawCoef, mods);
+  } catch (e) {
+    return (
+      "[액션 판정 오류]\n" +
+      character["이름"] + " - " + actionName + "\n\n" +
+      "보정 처리 중 오류가 발생했습니다.\n\n" +
+      "오류: " + e.message
+    );
+  }
+
+  const finalCoef = Math.max(0, moddedCoef);
+
+  const diceCount = Math.max(1, Math.ceil(finalCoef / ACTION_DICE_STEP));
+  const rolls = rollDice(diceCount, ACTION_DICE_SIDES);
+  let sum = rolls.reduce((a, b) => a + b, 0);
+
+  const statusMod = applyStatusModifierToValue(alias, sum, ["액션", actionName]);
+  sum = statusMod.value;
+
+  let combatText = "";
+
+  if (isDamage && parsed.target) {
+    const attackerAlias = alias;
+
+    const pending = createPendingAttackFlex(
+      attackerAlias,
+      parsed.target,
+      "액션",
+      actionName,
+      sum
+    );
+
+    if (pending.ok) {
+      combatText = "\n\n" + makeCombatChoiceTextFlex(pending);
+    } else {
+      combatText = "\n\n" + pending.text;
+    }
+  }
+
+  const judged = isDamage ? null : getDifficultyResultText(sum, difficulty);
+
+  const judgeSummary = judged
+    ? "\n난이도: " + difficulty +
+      "\n차이: " + formatSigned(judged.diff) +
+      "\n" + judged.text
+    : "";
+
+  const statusPrefix = statusResult.text
+    ? statusResult.text + "\n\n"
+    : "";
+
+  const summary =
+    statusPrefix +
+    "[액션 판정]\n" +
+    character["이름"] + " - " + actionName + "\n\n" +
+    "최종 계수: " + finalCoef + "\n" +
+    "주사위: " + diceCount + "d" + ACTION_DICE_SIDES + "\n" +
+    "합계: " + sum +
+    judgeSummary +
+    combatText;
+
+  const detail =
+    statusPrefix +
+    "[액션 판정 상세]\n" +
+    character["이름"] + " - " + actionName + "\n\n" +
+    detailLines.join("\n") + "\n\n" +
+    "기초부 합계: " + round2(baseTotal) + "\n" +
+    "배율부: 1 + " + round2(factorBonus) + " = " + round2(factor) + "\n" +
+    "계수값: " + round2(rawCoef) + "\n" +
+    "보정: " + (mods.join(" ") || "없음") + "\n" +
+    "최종 계수: " + finalCoef + "\n\n" +
+    "주사위: " + diceCount + "d" + ACTION_DICE_SIDES + "\n" +
+    "결과: " + rolls.join(", ") + "\n" +
+    "합계: " + sum +
+    judgeSummary +
+    combatText;
+
+  return makeFoldedResponse(summary, detail);
+}
+
+function powerCheck(parts, type, displayName) {
+  if (parts.length < 2) {
+    return "사용법: !" + type + " 랭크\n예시: !" + type + " A +2";
+  }
+
+  const character = findCharacter(displayName);
+
+  if (!character) {
+    return (
+      "캐릭터를 찾을 수 없습니다.\n" +
+      "디스코드 별명: " + displayName
+    );
+  }
+
+  const alias = String(character["별명"]).trim();
+
+  const statusResult = processStatusBeforeCheck(alias, "이능");
+
+  if (statusResult.blocked) {
+    return statusResult.text;
+  }
+
+  const rank = String(parts[1]).trim().toUpperCase();
+  const targetParsed = parseTargetAndMods(parts.slice(2));
+  const mods = targetParsed.mods;
+  const targetAlias = targetParsed.target;
+
+  let rankValue;
+
+  try {
+    rankValue = rankToValue(rank);
+  } catch (e) {
+    return "존재하지 않는 랭크입니다: " + rank;
+  }
+
+  const dice = rollDie(20);
+
+  let base = dice + rankValue;
+  let typeBonusText = "";
+
+  if (type === "방호") {
+    base += 3;
+    typeBonusText = "방호 보정: +3\n";
+  }
+  let finalValue;
+  let statusMod = {
+   value: 0,
+   delta: 0,
+   text: "",
+   before: 0,
+   after: 0
+  };
+
+  try {
+   finalValue = applyMods(base, mods);
+   statusMod = applyStatusModifierToValue(alias, finalValue, ["이능", type]);
+   finalValue = statusMod.value;
+  } catch (e) {
+    return (
+      "[" + type + " 판정 오류]\n" +
+      "보정 처리 중 오류가 발생했습니다.\n\n" +
+      "오류: " + e.message
+    );
+  }
+
+  const resultText = getSkillResultText(type, finalValue);
+
+  let healingText = "";
+
+  if (type === "치유" || type === "재생") {
+    const healTarget = targetAlias || alias;
+    const healResult = applyHealingToCharacter(healTarget, finalValue);
+    healingText = "\n\n" + healResult.text;
+  }
+
+  let combatText = "";
+
+  if (type === "화력" && targetAlias) {
+    const pending = createPendingAttackFlex(
+      alias,
+      targetAlias,
+      "이능",
+      "화력 " + rank,
+      finalValue
+    );
+
+    if (pending.ok) {
+      combatText = "\n\n" + makeCombatChoiceTextFlex(pending);
+    } else {
+      combatText = "\n\n" + pending.text;
+    }
+  }
+
+  const statusPrefix = statusResult.text
+    ? statusResult.text + "\n\n"
+    : "";
+
+  const summary =
+    statusPrefix +
+    "[" + type + " 판정]\n\n" +
+    "사용자: " + alias + "\n" +
+    "랭크: " + rank + "(" + rankValue + ")\n" +
+    "최종값: " + finalValue + "\n" +
+    resultText +
+    healingText +
+    combatText;
+
+  const detail =
+    statusPrefix +
+    "[" + type + " 판정 상세]\n\n" +
+    "사용자: " + alias + "\n" +
+    "난수: " + dice + "\n" +
+    "랭크: " + rank + "(" + rankValue + ")\n" +
+    typeBonusText +
+    (statusMod.text ? "\n\n" + statusMod.text + "\n" : "") +
+    "기본값: " + base + "\n" +
+    "보정: " + (mods.join(" ") || "없음") + "\n\n" +
+    "최종값: " + finalValue + "\n" +
+    resultText +
+    healingText +
+    combatText;
+
+  return makeFoldedResponse(summary, detail);
+}
+
+function showMyInfo(displayName) {
+  const character = findCharacter(displayName);
+
+  if (!character) {
+    return (
+      "캐릭터를 찾을 수 없습니다.\n" +
+      "디스코드 별명: " + displayName + "\n" +
+      "BOT_DB의 별명 열과 디스코드 서버 별명이 같은지 확인하세요."
+    );
+  }
+
+  const alias = String(character["별명"]).trim();
+  refreshCharacterBudget(alias);
+
+  const fresh = findCharacter(alias) || character;
+
+  const name = fresh["이름"] || "이름 없음";
+  const race = fresh["종족"] || "종족 미상";
+  const level = fresh["레벨"] || readCharacterLevel(fresh);
+  const exp = fresh["경험치"] || 0;
+
+  const maxHp = fresh["최대체력"] || 0;
+  const currentHp = fresh["현재체력"] || 0;
+
+  const budget = fresh["성장예산"] || readCharacterBudget(fresh);
+  const used = fresh["사용점수"] || calculateCharacterUsedPoints(fresh);
+  const remain = fresh["남은점수"] || (Number(budget) - Number(used));
+
+  const daily = fresh["일상점"] || 0;
+  const erosion = fresh["이면침식"] || 0;
+
+  const statBlock =
+    "근력 " + safeValue(fresh["근력"]) + "　" +
+    "민첩 " + safeValue(fresh["민첩"]) + "　" +
+    "내구 " + safeValue(fresh["내구"]) + "\n" +
+    "감각 " + safeValue(fresh["감각"]) + "　" +
+    "지능 " + safeValue(fresh["지능"]);
+
+  const featureBlock = makeGroupedLines([
+    ["무기술", fresh["무기술"]],
+    ["격투술", fresh["격투술"]],
+    ["사격술", fresh["사격술"]],
+    ["기동술", fresh["기동술"]],
+    ["방어술", fresh["방어술"]],
+    ["인내", fresh["인내"]],
+    ["관찰", fresh["관찰"]],
+    ["추적술", fresh["추적술"]],
+    ["은밀행동", fresh["은밀행동"]],
+    ["지식", fresh["지식"]],
+    ["이면학", fresh["이면학"]],
+    ["화술", fresh["화술"]]
+  ], 3);
+
+  const profBlock = makeGroupedLines([
+    ["참격", fresh["참격숙련"]],
+    ["관통", fresh["관통숙련"]],
+    ["타격", fresh["타격숙련"]],
+    ["격투", fresh["격투숙련"]],
+    ["사격", fresh["사격숙련"]],
+    ["회피", fresh["회피숙련"]],
+    ["방어", fresh["방어숙련"]],
+    ["저항", fresh["저항숙련"]],
+    ["조사", fresh["조사숙련"]],
+    ["해석", fresh["해석숙련"]],
+    ["은신", fresh["은신숙련"]],
+    ["추적", fresh["추적숙련"]],
+    ["설득", fresh["설득숙련"]]
+  ], 3);
+
+  const hpBar = makeGaugeBar(Number(currentHp), Number(maxHp), 10);
+  const erosionBar = makeGaugeBar(Number(erosion), 10, 10);
+
+  return (
+    "╔═══ 〔 CHARACTER STATUS 〕 ═══╗\n" +
+    name + "\n" +
+    race + " / Lv." + level + "\n\n" +
+    "HP  " + currentHp + " / " + maxHp + "  " + hpBar + "\n" +
+    "EXP " + exp + "\n" +
+    "성장예산 " + budget + "\n" +
+    "사용점수 " + used + "\n" +
+    "남은점수 " + remain + "\n" +
+    "╚════════════════════════════╝\n\n" +
+
+    "【기초 스탯】\n" +
+    statBlock + "\n\n" +
+
+    "【기능】\n" +
+    featureBlock + "\n\n" +
+
+    "【숙련】\n" +
+    profBlock + "\n\n" +
+
+    "【이면 상태】\n" +
+    "일상점: " + daily + " / " + safeValue(fresh["최대일상점"]) + "\n" +
+    "사용일상점: " + safeValue(fresh["사용일상점"]) + "\n" +
+    "이면침식: " + erosion + " / 10 " + erosionBar
+  );
+}
+
+function parseFormBlock(utterance) {
+  const lines = String(utterance || "").split(/\n/).slice(1);
+  const data = {};
+  let currentKey = "";
+
+  lines.forEach(rawLine => {
+    const line = String(rawLine || "").trim();
+
+    if (!line) {
+      return;
+    }
+
+    // "이름:", "계통:", "효과:" 같은 양식 헤더만 새 항목으로 인식한다.
+    // 핵심: 공백이 들어간 긴 줄의 "수치:0", "확률:30" 같은 옵션은 새 항목으로 보지 않는다.
+    const match = line.match(/^([가-힣A-Za-z0-9_]+)\s*[:：]\s*(.*)$/);
+
+    if (match) {
+      currentKey = match[1].trim();
+      data[currentKey] = match[2].trim();
+      return;
+    }
+
+    // 현재 항목이 있으면 이어붙인다.
+    // 예: 효과: 다음 줄의 상태부여 명령들
+    if (currentKey) {
+      if (data[currentKey]) {
+        data[currentKey] += "\n" + line;
+      } else {
+        data[currentKey] = line;
+      }
+    }
+  });
+
+  return data;
+}
+
+function getNowText() {
+  return Utilities.formatDate(new Date(), "Asia/Seoul", "yyyy-MM-dd HH:mm:ss");
+}
+
+function makeId(prefix, sheetName) {
+  const rows = getSheetData(sheetName);
+  const num = rows.length + 1;
+  return prefix + "-" + String(num).padStart(4, "0");
+}
+
+function appendRowByHeaders(sheetName, obj) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    throw new Error("시트를 찾을 수 없습니다: " + sheetName);
+  }
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn())
+    .getValues()[0]
+    .map(h => String(h).trim());
+
+  const row = headers.map(h => obj[h] !== undefined ? obj[h] : "");
+  sheet.appendRow(row);
+}
+
+function makeAttackId() {
+  return makeId("ATK", SHEET_COMBAT_PENDING);
+}
+
+function createPendingAttack(attackerAlias, targetAlias, attackKind, attackName, attackValue) {
+  const target = findCharacterByAlias(targetAlias);
+
+  if (!target) {
+    return {
+      ok: false,
+      text: "대상 캐릭터를 찾을 수 없습니다: " + targetAlias
+    };
+  }
+
+  const id = makeAttackId();
+  const now = getNowText();
+
+  appendRowByHeaders(SHEET_COMBAT_PENDING, {
+    id: id,
+    상태: "PENDING",
+    공격자: attackerAlias,
+    대상: targetAlias,
+    공격종류: attackKind,
+    공격명: attackName,
+    공격값: Math.floor(Number(attackValue) || 0),
+    생성일: now,
+    처리일: "",
+    대응종류: "",
+    대응값: "",
+    최종피해: "",
+    메모: ""
+  });
+
+  return {
+    ok: true,
+    id: id,
+    attacker: attackerAlias,
+    target: targetAlias,
+    attackKind: attackKind,
+    attackName: attackName,
+    attackValue: Math.floor(Number(attackValue) || 0)
+  };
+}
+
+function makeCombatChoiceText(attack) {
+  const id = attack.id || attack["id"] || "";
+  const attacker = attack.attacker || attack["공격자"] || "";
+  const target = attack.target || attack["대상"] || "";
+  const attackName = attack.attackName || attack["공격명"] || "";
+  const attackValue = attack.attackValue || attack["공격값"] || "";
+
+  return (
+    "[대응 대기]\n" +
+    "공격번호: " + id + "\n" +
+    "공격자: " + attacker + "\n" +
+    "대상: " + target + "\n\n" +
+    "공격: " + attackName + "\n" +
+    "공격값: " + attackValue + "\n\n" +
+    "대응: !대응 방어/회피/맞대응/무대응\n" +
+    "지정 대응: !대응 " + id + " 방어/회피/맞대응/무대응"
+  );
+}
+
+function findPendingAttackById(id) {
+  const rows = getSheetData(SHEET_COMBAT_PENDING);
+
+  return rows.find(r => {
+    return (
+      String(r["id"]).trim() === String(id).trim() &&
+      String(r["상태"]).trim() === "PENDING"
+    );
+  }) || null;
+}
+
+function findLatestPendingAttackForTarget(targetAlias) {
+  const rows = getSheetData(SHEET_COMBAT_PENDING);
+
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+
+    if (
+      String(r["상태"]).trim() === "PENDING" &&
+      String(r["대상"]).trim() === String(targetAlias).trim()
+    ) {
+      return r;
+    }
+  }
+
+  return null;
+}
+
+function resolvePendingAttack(id, updates) {
+  updates = Object.assign({}, updates, {
+    상태: "RESOLVED",
+    처리일: getNowText()
+  });
+
+  return updateRowById(SHEET_COMBAT_PENDING, "id", id, updates);
+}
+
+function updateRowById(sheetName, idColumn, idValue, updates) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    throw new Error("시트를 찾을 수 없습니다: " + sheetName);
+  }
+
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(h => String(h).trim());
+
+  const idIndex = headers.indexOf(idColumn);
+  if (idIndex < 0) throw new Error("id 열을 찾을 수 없습니다: " + idColumn);
+
+  for (let r = 1; r < values.length; r++) {
+    if (String(values[r][idIndex]).trim() === String(idValue).trim()) {
+      Object.keys(updates).forEach(key => {
+        const c = headers.indexOf(key);
+        if (c >= 0) {
+          sheet.getRange(r + 1, c + 1).setValue(updates[key]);
+        }
+      });
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function makeSkillId() {
+  return makeId("SK", SHEET_SKILL_PENDING);
+}
+
+function findPendingSkill(id) {
+  const rows = getSheetData(SHEET_SKILL_PENDING);
+
+  return rows.find(r => {
+    return String(r["id"]).trim() === String(id).trim();
+  }) || null;
+}
+
+function findApprovedSkill(owner, skillName) {
+  const rows = getSheetData(SHEET_SKILL_DB);
+
+  return rows.find(r => {
+    return (
+      String(r["소유자"]).trim() === String(owner).trim() &&
+      String(r["스킬명"]).trim() === String(skillName).trim()
+    );
+  }) || null;
+}
+
+function validateSkillData(data) {
+  const required = ["이름", "계통", "계열", "랭크", "계산식", "조건", "대가", "설명"];
+
+  for (const key of required) {
+    if (!data[key]) {
+      return "누락된 항목이 있습니다: " + key;
+    }
+  }
+
+  const allowedSystems = ["마술", "주술", "신성", "마법", "혈계", "요력", "특수"];
+  const allowedTypes = ["화력", "방호", "치유", "재생", "간섭", "강화", "특수"];
+
+  if (!allowedSystems.includes(data["계통"])) {
+    return "허용되지 않은 계통입니다: " + data["계통"];
+  }
+
+  if (!allowedTypes.includes(data["계열"])) {
+    return "허용되지 않은 계열입니다: " + data["계열"];
+  }
+
+  try {
+    rankToValue(data["랭크"]);
+  } catch (e) {
+    return "허용되지 않은 랭크입니다: " + data["랭크"];
+  }
+
+  return "";
+}
+
+function skillSubmit(utterance, displayName) {
+  const character = findCharacter(displayName);
+
+  if (!character) {
+    return (
+      "캐릭터를 찾을 수 없습니다.\n" +
+      "디스코드 별명: " + displayName + "\n" +
+      "BOT_DB의 별명 열을 확인하세요.\n\n" +
+      "캐릭터가 아직 없다면 먼저 !캐릭터신청 을 사용하세요."
+    );
+  }
+
+  const data = parseFormBlock(utterance);
+  const error = validateSkillData(data);
+
+  if (error) {
+    return (
+      "[스킬 신청 실패]\n" +
+      error + "\n\n" +
+      "양식:\n" +
+      "!스킬신청\n" +
+      "이름:\n" +
+      "계통:\n" +
+      "계열:\n" +
+      "랭크:\n" +
+      "계산식:\n" +
+      "효과:\n" +
+      "조건:\n" +
+      "대가:\n" +
+      "설명:"
+    );
+  }
+
+  const id = makeSkillId();
+  const now = getNowText();
+  const effectText = data["효과"] || "";
+
+  appendRowByHeaders(SHEET_SKILL_PENDING, {
+    id: id,
+    상태: "PENDING",
+    신청자: character["별명"],
+    스킬명: data["이름"],
+    계통: data["계통"],
+    계열: data["계열"],
+    랭크: data["랭크"],
+    계산식: data["계산식"],
+    효과: effectText,
+    조건: data["조건"],
+    대가: data["대가"],
+    설명: data["설명"],
+    신청일: now,
+    처리자: "",
+    처리메모: ""
+  });
+
+  const effectPreview = effectText
+    ? "\n효과:\n" + effectText + "\n"
+    : "\n효과: 없음\n";
+
+  return (
+    "[스킬 신청 접수]\n" +
+    "신청번호: " + id + "\n" +
+    "신청자: " + character["별명"] + "\n" +
+    "스킬명: " + data["이름"] + "\n" +
+    "계통: " + data["계통"] + "\n" +
+    "계열: " + data["계열"] + "\n" +
+    "랭크: " + data["랭크"] + "\n" +
+    "필요예산: " + getSkillCostByRank(data["랭크"]) + "\n" +
+    effectPreview + "\n" +
+    "상태: 승인 대기\n\n" +
+    "GM 승인:\n" +
+    "!스킬승인 " + id + "\n\n" +
+    "GM 반려:\n" +
+    "!스킬반려 " + id + " 사유"
+  );
+}
+
+function skillApprove(parts, displayName) {
+  if (parts.length < 2) {
+    return "사용법: !스킬승인 신청번호\n예시: !스킬승인 SK-0001";
+  }
+
+  const id = parts[1];
+  const pending = findPendingSkill(id);
+
+  if (!pending) {
+    return "신청번호를 찾을 수 없습니다: " + id;
+  }
+
+  if (String(pending["상태"]).trim() !== "PENDING") {
+    return "이미 처리된 신청입니다: " + id + "\n현재 상태: " + pending["상태"];
+  }
+
+  const owner = String(pending["신청자"]).trim();
+  const ownerRow = findCharacterRowByAlias(owner);
+
+  if (!ownerRow) {
+    return "스킬 소유자 캐릭터를 찾을 수 없습니다: " + owner;
+  }
+
+  const budgetInfo = refreshCharacterBudget(owner);
+  const skillCost = getSkillCostByRank(pending["랭크"]);
+  const afterUsed = budgetInfo.used + skillCost;
+
+  if (afterUsed > budgetInfo.budget) {
+    return (
+      "[스킬 승인 실패]\n" +
+      "성장예산을 초과합니다.\n\n" +
+      "소유자: " + owner + "\n" +
+      "스킬명: " + pending["스킬명"] + "\n" +
+      "랭크: " + pending["랭크"] + "\n\n" +
+      "현재 성장예산: " + budgetInfo.budget + "\n" +
+      "현재 사용점수: " + budgetInfo.used + "\n" +
+      "남은점수: " + budgetInfo.remain + "\n" +
+      "스킬 필요점수: " + skillCost + "\n\n" +
+      "부족한 성장예산: " + (afterUsed - budgetInfo.budget) + "\n\n" +
+      "필요한 자원:\n" +
+      "- 경험치를 올려 레벨업\n" +
+      "- 낮은 랭크 스킬로 재신청\n" +
+      "- 다른 성장 항목을 낮춰 사용점수 확보"
+    );
+  }
+
+  const duplicate = findApprovedSkill(owner, pending["스킬명"]);
+
+  if (duplicate) {
+    return (
+      "[스킬 승인 실패]\n" +
+      "이미 같은 이름의 스킬이 등록되어 있습니다.\n" +
+      "소유자: " + owner + "\n" +
+      "스킬명: " + pending["스킬명"]
+    );
+  }
+
+  const now = getNowText();
+  const effectText = pending["효과"] || "";
+
+  appendRowByHeaders(SHEET_SKILL_DB, {
+    소유자: pending["신청자"],
+    스킬명: pending["스킬명"],
+    계통: pending["계통"],
+    계열: pending["계열"],
+    랭크: pending["랭크"],
+    계산식: pending["계산식"],
+    효과: effectText,
+    조건: pending["조건"],
+    대가: pending["대가"],
+    설명: pending["설명"],
+    승인자: displayName,
+    승인일: now
+  });
+
+  updateRowById(SHEET_SKILL_PENDING, "id", id, {
+    상태: "APPROVED",
+    처리자: displayName,
+    처리메모: "승인됨"
+  });
+
+  const refreshed = refreshCharacterBudget(owner);
+
+  const effectPreview = effectText
+    ? "\n효과:\n" + effectText + "\n"
+    : "\n효과: 없음\n";
+
+  return (
+    "[스킬 승인 완료]\n" +
+    "신청번호: " + id + "\n" +
+    "소유자: " + pending["신청자"] + "\n" +
+    "스킬명: " + pending["스킬명"] + "\n" +
+    "스킬 필요점수: " + skillCost + "\n" +
+    effectPreview + "\n" +
+    "현재 성장예산: " + refreshed.budget + "\n" +
+    "변경 후 사용점수: " + refreshed.used + "\n" +
+    "남은점수: " + refreshed.remain + "\n\n" +
+    "SKILL_DB에 등록되었습니다."
+  );
+}
+
+function skillReject(parts, displayName, utterance) {
+  if (parts.length < 2) {
+    return "사용법: !스킬반려 신청번호 사유";
+  }
+
+  const id = parts[1];
+  const reason = String(utterance).split(/\s+/).slice(2).join(" ") || "사유 없음";
+
+  const pending = findPendingSkill(id);
+
+  if (!pending) {
+    return "신청번호를 찾을 수 없습니다: " + id;
+  }
+
+  if (String(pending["상태"]).trim() !== "PENDING") {
+    return "이미 처리된 신청입니다: " + id + "\n현재 상태: " + pending["상태"];
+  }
+
+  updateRowById(SHEET_SKILL_PENDING, "id", id, {
+    상태: "REJECTED",
+    처리자: displayName,
+    처리메모: reason
+  });
+
+  return (
+    "[스킬 반려]\n" +
+    "신청번호: " + id + "\n" +
+    "스킬명: " + pending["스킬명"] + "\n\n" +
+    "사유:\n" + reason
+  );
+}
+
+function skillList(displayName) {
+  const character = findCharacter(displayName);
+
+  if (!character) {
+    return (
+      "캐릭터를 찾을 수 없습니다.\n" +
+      "디스코드 별명: " + displayName
+    );
+  }
+
+  const alias = String(character["별명"]).trim();
+  const rows = getSheetData(SHEET_SKILL_DB)
+    .filter(r => String(r["소유자"]).trim() === alias);
+
+  if (rows.length === 0) {
+    return "[스킬 목록]\n" + alias + "에게 등록된 스킬이 없습니다.";
+  }
+
+  const lines = rows.map(r => {
+    return "- " + r["스킬명"] + " / " + r["계통"] + " / " + r["계열"] + " " + r["랭크"] + " / 비용 " + getSkillCostByRank(r["랭크"]);
+  });
+
+  return (
+    "[스킬 목록]\n" +
+    alias + "\n\n" +
+    lines.join("\n")
+  );
+}
+
+function buildFormulaVariables(character, rankValue, targetAlias) {
+  const vars = {};
+
+  vars["랭크"] = rankValue;
+
+  const metaNames = [
+    "별명",
+    "이름",
+    "종족",
+    "기능",
+    "숙련"
+  ];
+
+  STAT_FIELDS.forEach(name => {
+    vars[name] = statToValue(character[name]);
+  });
+
+  Object.keys(character).forEach(key => {
+    key = String(key || "").trim();
+
+    if (!key) return;
+    if (STAT_FIELDS.includes(key)) return;
+    if (metaNames.includes(key)) return;
+
+    const value = getDirectNumber(character, key);
+
+    if (value !== null) {
+      vars[key] = value;
+    }
+  });
+
+  const features = parseStatMap(character["기능"]);
+  const profs = parseStatMap(character["숙련"]);
+
+  Object.keys(features).forEach(k => {
+    vars[k] = Number(features[k] || 0);
+  });
+
+  Object.keys(profs).forEach(k => {
+    vars[k] = Number(profs[k] || 0);
+  });
+
+  const selfAlias = String(character["별명"] || "").trim();
+
+  injectStackVariables(vars, selfAlias, "");
+  injectStatusVariables(vars, selfAlias, "");
+
+  if (targetAlias) {
+   injectStackVariables(vars, targetAlias, "대상");
+   injectStatusVariables(vars, targetAlias, "대상");
+  }
+
+  return vars;
+}
+
+function escapeRegExp(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function safeEvalFormula(formula, variables) {
+  let expr = String(formula || "")
+    .replace(/\u200B/g, "")
+    .replace(/[×＊]/g, "*")
+    .replace(/＋/g, "+")
+    .replace(/－/g, "-")
+    .replace(/[／÷]/g, "/");
+
+  const diceExpanded = expandDiceNotationInFormula(expr);
+  expr = diceExpanded.expression;
+
+  const keys = Object.keys(variables).sort((a, b) => b.length - a.length);
+
+  keys.forEach(key => {
+    const value = Number(variables[key] || 0);
+    const re = new RegExp(escapeRegExp(key), "g");
+    expr = expr.replace(re, String(value));
+  });
+
+  // 존재하지 않는 상태/스택 참조는 0으로 처리
+  expr = expr.replace(/대상상태_[가-힣A-Za-z0-9_]+_(수치|개수|최대|존재|확률)/g, "0");
+  expr = expr.replace(/상태_[가-힣A-Za-z0-9_]+_(수치|개수|최대|존재|확률)/g, "0");
+  expr = expr.replace(/대상스택_[가-힣A-Za-z0-9_]+/g, "0");
+  expr = expr.replace(/스택_[가-힣A-Za-z0-9_]+/g, "0");
+
+  expr = expr.replace(/\)\s*\(/g, ")*(");
+  expr = expr.replace(/(\d)\s*\(/g, "$1*(");
+  expr = expr.replace(/\)\s*(\d)/g, ")*$1");
+
+  const leftoverWords = expr.match(/[가-힣A-Za-z_][가-힣A-Za-z0-9_]*/g);
+
+  if (leftoverWords && leftoverWords.length > 0) {
+    throw new Error(
+      "계산식에 DB에서 찾을 수 없는 변수가 있습니다: " +
+      Array.from(new Set(leftoverWords)).join(", ") +
+      "\n\n대입식:\n" +
+      expr
+    );
+  }
+
+  if (!/^[0-9+\-*/().\s]+$/.test(expr)) {
+    throw new Error("계산식에 허용되지 않은 문자가 있습니다:\n" + expr);
+  }
+
+  const result = Function('"use strict"; return (' + expr + ');')();
+
+  if (!Number.isFinite(result)) {
+    throw new Error("계산 결과가 유효하지 않습니다:\n" + expr);
+  }
+
+  return {
+    value: Math.floor(result),
+    expression: expr,
+    diceLogs: diceExpanded.diceLogs || []
+  };
+}
+
+function getSkillResultText(type, value) {
+  if (type === "화력") {
+    return "처리: 피해/공격 판정값으로 사용.";
+  }
+
+  if (type === "방호") {
+    return "처리: 상대 화력 또는 간섭에 대한 방호 판정값으로 사용.";
+  }
+
+  if (type === "치유") {
+    return "처리: 최종값만큼 현재체력 회복.";
+  }
+
+  if (type === "재생") {
+    return "처리: 최종값만큼 현재체력 회복.";
+  }
+
+  if (type === "간섭") {
+    if (value < 10) return "결과: 간섭 실패.";
+    if (value < 15) return "결과: 약한 간섭. 대상 저항 판정 권장.";
+    if (value < 20) return "결과: 표준 간섭. 대상 저항 판정 필요.";
+    if (value < 25) return "결과: 강한 간섭. 저항 실패 시 뚜렷한 제약 발생.";
+    if (value < 30) return "결과: 고강도 간섭. 저항 실패 시 전투 흐름을 바꿀 수 있음.";
+    return "결과: 초월적 간섭. GM 판정하에 장면급 효과 가능.";
+  }
+
+  if (type === "강화") {
+    if (value < 10) return "결과: 강화 실패.";
+    if (value < 15) return "결과: 다음 관련 판정 +1.";
+    if (value < 20) return "결과: 다음 관련 판정 +2.";
+    if (value < 25) return "결과: 다음 관련 판정 +3.";
+    if (value < 30) return "결과: 다음 관련 판정 +4.";
+    return "결과: 다음 관련 판정 +5 또는 장면 지속 강화.";
+  }
+
+  if (type === "특수") {
+    if (value >= 15) {
+      return "결과: 성공.\n처리: 특수 계열 효과는 GM이 스킬 설명과 상황에 따라 적용합니다.";
+    }
+
+    return "결과: 실패.\n처리: 특수 계열 효과는 발동하지 않거나 불완전하게 적용됩니다.";
+  }
+
+  return "";
+}
+
+function rollSkillValueForCharacter(character, skillName, mods, targetAlias) {
+  mods = mods || [];
+  targetAlias = targetAlias || "";
+
+  const alias = String(character["별명"]).trim();
+  const skill = findApprovedSkill(alias, skillName);
+
+  if (!skill) {
+    throw new Error(
+      "등록된 스킬을 찾을 수 없습니다.\n" +
+      "소유자: " + alias + "\n" +
+      "스킬명: " + skillName
+    );
+  }
+
+  const erosion = Number(character["이면침식"] || 0);
+
+  if (erosion >= MAX_EROSION) {
+    throw new Error(alias + "은/는 이미 로스트 상태입니다. 스킬을 사용할 수 없습니다.");
+  }
+
+  const rank = String(skill["랭크"]).trim().toUpperCase();
+  const rankValue = rankToValue(rank);
+
+  const variables = buildFormulaVariables(character, rankValue, targetAlias);
+  const calc = safeEvalFormula(skill["계산식"], variables);
+
+  let result = Math.floor(calc.value);
+
+  const erosionMultiplier = getErosionMultiplier(erosion);
+  const beforeErosionMultiplier = result;
+
+  result = Math.floor(result * erosionMultiplier);
+
+  let typeBonusText = "";
+  const type = String(skill["계열"]).trim();
+
+  if (type === "방호") {
+    result += 3;
+    typeBonusText = "방호 보정: +3";
+  }
+
+  let finalValue = applyMods(result, mods);
+
+  const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type, "대응"]);
+  finalValue = statusMod.value;
+
+  return {
+    skill: skill,
+    alias: alias,
+    skillName: skillName,
+    type: type,
+    rank: rank,
+    rankValue: rankValue,
+    diceLogs: calc.diceLogs || [],
+    expression: calc.expression,
+    baseValue: Math.floor(calc.value),
+    beforeErosionMultiplier: beforeErosionMultiplier,
+    erosion: erosion,
+    erosionMultiplier: erosionMultiplier,
+    typeBonusText: typeBonusText,
+    mods: mods,
+    statusMod: statusMod,
+    finalValue: finalValue
+  };
+}
+
+function skillUse(parts, displayName) {
+  if (parts.length < 2) {
+    return "사용법: !스킬 스킬명 [대상:캐릭터별명] [보정]\n예시: !스킬 월광참 대상:적A +2";
+  }
+
+  const skillName = parts[1];
+  const targetParsed = parseTargetAndMods(parts.slice(2));
+  const mods = targetParsed.mods;
+  const targetAlias = targetParsed.target;
+
+  const character = findCharacter(displayName);
+
+  if (!character) {
+    return (
+      "캐릭터를 찾을 수 없습니다.\n" +
+      "디스코드 별명: " + displayName
+    );
+  }
+
+  const alias = String(character["별명"]).trim();
+  const skill = findApprovedSkill(alias, skillName);
+
+  if (!skill) {
+    return (
+      "등록된 스킬을 찾을 수 없습니다.\n" +
+      "소유자: " + alias + "\n" +
+      "스킬명: " + skillName + "\n\n" +
+      "등록된 스킬 확인: !스킬목록"
+    );
+  }
+
+  const erosion = Number(character["이면침식"] || 0);
+  const erosionStage = getErosionStageText(erosion);
+
+  if (erosion >= MAX_EROSION) {
+    return (
+      "[로스트]\n" +
+      alias + "은/는 이미 경계를 넘어섰습니다.\n\n" +
+      "이면침식: " + erosion + " / " + MAX_EROSION + "\n" +
+      "상태: " + erosionStage + "\n\n" +
+      "이 캐릭터는 더 이상 플레이어 캐릭터로 사용할 수 없습니다."
+    );
+  }
+
+  const rank = String(skill["랭크"]).trim().toUpperCase();
+
+  let rankValue;
+
+  try {
+    rankValue = rankToValue(rank);
+  } catch (e) {
+    return (
+      "[스킬 오류]\n" +
+      skill["스킬명"] + "\n\n" +
+      "허용되지 않은 랭크입니다: " + rank
+    );
+  }
+
+  const statusResult = processStatusBeforeCheck(alias, "스킬");
+
+  if (statusResult.blocked) {
+    return statusResult.text;
+  }
+
+  const variables = buildFormulaVariables(character, rankValue, targetAlias);
+
+  let calc;
+
+  try {
+    calc = safeEvalFormula(skill["계산식"], variables);
+  } catch (e) {
+    return (
+      "[스킬 계산 오류]\n" +
+      skill["스킬명"] + "\n\n" +
+      "오류: " + e.message + "\n\n" +
+      "계산식:\n```" +
+      skill["계산식"] +
+      "```"
+    );
+  }
+
+  let result = Math.floor(calc.value);
+
+  const erosionMultiplier = getErosionMultiplier(erosion);
+  const beforeErosionMultiplier = result;
+
+  result = Math.floor(result * erosionMultiplier);
+
+  let typeBonusText = "";
+  const type = String(skill["계열"]).trim();
+
+  if (type === "방호") {
+    result += 3;
+    typeBonusText = "방호 보정: +3\n";
+  }
+
+  let finalValue;
+
+  try {
+    finalValue = applyMods(result, mods);
+    const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type]);
+    finalValue = statusMod.value;
+  } catch (e) {
+    return (
+      "[스킬 판정 오류]\n" +
+      skill["스킬명"] + "\n\n" +
+      "보정 처리 중 오류가 발생했습니다.\n\n" +
+      "오류: " + e.message
+    );
+  }
+
+  const resultText = getSkillResultText(type, finalValue);
+  const rawEffectText = String(skill["효과"] || "").trim();
+
+  let pendingId = "";
+  let healingDetailText = "";
+  let combatDetailText = "";
+  let interferenceDetailText = "";
+  let effectDetailText = "";
+  let effectSummary = summarizeSkillEffects(rawEffectText);
+
+  const isTargetedAttackSkill = ATTACK_SKILL_TYPES.includes(type) && targetAlias;
+  const isTargetedInterferenceSkill = type === "간섭" && targetAlias;
+
+  if (type === "치유" || type === "재생") {
+    const healTarget = targetAlias || alias;
+    const healResult = applyHealingToCharacter(healTarget, finalValue);
+
+    healingDetailText = "\n\n" + healResult.text;
+    effectSummary = rawEffectText ? effectSummary : "회복 적용";
+  }
+
+  if (isTargetedAttackSkill) {
+    const pending = createPendingAttackFlex(
+      alias,
+      targetAlias,
+      "스킬",
+      skill["스킬명"],
+      finalValue
+    );
+
+    if (pending.ok) {
+      pendingId = pending.id;
+      combatDetailText = "\n\n" + makeCombatChoiceTextFlex(pending);
+
+      if (rawEffectText) {
+        effectSummary = "맞게 될 시 " + summarizeSkillEffects(rawEffectText);
+
+        effectDetailText =
+          "\n\n[스킬 효과 대기]\n" +
+          "화력계 대상 지정 스킬의 효과는 즉시 발동하지 않습니다.\n" +
+          "대상의 대응 결과에 따라 처리됩니다.\n\n" +
+          "방어/회피 성공: 효과 무효\n" +
+          "방어/회피 실패: 효과 저항 판정\n" +
+          "무대응/맞대응 패배: 효과 저항 자동 실패";
+      } else {
+        effectSummary = "없음";
+      }
+    } else {
+      combatDetailText = "\n\n" + pending.text;
+      effectSummary = "공격 대기 생성 실패";
+    }
+
+  } else if (isTargetedInterferenceSkill) {
+    let resistance;
+
+    try {
+      resistance = rollResistanceForStatus(targetAlias, finalValue, []);
+    } catch (e) {
+      return (
+        "[간섭 저항 오류]\n" +
+        skill["스킬명"] + "\n\n" +
+        "오류: " + e.message
+      );
+    }
+
+    interferenceDetailText =
+      "\n\n[간섭 저항]\n" +
+      resistance.text + "\n\n" +
+      "결과: " + (resistance.success ? "간섭 무효" : "간섭 적중");
+
+    if (resistance.success) {
+      effectSummary = rawEffectText ? "저항 성공으로 무효" : "간섭 무효";
+      effectDetailText =
+        rawEffectText
+          ? "\n\n[스킬 효과 무효]\n대상이 간섭 저항에 성공하여 효과가 발동하지 않습니다."
+          : "";
+    } else {
+      try {
+        const processed = processSkillEffects(rawEffectText, {
+          userAlias: alias,
+          targetAlias: targetAlias,
+          finalValue: finalValue,
+          skillName: skill["스킬명"],
+          skill: skill,
+          resistanceMode: "none"
+        });
+
+        effectDetailText = processed;
+        effectSummary = processed ? "적용됨 / " + summarizeSkillEffects(rawEffectText) : "없음";
+      } catch (e) {
+        return (
+          "[간섭 효과 처리 오류]\n" +
+          skill["스킬명"] + "\n\n" +
+          "오류: " + e.message + "\n\n" +
+          "효과:\n```" +
+          rawEffectText +
+          "```"
+        );
+      }
+    }
+
+  } else {
+    try {
+      const processed = processSkillEffects(rawEffectText, {
+        userAlias: alias,
+        targetAlias: targetAlias,
+        finalValue: finalValue,
+        skillName: skill["스킬명"],
+        skill: skill,
+        resistanceMode: "normal"
+      });
+
+      effectDetailText = processed;
+      effectSummary = processed ? "처리됨 / " + summarizeSkillEffects(rawEffectText) : "없음";
+    } catch (e) {
+      return (
+        "[스킬 효과 처리 오류]\n" +
+        skill["스킬명"] + "\n\n" +
+        "오류: " + e.message + "\n\n" +
+        "효과:\n```" +
+        rawEffectText +
+        "```"
+      );
+    }
+  }
+
+  const diceText = formatDiceLogs(calc.diceLogs);
+
+  const summary =
+    formatSkillSummaryBlock(
+      skill,
+      alias,
+      targetAlias,
+      rank,
+      rankValue,
+      finalValue,
+      effectSummary,
+      pendingId
+    );
+
+  const detail =
+    (statusResult.text ? statusResult.text + "\n\n" : "") +
+    "[스킬 사용 상세]\n" +
+    alias + " - " + skill["스킬명"] + "\n\n" +
+    "계통: " + skill["계통"] + "\n" +
+    "계열: " + skill["계열"] + "\n" +
+    "랭크: " + rank + "(" + rankValue + ")\n" +
+    "필요예산: " + getSkillCostByRank(rank) + "\n\n" +
+    "조건:\n" + skill["조건"] + "\n\n" +
+    "대가:\n" + skill["대가"] + "\n\n" +
+    "설명:\n" + skill["설명"] + "\n\n" +
+    "주사위:\n" + diceText + "\n\n" +
+    "계산식:\n```" + skill["계산식"] + "```\n\n" +
+    "대입식:\n```" + calc.expression + "```\n" +
+    "계산 결과: " + Math.floor(calc.value) + "\n" +
+    "이면침식: " + erosion + " / " + MAX_EROSION + "\n" +
+    "침식단계: " + erosionStage + "\n" +
+    "침식배율: ×" + erosionMultiplier + "\n" +
+    "배율 적용 결과: " + beforeErosionMultiplier + " → " + result + "\n" +
+    typeBonusText +
+    "보정: " + (mods.join(" ") || "없음") + "\n\n" +
+    "최종값: " + finalValue + "\n" +
+    resultText +
+    healingDetailText +
+    combatDetailText +
+    interferenceDetailText +
+    effectDetailText;
+
+  return makeFoldedResponse(summary, detail);
+}
+
+function makeCharacterId() {
+  return makeId("CH", SHEET_CHAR_PENDING);
+}
+
+function findPendingCharacter(id) {
+  const rows = getSheetData(SHEET_CHAR_PENDING);
+
+  return rows.find(r => {
+    return String(r["id"]).trim() === String(id).trim();
+  }) || null;
+}
+
+function validateCharacterData(data) {
+  const required = [
+    "이름",
+    "종족",
+    "근력",
+    "민첩",
+    "내구",
+    "감각",
+    "지능"
+  ];
+
+  for (const key of required) {
+    if (!data[key]) {
+      return "누락된 항목이 있습니다: " + key;
+    }
+  }
+
+  const allowedRaces = ["인간", "마녀", "흡혈귀", "요괴"];
+
+  if (!allowedRaces.includes(data["종족"])) {
+    return "허용되지 않은 종족입니다: " + data["종족"];
+  }
+
+  const allowedStats = ["F", "E", "D", "C", "B", "A", "S"];
+
+  for (const key of STAT_FIELDS) {
+    const value = String(data[key]).trim().toUpperCase();
+
+    if (!allowedStats.includes(value)) {
+      return key + " 스탯이 올바르지 않습니다: " + data[key] + "\n허용: F, E, D, C, B, A, S";
+    }
+  }
+
+  for (const key of FEATURE_FIELDS) {
+    const raw = data[key];
+
+    if (raw === undefined || raw === null || raw === "") continue;
+
+    const value = Number(raw);
+
+    if (!Number.isInteger(value) || value < 0 || value > MAX_FEATURE) {
+      return key + " 기능 값이 올바르지 않습니다: " + raw + "\n허용: 0~" + MAX_FEATURE;
+    }
+  }
+
+  for (const key of PROF_FIELDS) {
+    const raw = data[key];
+
+    if (raw === undefined || raw === null || raw === "") continue;
+
+    const value = Number(raw);
+
+    if (!Number.isInteger(value) || value < 0 || value > MAX_PROF) {
+      return key + " 숙련 값이 올바르지 않습니다: " + raw + "\n허용: 0~" + MAX_PROF;
+    }
+  }
+
+  return "";
+}
+
+function getNumberField(data, key, defaultValue) {
+  if (data[key] === undefined || data[key] === null || data[key] === "") {
+    return defaultValue;
+  }
+
+  const value = Number(String(data[key]).trim());
+
+  if (isNaN(value)) {
+    return defaultValue;
+  }
+
+  return value;
+}
+
+function characterSubmit(utterance, displayName) {
+  const data = parseFormBlock(utterance);
+
+  const error = validateCharacterData(data);
+
+  if (error) {
+    return (
+      "[캐릭터 신청 실패]\n" +
+      error + "\n\n" +
+      "양식:\n" +
+      getCharacterFormText()
+    );
+  }
+
+  const alias = String(displayName).trim();
+
+  if (findCharacterByAlias(alias)) {
+    return (
+      "[캐릭터 신청 실패]\n" +
+      "이미 BOT_DB에 등록된 캐릭터가 있습니다.\n" +
+      "별명: " + alias
+    );
+  }
+
+  const id = makeCharacterId();
+  const now = getNowText();
+
+  const row = {
+    id: id,
+    상태: "PENDING",
+    신청자: alias,
+    별명: alias,
+    이름: data["이름"],
+    종족: data["종족"],
+
+    레벨: "",
+    경험치: getNumberField(data, "경험치", 0),
+    성장예산: "",
+    사용점수: "",
+    남은점수: "",
+
+    근력: String(data["근력"]).trim().toUpperCase(),
+    민첩: String(data["민첩"]).trim().toUpperCase(),
+    내구: String(data["내구"]).trim().toUpperCase(),
+    감각: String(data["감각"]).trim().toUpperCase(),
+    지능: String(data["지능"]).trim().toUpperCase(),
+
+    최대체력: "",
+    현재체력: "",
+
+    무기술: getNumberField(data, "무기술", 0),
+    격투술: getNumberField(data, "격투술", 0),
+    사격술: getNumberField(data, "사격술", 0),
+    기동술: getNumberField(data, "기동술", 0),
+    방어술: getNumberField(data, "방어술", 0),
+    인내: getNumberField(data, "인내", 0),
+    관찰: getNumberField(data, "관찰", 0),
+    추적술: getNumberField(data, "추적술", 0),
+    은밀행동: getNumberField(data, "은밀행동", 0),
+    지식: getNumberField(data, "지식", 0),
+    이면학: getNumberField(data, "이면학", 0),
+    화술: getNumberField(data, "화술", 0),
+
+    참격숙련: getNumberField(data, "참격숙련", 0),
+    관통숙련: getNumberField(data, "관통숙련", 0),
+    타격숙련: getNumberField(data, "타격숙련", 0),
+    격투숙련: getNumberField(data, "격투숙련", 0),
+    사격숙련: getNumberField(data, "사격숙련", 0),
+    회피숙련: getNumberField(data, "회피숙련", 0),
+    방어숙련: getNumberField(data, "방어숙련", 0),
+    저항숙련: getNumberField(data, "저항숙련", 0),
+    조사숙련: getNumberField(data, "조사숙련", 0),
+    해석숙련: getNumberField(data, "해석숙련", 0),
+    은신숙련: getNumberField(data, "은신숙련", 0),
+    추적숙련: getNumberField(data, "추적숙련", 0),
+    설득숙련: getNumberField(data, "설득숙련", 0),
+
+    일상점: getNumberField(data, "일상점", 0),
+    이면침식: getNumberField(data, "이면침식", 0),
+
+    신청일: now,
+    처리자: "",
+    처리메모: ""
+  };
+
+  appendRowByHeaders(SHEET_CHAR_PENDING, row);
+
+  return (
+    "[캐릭터 신청 접수]\n" +
+    "신청번호: " + id + "\n" +
+    "신청자/별명: " + alias + "\n" +
+    "이름: " + data["이름"] + "\n" +
+    "종족: " + data["종족"] + "\n\n" +
+    "상태: 승인 대기\n\n" +
+    "GM 승인:\n" +
+    "!캐릭터승인 " + id + "\n\n" +
+    "GM 반려:\n" +
+    "!캐릭터반려 " + id + " 사유"
+  );
+}
+
+function characterApprove(parts, displayName) {
+  if (parts.length < 2) {
+    return "사용법: !캐릭터승인 신청번호\n예시: !캐릭터승인 CH-0001";
+  }
+
+  const id = parts[1];
+  const pending = findPendingCharacter(id);
+
+  if (!pending) {
+    return "신청번호를 찾을 수 없습니다: " + id;
+  }
+
+  if (String(pending["상태"]).trim() !== "PENDING") {
+    return "이미 처리된 신청입니다: " + id + "\n현재 상태: " + pending["상태"];
+  }
+
+  if (findCharacterByAlias(pending["별명"])) {
+    return (
+      "이미 BOT_DB에 같은 별명의 캐릭터가 있습니다.\n" +
+      "별명: " + pending["별명"]
+    );
+  }
+
+  const headers = getSheetHeaders(SHEET_BOT_DB);
+  const rowObj = {};
+
+  headers.forEach(h => {
+    if (h in pending) {
+      rowObj[h] = pending[h];
+    }
+  });
+
+  appendRowByHeaders(SHEET_BOT_DB, rowObj);
+
+  updateRowById(SHEET_CHAR_PENDING, "id", id, {
+    상태: "APPROVED",
+    처리자: displayName,
+    처리메모: "승인됨"
+  });
+
+  SpreadsheetApp.flush();
+
+  const alias = String(pending["별명"]).trim();
+  const rowInfo = findCharacterRowByAlias(alias);
+
+  if (rowInfo) {
+    SpreadsheetApp.flush();
+    const fresh = findCharacterRowByAlias(alias);
+
+    const hp = getHealthInfo(fresh.character);
+    if (fresh.headers.includes("현재체력") && hp.maxHp > 0 && hp.currentHp <= 0) {
+      setCellByHeader(fresh, "현재체력", hp.maxHp);
+    }
+
+    refreshCharacterBudget(alias);
+  }
+
+  return (
+    "[캐릭터 승인 완료]\n" +
+    "신청번호: " + id + "\n" +
+    "별명: " + pending["별명"] + "\n" +
+    "이름: " + pending["이름"] + "\n\n" +
+    "BOT_DB에 등록되었습니다.\n" +
+    "이제 !내정보 로 확인할 수 있습니다."
+  );
+}
+
+function characterReject(parts, displayName, utterance) {
+  if (parts.length < 2) {
+    return "사용법: !캐릭터반려 신청번호 사유";
+  }
+
+  const id = parts[1];
+  const reason = String(utterance).split(/\s+/).slice(2).join(" ") || "사유 없음";
+
+  const pending = findPendingCharacter(id);
+
+  if (!pending) {
+    return "신청번호를 찾을 수 없습니다: " + id;
+  }
+
+  if (String(pending["상태"]).trim() !== "PENDING") {
+    return "이미 처리된 신청입니다: " + id + "\n현재 상태: " + pending["상태"];
+  }
+
+  updateRowById(SHEET_CHAR_PENDING, "id", id, {
+    상태: "REJECTED",
+    처리자: displayName,
+    처리메모: reason
+  });
+
+  return (
+    "[캐릭터 반려]\n" +
+    "신청번호: " + id + "\n" +
+    "이름: " + pending["이름"] + "\n\n" +
+    "사유:\n" + reason
+  );
+}
+
+function getCharacterFormText() {
+  return (
+    "!캐릭터신청\n" +
+    "이름:\n" +
+    "종족:\n" +
+    "근력:\n" +
+    "민첩:\n" +
+    "내구:\n" +
+    "감각:\n" +
+    "지능:\n" +
+    "무기술:\n" +
+    "격투술:\n" +
+    "사격술:\n" +
+    "기동술:\n" +
+    "방어술:\n" +
+    "인내:\n" +
+    "관찰:\n" +
+    "추적술:\n" +
+    "은밀행동:\n" +
+    "지식:\n" +
+    "이면학:\n" +
+    "화술:\n" +
+    "참격숙련:\n" +
+    "관통숙련:\n" +
+    "타격숙련:\n" +
+    "격투숙련:\n" +
+    "사격숙련:\n" +
+    "회피숙련:\n" +
+    "방어숙련:\n" +
+    "저항숙련:\n" +
+    "조사숙련:\n" +
+    "해석숙련:\n" +
+    "은신숙련:\n" +
+    "추적숙련:\n" +
+    "설득숙련:\n" +
+    "일상점:\n" +
+    "이면침식:"
+  );
+}
+
+function characterModify(parts, displayName) {
+  if (parts.length < 4) {
+    return (
+      "사용법: !수정 캐릭터별명 항목 변경값\n\n" +
+      "예시:\n" +
+      "!수정 월하륜 경험치 +3\n" +
+      "!수정 월하륜 현재체력 -10\n" +
+      "!수정 월하륜 현재체력 =50\n" +
+      "!수정 월하륜 이면침식 +5\n" +
+      "!수정 월하륜 종족 =마녀\n\n" +
+      "주의:\n" +
+      "레벨, 성장예산, 사용점수, 남은점수, 최대체력은 자동 계산 항목입니다."
+    );
+  }
+
+  const alias = parts[1];
+  const field = parts[2];
+  const changeText = parts.slice(3).join(" ");
+
+  let found = findCharacterRowByAlias(alias);
+
+  if (!found) {
+    return "캐릭터를 찾을 수 없습니다: " + alias;
+  }
+
+  const headers = found.headers;
+  const columnIndex = headers.indexOf(field);
+
+  if (columnIndex < 0) {
+    return (
+      "BOT_DB에서 해당 항목을 찾을 수 없습니다: " + field + "\n\n" +
+      "사용 가능한 항목:\n" +
+      headers.join(", ")
+    );
+  }
+
+  const protectedFields = ["별명", "레벨", "성장예산", "사용점수", "남은점수", "최대체력"];
+  if (protectedFields.includes(field)) {
+    return (
+      "이 항목은 직접 수정할 수 없습니다: " + field + "\n\n" +
+      "레벨/성장예산/최대체력은 시트 함수로 관리됩니다.\n" +
+      "사용점수/남은점수는 봇이 자동 갱신합니다."
+    );
+  }
+
+  const oldValue = found.character[field];
+  const oldLevel = readCharacterLevel(found.character);
+
+  const textFields = ["이름", "종족"];
+
+  let newValue;
+
+  try {
+    if (STAT_FIELDS.includes(field)) {
+      newValue = modifyStatGrade(oldValue, changeText);
+    } else if (textFields.includes(field)) {
+      newValue = modifyTextField(oldValue, changeText);
+    } else {
+      newValue = modifyNumericField(oldValue, changeText);
+    }
+  } catch (e) {
+    return (
+      "[수정 실패]\n" +
+      "대상: " + alias + "\n" +
+      "항목: " + field + "\n" +
+      "오류: " + e.message
+    );
+  }
+
+  if (field === "현재체력") {
+    const hp = getHealthInfo(found.character);
+    newValue = clampHp(newValue, hp.maxHp);
+  }
+
+  found.sheet.getRange(found.rowIndex, columnIndex + 1).setValue(newValue);
+
+  SpreadsheetApp.flush();
+
+  found = rereadCharacterRow(alias);
+
+  let hpText = "";
+  if (field === "내구" || field === "현재체력") {
+    const hp = getHealthInfo(found.character);
+
+    if (field === "내구" && found.headers.includes("현재체력") && hp.maxHp > 0 && hp.currentHp > hp.maxHp) {
+      setCellByHeader(found, "현재체력", hp.maxHp);
+      hpText =
+        "\n\n[체력 보정]\n" +
+        "현재체력이 최대체력을 초과하여 조정되었습니다.\n" +
+        "현재체력: " + hp.currentHp + " → " + hp.maxHp + " / " + hp.maxHp;
+    }
+  }
+
+  const budgetInfo = refreshCharacterBudget(alias);
+
+  let levelText = "";
+  if (field === "경험치") {
+    const afterRow = rereadCharacterRow(alias);
+    const newLevel = readCharacterLevel(afterRow.character);
+
+    if (newLevel > oldLevel) {
+      levelText =
+        "\n\n[레벨업]\n" +
+        afterRow.character["이름"] + "의 경계가 깊어졌습니다.\n" +
+        "Lv." + oldLevel + " → Lv." + newLevel + "\n\n" +
+        "일상과 비일상의 경계에서, 새로운 가능성이 열립니다.";
+    } else if (newLevel < oldLevel) {
+      levelText =
+        "\n\n[레벨 변동]\n" +
+        afterRow.character["이름"] + "의 레벨이 하락했습니다.\n" +
+        "Lv." + oldLevel + " → Lv." + newLevel;
+    }
+  }
+
+  return (
+    "[캐릭터 수정 완료]\n" +
+    "처리자: " + displayName + "\n" +
+    "대상: " + alias + "\n" +
+    "항목: " + field + "\n\n" +
+    "기존값: " + oldValue + "\n" +
+    "변경값: " + newValue + "\n\n" +
+    "현재 성장예산: " + budgetInfo.budget + "\n" +
+    "현재 사용점수: " + budgetInfo.used + "\n" +
+    "남은점수: " + budgetInfo.remain +
+    hpText +
+    levelText
+  );
+}
+
+function characterGrow(parts, displayName) {
+  if (parts.length < 3) {
+    return (
+      "사용법: !성장 캐릭터별명 항목\n\n" +
+      "예시:\n" +
+      "!성장 월하륜 민첩\n" +
+      "!성장 월하륜 무기술\n" +
+      "!성장 월하륜 참격숙련"
+    );
+  }
+
+  const alias = parts[1];
+  const field = parts[2];
+
+  let found = findCharacterRowByAlias(alias);
+
+  if (!found) {
+    return "캐릭터를 찾을 수 없습니다: " + alias;
+  }
+
+  if (!STAT_FIELDS.includes(field) && !FEATURE_FIELDS.includes(field) && !PROF_FIELDS.includes(field)) {
+    return (
+      "[성장 실패]\n" +
+      "성장 가능한 항목이 아닙니다: " + field + "\n\n" +
+      "성장 가능 항목:\n" +
+      "- 스탯: " + STAT_FIELDS.join(", ") + "\n" +
+      "- 기능: " + FEATURE_FIELDS.join(", ") + "\n" +
+      "- 숙련: " + PROF_FIELDS.join(", ")
+    );
+  }
+
+  const budget = readCharacterBudget(found.character);
+  const currentUsed = calculateCharacterUsedPoints(found.character);
+
+  let growth;
+
+  try {
+    growth = calculateGrowthCostDelta(found.character, field);
+  } catch (e) {
+    return (
+      "[성장 실패]\n" +
+      "대상: " + alias + "\n" +
+      "항목: " + field + "\n\n" +
+      "오류: " + e.message
+    );
+  }
+
+  if (growth.afterUsed > budget) {
+    return (
+      "[성장 실패]\n" +
+      "대상: " + alias + "\n" +
+      "항목: " + field + "\n\n" +
+      field + ": " + growth.oldValue + " → " + growth.newValue + " 성장 시도\n\n" +
+      "현재 성장예산: " + budget + "\n" +
+      "현재 사용점수: " + currentUsed + "\n" +
+      "남은점수: " + (budget - currentUsed) + "\n" +
+      "필요 추가점수: " + growth.need + "\n\n" +
+      "부족한 성장예산: " + (growth.afterUsed - budget) + "\n\n" +
+      "필요한 자원:\n" +
+      "- 성장예산 " + (growth.afterUsed - budget) + "점 추가 필요\n" +
+      "- 또는 경험치를 올려 레벨업 필요\n" +
+      "- 또는 다른 항목을 낮춰 사용점수 확보 필요"
+    );
+  }
+
+  const columnIndex = found.headers.indexOf(field);
+  if (columnIndex < 0) {
+    return "BOT_DB에서 해당 항목을 찾을 수 없습니다: " + field;
+  }
+
+  found.sheet.getRange(found.rowIndex, columnIndex + 1).setValue(growth.newValue);
+
+  SpreadsheetApp.flush();
+
+  if (field === "내구") {
+    const hpRow = rereadCharacterRow(alias);
+    const hp = getHealthInfo(hpRow.character);
+
+    if (hpRow.headers.includes("현재체력") && hp.maxHp > 0 && hp.currentHp > hp.maxHp) {
+      setCellByHeader(hpRow, "현재체력", hp.maxHp);
+    }
+  }
+
+  const refreshed = refreshCharacterBudget(alias);
+
+  return (
+    "[성장 완료]\n" +
+    "처리자: " + displayName + "\n" +
+    "대상: " + alias + "\n" +
+    "항목: " + field + "\n\n" +
+    field + ": " + growth.oldValue + " → " + growth.newValue + "\n\n" +
+    "현재 성장예산: " + refreshed.budget + "\n" +
+    "기존 사용점수: " + growth.beforeUsed + "\n" +
+    "추가 필요점수: " + growth.need + "\n" +
+    "변경 후 사용점수: " + refreshed.used + "\n" +
+    "남은점수: " + refreshed.remain
+  );
+}
+
+function modifyStatGrade(oldValue, changeText) {
+  const oldGrade = String(oldValue || "").trim().toUpperCase();
+  const change = String(changeText || "").trim().toUpperCase();
+
+  if (!STAT_ORDER.includes(oldGrade)) {
+    throw new Error("기존 스탯 등급이 올바르지 않습니다: " + oldValue);
+  }
+
+  if (change.startsWith("=")) {
+    const target = change.slice(1).trim().toUpperCase();
+
+    if (!STAT_ORDER.includes(target)) {
+      throw new Error("설정할 스탯 등급이 올바르지 않습니다: " + target);
+    }
+
+    return target;
+  }
+
+  if (STAT_ORDER.includes(change)) {
+    return change;
+  }
+
+  const delta = Number(change);
+
+  if (isNaN(delta)) {
+    throw new Error("스탯은 +1, -1, =A 같은 형식으로 수정하세요.");
+  }
+
+  const oldIndex = STAT_ORDER.indexOf(oldGrade);
+  const nextIndex = Math.max(0, Math.min(STAT_ORDER.length - 1, oldIndex + delta));
+
+  return STAT_ORDER[nextIndex];
+}
+
+function modifyNumericField(oldValue, changeText) {
+  const change = String(changeText || "").trim();
+
+  if (change.startsWith("=")) {
+    const target = Number(change.slice(1).trim());
+
+    if (isNaN(target)) {
+      throw new Error("숫자 항목은 =3, +1, -1 같은 형식으로 수정하세요.");
+    }
+
+    return target;
+  }
+
+  const oldNumber = Number(oldValue || 0);
+
+  if (isNaN(oldNumber)) {
+    throw new Error("기존 값이 숫자가 아닙니다: " + oldValue);
+  }
+
+  const delta = Number(change);
+
+  if (isNaN(delta)) {
+    throw new Error("숫자 항목은 +1, -1, =3 같은 형식으로 수정하세요.");
+  }
+
+  return oldNumber + delta;
+}
+
+function modifyTextField(oldValue, changeText) {
+  const change = String(changeText || "").trim();
+
+  if (!change.startsWith("=")) {
+    throw new Error("문자 항목은 =값 형식으로 수정하세요. 예: =마녀");
+  }
+
+  const target = change.slice(1).trim();
+
+  if (!target) {
+    throw new Error("설정할 값이 비어 있습니다.");
+  }
+
+  return target;
+}
+
+function round2(value) {
+  return Math.round(Number(value) * 100) / 100;
+}
+
+function makeFoldedResponse(summary, detail) {
+  return (
+    "@@SUMMARY@@\n" +
+    String(summary || "").trim() +
+    "\n@@DETAIL@@\n" +
+    String(detail || "").trim()
+  );
+}
+
+function parseDifficultyAndMods(tokens) {
+  let difficulty = DEFAULT_DIFFICULTY;
+  const mods = [];
+
+  tokens.forEach(token => {
+    token = String(token || "").trim();
+
+    if (!token) return;
+
+    if (/^\d+$/.test(token)) {
+      difficulty = Number(token);
+      return;
+    }
+
+    mods.push(token);
+  });
+
+  return {
+    difficulty: difficulty,
+    mods: mods
+  };
+}
+
+function getDifficultyResultText(value, difficulty) {
+  value = Number(value || 0);
+  difficulty = Number(difficulty || DEFAULT_DIFFICULTY);
+
+  const diff = value - difficulty;
+
+  if (diff <= -GREAT_RESULT_MARGIN) {
+    return {
+      diff: diff,
+      text: "결과: 대실패."
+    };
+  }
+
+  if (diff < 0) {
+    return {
+      diff: diff,
+      text: "결과: 실패."
+    };
+  }
+
+  if (diff >= GREAT_RESULT_MARGIN) {
+    return {
+      diff: diff,
+      text: "결과: 대성공."
+    };
+  }
+
+  return {
+    diff: diff,
+    text: "결과: 성공."
+  };
+}
+
+function formatSigned(value) {
+  value = Number(value || 0);
+
+  if (value > 0) {
+    return "+" + value;
+  }
+
+  return String(value);
+}
+
+function isDamageAction(actionName) {
+  return DAMAGE_ACTIONS.includes(String(actionName || "").trim());
+}
+function safeValue(value) {
+  if (value === "" || value === null || value === undefined) {
+    return "0";
+  }
+
+  return String(value);
+}
+
+function makeGroupedLines(items, perLine) {
+  const chunks = [];
+  let current = [];
+
+  items.forEach(pair => {
+    const name = pair[0];
+    const value = safeValue(pair[1]);
+
+    current.push(name + " " + value);
+
+    if (current.length >= perLine) {
+      chunks.push(current.join(" / "));
+      current = [];
+    }
+  });
+
+  if (current.length > 0) {
+    chunks.push(current.join(" / "));
+  }
+
+  return chunks.join("\n");
+}
+
+function makeGaugeBar(current, max, length) {
+  current = Number(current || 0);
+  max = Number(max || 0);
+  length = Number(length || 10);
+
+  if (max <= 0) {
+    return "[----------]";
+  }
+
+  const ratio = Math.max(0, Math.min(1, current / max));
+  const filled = Math.round(ratio * length);
+  const empty = length - filled;
+
+  return "[" + "■".repeat(filled) + "□".repeat(empty) + "]";
+
+}
+
+function makeAnchorId() {
+  return makeId("AN", SHEET_ANCHOR_DB);
+}
+
+function findAnchorById(id) {
+  const rows = getSheetData(SHEET_ANCHOR_DB);
+
+  return rows.find(r => {
+    return String(r["id"]).trim() === String(id).trim();
+  }) || null;
+}
+
+function findAnchorRowById(id) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_ANCHOR_DB);
+
+  if (!sheet) {
+    throw new Error("시트를 찾을 수 없습니다: " + SHEET_ANCHOR_DB);
+  }
+
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return null;
+
+  const headers = values[0].map(h => String(h).trim());
+  const idIndex = headers.indexOf("id");
+
+  if (idIndex < 0) {
+    throw new Error("ANCHOR_DB에 id 열이 없습니다.");
+  }
+
+  for (let r = 1; r < values.length; r++) {
+    if (String(values[r][idIndex]).trim() === String(id).trim()) {
+      const obj = {};
+      headers.forEach((h, i) => {
+        obj[h] = values[r][i];
+      });
+
+      return {
+        sheet: sheet,
+        rowIndex: r + 1,
+        headers: headers,
+        anchor: obj
+      };
+    }
+  }
+
+  return null;
+}
+
+function anchorRegister(utterance, displayName) {
+  const firstLine = String(utterance || "").split(/\n/)[0].trim();
+  const parts = firstLine.split(/\s+/);
+
+  if (parts.length < 2) {
+    return (
+      "사용법:\n" +
+      "!관계등록 캐릭터별명\n" +
+      "관계명:\n" +
+      "관계대상:\n" +
+      "관계종류:\n" +
+      "관계단계:\n" +
+      "주는일상점개수:\n" +
+      "메모:\n\n" +
+      "예시:\n" +
+      "!관계등록 월하륜\n" +
+      "관계명: 여동생\n" +
+      "관계대상: 월하은\n" +
+      "관계종류: 가족\n" +
+      "관계단계: 2\n" +
+      "주는일상점개수: 2\n" +
+      "메모: 돌아갈 집의 이유"
+    );
+  }
+
+  const owner = parts[1];
+
+  if (!findCharacterByAlias(owner)) {
+    return "캐릭터를 찾을 수 없습니다: " + owner;
+  }
+
+  const data = parseFormBlock(utterance);
+
+  const required = ["관계명", "관계대상", "관계종류", "관계단계", "주는일상점개수"];
+
+  for (const key of required) {
+    if (!data[key]) {
+      return "[관계 등록 실패]\n누락된 항목이 있습니다: " + key;
+    }
+  }
+
+  const level = Number(data["관계단계"]);
+  const point = Number(data["주는일상점개수"]);
+
+  if (isNaN(level) || level < 0) {
+    return "[관계 등록 실패]\n관계단계는 0 이상의 숫자로 입력하세요.";
+  }
+
+  if (isNaN(point) || point < 0) {
+    return "[관계 등록 실패]\n주는일상점개수는 0 이상의 숫자로 입력하세요.";
+  }
+
+  const id = makeAnchorId();
+  const now = getNowText();
+
+  appendRowByHeaders(SHEET_ANCHOR_DB, {
+    id: id,
+    소유자: owner,
+    관계명: data["관계명"],
+    관계대상: data["관계대상"],
+    관계종류: data["관계종류"],
+    관계단계: level,
+    주는일상점개수: point,
+    상태: data["상태"] || "정상",
+    메모: data["메모"] || "",
+    등록일: now,
+    수정일: ""
+  });
+
+  SpreadsheetApp.flush();
+
+  return (
+    "[관계 등록 완료]\n" +
+    "관계ID: " + id + "\n" +
+    "소유자: " + owner + "\n" +
+    "관계명: " + data["관계명"] + "\n" +
+    "관계대상: " + data["관계대상"] + "\n" +
+    "관계종류: " + data["관계종류"] + "\n" +
+    "관계단계: " + level + "\n" +
+    "주는일상점개수: " + point + "\n\n" +
+    "최대일상점은 시트 함수에 따라 자동 반영됩니다."
+  );
+}
+
+function anchorModify(parts, displayName) {
+  if (parts.length < 4) {
+    return (
+      "사용법: !관계수정 관계ID 항목 변경값\n\n" +
+      "예시:\n" +
+      "!관계수정 AN-0001 관계단계 =3\n" +
+      "!관계수정 AN-0001 주는일상점개수 =3\n" +
+      "!관계수정 AN-0001 상태 =불안정\n" +
+      "!관계수정 AN-0001 메모 =이면을 목격함"
+    );
+  }
+
+  const id = parts[1];
+  const field = parts[2];
+  const changeText = parts.slice(3).join(" ");
+
+  const found = findAnchorRowById(id);
+
+  if (!found) {
+    return "관계ID를 찾을 수 없습니다: " + id;
+  }
+
+  const headers = found.headers;
+  const columnIndex = headers.indexOf(field);
+
+  if (columnIndex < 0) {
+    return (
+      "ANCHOR_DB에서 해당 항목을 찾을 수 없습니다: " + field + "\n\n" +
+      "수정 가능 항목:\n" +
+      headers.filter(h => h !== "id" && h !== "등록일" && h !== "수정일").join(", ")
+    );
+  }
+
+  const protectedFields = ["id", "등록일", "수정일"];
+
+  if (protectedFields.includes(field)) {
+    return "이 항목은 직접 수정할 수 없습니다: " + field;
+  }
+
+  const oldValue = found.anchor[field];
+
+  let newValue;
+
+  try {
+    if (field === "관계단계" || field === "주는일상점개수") {
+      newValue = modifyNumericField(oldValue, changeText);
+
+      if (Number(newValue) < 0) {
+        return "[관계 수정 실패]\n" + field + "는 0 미만이 될 수 없습니다.";
+      }
+    } else {
+      newValue = modifyTextField(oldValue, changeText);
+    }
+  } catch (e) {
+    return (
+      "[관계 수정 실패]\n" +
+      "관계ID: " + id + "\n" +
+      "항목: " + field + "\n" +
+      "오류: " + e.message
+    );
+  }
+
+  found.sheet.getRange(found.rowIndex, columnIndex + 1).setValue(newValue);
+
+  const updatedAtIndex = headers.indexOf("수정일");
+  if (updatedAtIndex >= 0) {
+    found.sheet.getRange(found.rowIndex, updatedAtIndex + 1).setValue(getNowText());
+  }
+
+  SpreadsheetApp.flush();
+
+  return (
+    "[관계 수정 완료]\n" +
+    "관계ID: " + id + "\n" +
+    "소유자: " + found.anchor["소유자"] + "\n" +
+    "관계명: " + found.anchor["관계명"] + "\n" +
+    "항목: " + field + "\n\n" +
+    "기존값: " + oldValue + "\n" +
+    "변경값: " + newValue + "\n\n" +
+    "최대일상점은 시트 함수에 따라 자동 반영됩니다."
+  );
+}
+
+function anchorList(parts, displayName) {
+  let owner = "";
+
+  if (parts.length >= 2) {
+    owner = parts[1];
+  } else {
+    const character = findCharacter(displayName);
+
+    if (!character) {
+      return (
+        "캐릭터를 찾을 수 없습니다.\n" +
+        "사용법: !관계목록 캐릭터별명"
+      );
+    }
+
+    owner = String(character["별명"]).trim();
+  }
+
+  const rows = getSheetData(SHEET_ANCHOR_DB)
+    .filter(r => String(r["소유자"]).trim() === String(owner).trim());
+
+  if (rows.length === 0) {
+    return "[관계 목록]\n" + owner + "에게 등록된 관계가 없습니다.";
+  }
+
+  const totalPoint = rows.reduce((sum, r) => {
+    return sum + Number(r["주는일상점개수"] || 0);
+  }, 0);
+
+  const lines = rows.map(r => {
+    return (
+      "- " + r["id"] +
+      " / " + r["관계명"] +
+      " / 대상: " + r["관계대상"] +
+      " / 종류: " + r["관계종류"] +
+      " / 단계: " + r["관계단계"] +
+      " / 일상점 +" + r["주는일상점개수"] +
+      " / 상태: " + r["상태"]
+    );
+  });
+
+  return (
+    "[관계 목록]\n" +
+    owner + "\n\n" +
+    lines.join("\n") +
+    "\n\n" +
+    "최대일상점 합계: " + totalPoint
+  );
+}
+
+function getDailyPointInfo(alias) {
+  const rowInfo = findCharacterRowByAlias(alias);
+
+  if (!rowInfo) {
+    return null;
+  }
+
+  const current = Number(rowInfo.character["일상점"] || 0);
+  const max = Number(rowInfo.character["최대일상점"] || 0);
+  const used = Number(rowInfo.character["사용일상점"] || 0);
+
+  return {
+    rowInfo: rowInfo,
+    current: isNaN(current) ? 0 : current,
+    max: isNaN(max) ? 0 : max,
+    used: isNaN(used) ? 0 : used
+  };
+}
+
+function dailyPointUse(parts, displayName) {
+  if (parts.length < 3) {
+    return (
+      "사용법: !일상점사용 캐릭터별명 용도\n\n" +
+      "예시:\n" +
+      "!일상점사용 월하륜 리롤\n" +
+      "!일상점사용 월하륜 스킬강화\n" +
+      "!일상점사용 월하륜 침식회복\n\n" +
+      "효과:\n" +
+      "- 리롤: 방금 판정을 다시 시도할 수 있습니다.\n" +
+      "- 스킬강화: 다음 스킬 사용 시 수동으로 보정을 적용하세요.\n" +
+      "- 침식회복: 이면침식 -1"
+    );
+  }
+
+  const alias = parts[1];
+  const purpose = parts.slice(2).join(" ");
+
+  const info = getDailyPointInfo(alias);
+
+  if (!info) {
+    return "캐릭터를 찾을 수 없습니다: " + alias;
+  }
+
+  if (!info.rowInfo.headers.includes("사용일상점")) {
+    return "BOT_DB에 사용일상점 열이 없습니다.";
+  }
+
+  if (!info.rowInfo.headers.includes("일상점")) {
+    return "BOT_DB에 일상점 열이 없습니다.";
+  }
+
+  SpreadsheetApp.flush();
+
+  const freshInfo = getDailyPointInfo(alias);
+
+  if (freshInfo.current <= 0) {
+    return (
+      "[일상점 사용 실패]\n" +
+      "대상: " + alias + "\n\n" +
+      "남은 일상점이 없습니다.\n" +
+      "일상점: " + freshInfo.current + " / " + freshInfo.max + "\n" +
+      "사용일상점: " + freshInfo.used
+    );
+  }
+
+  const beforeUsed = freshInfo.used;
+  const beforeCurrent = freshInfo.current;
+  const beforeMax = freshInfo.max;
+
+  const afterUsed = beforeUsed + 1;
+
+  let guide = "";
+
+  if (purpose === "침식회복") {
+    if (!freshInfo.rowInfo.headers.includes("이면침식")) {
+      return "BOT_DB에 이면침식 열이 없습니다.";
+    }
+
+    const beforeErosion = Number(freshInfo.rowInfo.character["이면침식"] || 0);
+
+    if (beforeErosion >= MAX_EROSION) {
+      return (
+        "[일상점 사용 실패]\n" +
+        "대상: " + alias + "\n" +
+        "용도: 침식회복\n\n" +
+        "이면침식이 이미 최대치에 도달했습니다.\n" +
+        "이면침식: " + beforeErosion + " / " + MAX_EROSION + "\n\n" +
+        "로스트에 도달한 캐릭터는 일상점으로 되돌릴 수 없습니다."
+      );
+    }
+
+    if (beforeErosion <= 0) {
+      return (
+        "[일상점 사용 실패]\n" +
+        "대상: " + alias + "\n" +
+        "용도: 침식회복\n\n" +
+        "이면침식이 이미 0입니다."
+      );
+    }
+
+    const afterErosion = Math.max(0, beforeErosion - 1);
+
+    setCellByHeader(freshInfo.rowInfo, "사용일상점", afterUsed);
+    setCellByHeader(freshInfo.rowInfo, "이면침식", afterErosion);
+
+    SpreadsheetApp.flush();
+
+    const afterInfo = getDailyPointInfo(alias);
+    const afterStage = getErosionStageText(afterErosion);
+    const afterMultiplier = getErosionMultiplier(afterErosion);
+
+    return (
+      "[일상점 사용]\n" +
+      "대상: " + alias + "\n" +
+      "용도: 침식회복\n\n" +
+      "사용일상점: " + beforeUsed + " → " + afterUsed + "\n" +
+      "일상점: " + beforeCurrent + " → " + afterInfo.current + " / " + beforeMax + "\n\n" +
+      "이면침식: " + beforeErosion + " → " + afterErosion + " / " + MAX_EROSION + "\n" +
+      "침식단계: " + afterStage + "\n" +
+      "스킬 배율: ×" + afterMultiplier + "\n\n" +
+      "붙잡은 관계가 " + alias + "을/를 다시 이쪽으로 끌어당깁니다."
+    );
+  }
+
+  setCellByHeader(freshInfo.rowInfo, "사용일상점", afterUsed);
+
+  SpreadsheetApp.flush();
+
+  const afterInfo = getDailyPointInfo(alias);
+
+  if (purpose === "리롤") {
+    guide =
+      "\n\n[효과]\n" +
+      "방금 판정을 다시 시도할 수 있습니다.\n" +
+      "같은 명령어를 다시 입력하세요.";
+  } else if (purpose === "스킬강화") {
+    guide =
+      "\n\n[효과]\n" +
+      "다음 스킬 판정에 +3 보정을 적용할 수 있습니다.\n" +
+      "예시: !스킬 스킬명 +3";
+  } else {
+    guide =
+      "\n\n[효과]\n" +
+      "용도: " + purpose + "\n" +
+      "마스터와 합의한 방식으로 처리하세요.";
+  }
+
+  return (
+    "[일상점 사용]\n" +
+    "대상: " + alias + "\n" +
+    "용도: " + purpose + "\n\n" +
+    "사용일상점: " + beforeUsed + " → " + afterUsed + "\n" +
+    "일상점: " + beforeCurrent + " → " + afterInfo.current + " / " + beforeMax +
+    guide
+  );
+}
+
+function dailyPointRecover(parts, displayName) {
+  if (parts.length < 3) {
+    return (
+      "사용법: !일상점회복 캐릭터별명 수치\n\n" +
+      "예시:\n" +
+      "!일상점회복 월하륜 1\n" +
+      "!일상점회복 월하륜 2"
+    );
+  }
+
+  const alias = parts[1];
+  const amount = Number(parts[2]);
+
+  if (isNaN(amount) || amount <= 0) {
+    return "[일상점 회복 실패]\n회복 수치는 1 이상의 숫자로 입력하세요.";
+  }
+
+  const info = getDailyPointInfo(alias);
+
+  if (!info) {
+    return "캐릭터를 찾을 수 없습니다: " + alias;
+  }
+
+  if (!info.rowInfo.headers.includes("사용일상점")) {
+    return "BOT_DB에 사용일상점 열이 없습니다.";
+  }
+
+  SpreadsheetApp.flush();
+
+  const freshInfo = getDailyPointInfo(alias);
+
+  const beforeUsed = freshInfo.used;
+  const beforeCurrent = freshInfo.current;
+  const beforeMax = freshInfo.max;
+
+  const afterUsed = Math.max(0, beforeUsed - amount);
+
+  setCellByHeader(freshInfo.rowInfo, "사용일상점", afterUsed);
+
+  SpreadsheetApp.flush();
+
+  const afterInfo = getDailyPointInfo(alias);
+
+  return (
+    "[일상점 회복]\n" +
+    "대상: " + alias + "\n\n" +
+    "사용일상점: " + beforeUsed + " → " + afterUsed + "\n" +
+    "일상점: " + beforeCurrent + " → " + afterInfo.current + " / " + beforeMax + "\n\n" +
+    "소중한 인연들이 아직 당신을 붙들고 있습니다."
+  );
+}
+
+function getErosionMultiplier(erosion) {
+  erosion = Number(erosion || 0);
+
+  if (erosion >= 10) return 0;
+  if (erosion >= 9) return 1.5;
+  if (erosion >= 6) return 1.25;
+  if (erosion >= 3) return 1.1;
+
+  return 1;
+}
+
+function getErosionStageText(erosion) {
+  erosion = Number(erosion || 0);
+
+  if (erosion >= 10) return "로스트";
+  if (erosion >= 9) return "경계 붕괴 직전";
+  if (erosion >= 6) return "침식";
+  if (erosion >= 3) return "위화감";
+
+  return "정상";
+}
+
+function getErosionFlavorText(erosion) {
+  erosion = Number(erosion || 0);
+
+  if (erosion >= 10) {
+    return (
+      "캐릭터 로스트.\n" +
+      "이 캐릭터는 더 이상 플레이어 캐릭터로 사용할 수 없습니다.\n\n" +
+      "마지막 장면을 선언하십시오.\n" +
+      "그가 죽었는지, 괴이가 되었는지, 계약에 삼켜졌는지,\n" +
+      "혹은 모두의 기억에서 사라졌는지는 이야기로 결정됩니다."
+    );
+  }
+
+  if (erosion >= 9) {
+    return (
+      "경고:\n" +
+      "경계가 무너지기 직전입니다.\n" +
+      "다음 침식 증가는 로스트로 이어질 수 있습니다."
+    );
+  }
+
+  if (erosion >= 6) {
+    return (
+      "침식 단계:\n" +
+      "이면의 힘이 강해졌습니다.\n" +
+      "그러나 현재의 자신을 붙드는 감각은 점점 희미해집니다."
+    );
+  }
+
+  if (erosion >= 3) {
+    return (
+      "위화감 단계:\n" +
+      "이면이 당신을 알아보기 시작했습니다."
+    );
+  }
+
+  return "정상 단계: 아직은 돌아올 수 있습니다.";
+}
+
+function erosionModify(parts, displayName) {
+  if (parts.length < 3) {
+    return (
+      "사용법: !침식 캐릭터별명 변경값\n\n" +
+      "예시:\n" +
+      "!침식 월하륜 +1\n" +
+      "!침식 월하륜 -1\n" +
+      "!침식 월하륜 =5"
+    );
+  }
+
+  const alias = parts[1];
+  const changeText = parts.slice(2).join(" ");
+
+  const rowInfo = findCharacterRowByAlias(alias);
+
+  if (!rowInfo) {
+    return "캐릭터를 찾을 수 없습니다: " + alias;
+  }
+
+  if (!rowInfo.headers.includes("이면침식")) {
+    return "BOT_DB에 이면침식 열이 없습니다.";
+  }
+
+  const oldValueRaw = rowInfo.character["이면침식"];
+  const oldValue = Number(oldValueRaw || 0);
+
+  let newValue;
+
+  try {
+    newValue = modifyNumericField(oldValue, changeText);
+  } catch (e) {
+    return (
+      "[이면침식 수정 실패]\n" +
+      "대상: " + alias + "\n" +
+      "오류: " + e.message
+    );
+  }
+
+  newValue = Math.floor(Number(newValue || 0));
+  if (newValue < 0) newValue = 0;
+
+  setCellByHeader(rowInfo, "이면침식", newValue);
+
+  SpreadsheetApp.flush();
+
+  const stage = getErosionStageText(newValue);
+  const multiplier = getErosionMultiplier(newValue);
+  const flavor = getErosionFlavorText(newValue);
+
+  const header = newValue >= MAX_EROSION ? "[로스트]" : "[이면침식 변동]";
+
+  return (
+    header + "\n" +
+    "처리자: " + displayName + "\n" +
+    "대상: " + alias + "\n\n" +
+    "이면침식: " + oldValue + " → " + newValue + " / " + MAX_EROSION + "\n" +
+    "단계: " + stage + "\n" +
+    "스킬 배율: ×" + multiplier + "\n\n" +
+    flavor
+  );
+}
+
+function rollPowerValueForResponse(type, rank, mods) {
+  rank = String(rank || "").trim().toUpperCase();
+  mods = mods || [];
+
+  const rankValue = rankToValue(rank);
+  const dice = rollDie(20);
+
+  let base = dice + rankValue;
+
+  if (type === "방호") {
+    base += 3;
+  }
+
+  const finalValue = applyMods(base, mods);
+
+  return {
+    type: type,
+    rank: rank,
+    rankValue: rankValue,
+    dice: dice,
+    base: base,
+    finalValue: finalValue
+  };
+}
+
+function rollResponseValue(character, defaultActionName, tokens, targetAlias) {
+  tokens = tokens || [];
+  targetAlias = targetAlias || "";
+
+  if (tokens.length >= 2 && tokens[0] === "스킬") {
+    const skillName = tokens[1];
+    const mods = tokens.slice(2);
+    const rolled = rollSkillValueForCharacter(character, skillName, mods, targetAlias);
+
+    const diceText = formatDiceLogs(rolled.diceLogs);
+
+    const summaryText =
+      "스킬: " + skillName + "\n" +
+      "계열: " + rolled.type + "\n" +
+      "최종값: " + rolled.finalValue;
+
+    const detailText =
+      "스킬: " + skillName + "\n" +
+      "계열: " + rolled.type + "\n" +
+      "랭크: " + rolled.rank + "(" + rolled.rankValue + ")\n" +
+      "주사위:\n" + diceText + "\n\n" +
+      "대입식:\n```" + rolled.expression + "```\n" +
+      "계산 결과: " + rolled.baseValue + "\n" +
+      "이면침식: " + rolled.erosion + " / " + MAX_EROSION + "\n" +
+      "침식배율: ×" + rolled.erosionMultiplier + "\n" +
+      "배율 적용 결과: " + rolled.beforeErosionMultiplier + " → " +
+        Math.floor(rolled.beforeErosionMultiplier * rolled.erosionMultiplier) + "\n" +
+      (rolled.typeBonusText ? rolled.typeBonusText + "\n" : "") +
+      "보정: " + ((rolled.mods && rolled.mods.length > 0) ? rolled.mods.join(" ") : "없음") + "\n" +
+      "최종값: " + rolled.finalValue;
+
+    return {
+      kind: "스킬",
+      name: skillName,
+      skill: rolled.skill,
+      value: rolled.finalValue,
+      summaryText: summaryText,
+      detailText: detailText,
+      text: detailText
+    };
+  }
+
+  if (tokens.length >= 2 && ["화력", "방호", "치유", "재생", "간섭", "강화"].includes(tokens[0])) {
+    const type = tokens[0];
+    const rank = tokens[1];
+    const mods = tokens.slice(2);
+
+    const rolled = rollPowerValueForResponse(type, rank, mods);
+
+    const summaryText =
+      "이능: " + type + " " + rank + "\n" +
+      "최종값: " + rolled.finalValue;
+
+    const detailText =
+      "이능: " + type + " " + rank + "\n" +
+      "d20: " + rolled.dice + "\n" +
+      "랭크값: " + rolled.rankValue + "\n" +
+      "기본값: " + rolled.base + "\n" +
+      "보정: " + (mods.join(" ") || "없음") + "\n" +
+      "최종값: " + rolled.finalValue;
+
+    return {
+      kind: "이능",
+      name: type + " " + rank,
+      value: rolled.finalValue,
+      summaryText: summaryText,
+      detailText: detailText,
+      text: detailText
+    };
+  }
+
+  const actionName = defaultActionName || tokens[0];
+
+  if (!actionName) {
+    throw new Error("대응에 사용할 액션이 지정되지 않았습니다.");
+  }
+
+  const mods = defaultActionName ? tokens : tokens.slice(1);
+  const rolled = rollActionValueForCharacter(character, actionName, mods);
+
+  const summaryText =
+    "액션: " + actionName + "\n" +
+    "합계: " + rolled.sum;
+
+  const detailText =
+    "액션: " + actionName + "\n" +
+    "최종 계수: " + rolled.finalCoef + "\n" +
+    "주사위: " + rolled.diceCount + "d" + ACTION_DICE_SIDES + "\n" +
+    "결과: " + rolled.rolls.join(", ") + "\n" +
+    "합계: " + rolled.sum;
+
+  return {
+    kind: "액션",
+    name: actionName,
+    value: rolled.sum,
+    summaryText: summaryText,
+    detailText: detailText,
+    text: detailText
+  };
+}
+
+function combatResponse(parts, displayName) {
+  const character = findCharacter(displayName);
+
+  if (!character) {
+    return (
+      "캐릭터를 찾을 수 없습니다.\n" +
+      "디스코드 별명: " + displayName
+    );
+  }
+
+  const selfAlias = String(character["별명"]).trim();
+
+  if (parts.length < 2) {
+    return (
+      "사용법:\n" +
+      "!대응 방어 [보정]\n" +
+      "!대응 회피 [보정]\n" +
+      "!대응 맞대응 액션명 [보정]\n" +
+      "!대응 맞대응 화력 랭크 [보정]\n" +
+      "!대응 맞대응 스킬 스킬명 [보정]\n" +
+      "!대응 무대응\n\n" +
+      "공격번호 지정:\n" +
+      "!대응 ATK-0001 방어"
+    );
+  }
+
+  let index = 1;
+  let attackId = "";
+
+  if (/^ATK-\d+/i.test(String(parts[index] || ""))) {
+    attackId = parts[index];
+    index++;
+  }
+
+  const mode = String(parts[index] || "").trim();
+  const rest = parts.slice(index + 1);
+
+  if (!mode) {
+    return "대응 종류를 입력하세요: 방어 / 회피 / 맞대응 / 무대응";
+  }
+
+  const attack = attackId
+    ? findPendingAttackById(attackId)
+    : findLatestPendingAttackForTarget(selfAlias);
+
+  if (!attack) {
+    return (
+      "대응할 공격을 찾을 수 없습니다.\n" +
+      "대상: " + selfAlias + "\n\n" +
+      "공격이 여러 개라면 공격번호를 지정하세요.\n" +
+      "예시: !대응 ATK-0001 방어"
+    );
+  }
+
+  if (String(attack["대상"]).trim() !== selfAlias) {
+    return (
+      "이 공격의 대상이 아닙니다.\n" +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격 대상: " + attack["대상"] + "\n" +
+      "현재 캐릭터: " + selfAlias
+    );
+  }
+
+  const attackValue = Math.floor(Number(attack["공격값"]) || 0);
+  const attackerAlias = String(attack["공격자"]).trim();
+  const targetAlias = String(attack["대상"]).trim();
+
+  if (mode === "무대응") {
+    const damage = attackValue;
+    const damageResult = applyDamageToCharacter(targetAlias, damage);
+
+    const attackEffectText = processPendingAttackSkillEffects(
+      attack,
+      "forceFail",
+      attackValue
+    );
+
+    resolvePendingAttack(attack["id"], {
+      대응종류: "무대응",
+      대응값: 0,
+      최종피해: damage,
+      메모: "무대응으로 피해 전부 적용. 스킬 효과 저항 자동 실패"
+    });
+
+    const summary =
+      "[무대응]\n" +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격값: " + attackValue + "\n" +
+      "최종피해: " + damage + "\n" +
+      compactDamageText(damageResult) +
+      (attackEffectText ? "\n효과: 저항 자동 실패 / 강제 적용" : "");
+
+    const detail =
+      "[무대응 상세]\n" +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격자: " + attackerAlias + "\n" +
+      "대상: " + targetAlias + "\n" +
+      "공격값: " + attackValue + "\n" +
+      "최종피해: " + damage + "\n\n" +
+      damageResult.text +
+      attackEffectText;
+
+    return makeFoldedResponse(summary, detail);
+  }
+
+  const statusResult = processStatusBeforeCheck(selfAlias, "대응");
+
+  if (statusResult.blocked) {
+    const damage = attackValue;
+    const damageResult = applyDamageToCharacter(targetAlias, damage);
+
+    const attackEffectText = processPendingAttackSkillEffects(
+      attack,
+      "forceFail",
+      attackValue
+    );
+
+    resolvePendingAttack(attack["id"], {
+      대응종류: "상태이상으로 대응불가",
+      대응값: 0,
+      최종피해: damage,
+      메모: "상태이상으로 대응 행동 저지. 무대응 처리. 스킬 효과 저항 자동 실패"
+    });
+
+    const summary =
+      "[대응 불가]\n" +
+      "상태이상으로 대응하지 못했습니다.\n" +
+      "공격번호: " + attack["id"] + "\n" +
+      "최종피해: " + damage + "\n" +
+      compactDamageText(damageResult) +
+      (attackEffectText ? "\n효과: 저항 자동 실패 / 강제 적용" : "");
+
+    const detail =
+      statusResult.text + "\n\n" +
+      "[대응 불가 상세]\n" +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격자: " + attackerAlias + "\n" +
+      "대상: " + targetAlias + "\n" +
+      "공격값: " + attackValue + "\n" +
+      "최종피해: " + damage + "\n\n" +
+      damageResult.text +
+      attackEffectText;
+
+    return makeFoldedResponse(summary, detail);
+  }
+
+  const statusDetailPrefix = statusResult.text
+    ? statusResult.text + "\n\n"
+    : "";
+
+  const statusSummaryLine = statusResult.text
+    ? "상태 처리: 상세보기 참고\n"
+    : "";
+
+  if (mode === "방어") {
+    let response;
+
+    try {
+      response = rollResponseValue(character, "방어", rest, attackerAlias);
+    } catch (e) {
+      return "[방어 대응 오류]\n" + e.message;
+    }
+
+    const defenseValue = response.value;
+    const damage = Math.max(0, attackValue - defenseValue);
+    const defenseSuccess = damage <= 0;
+
+    const damageResult = damage > 0
+      ? applyDamageToCharacter(targetAlias, damage)
+      : { text: "피해 없음." };
+
+    const attackEffectText = defenseSuccess
+      ? (
+        getSkillFromPendingAttack(attack)
+          ? "\n\n[스킬 효과 무효]\n방어에 성공하여 공격 스킬의 효과가 발동하지 않습니다."
+          : ""
+      )
+      : processPendingAttackSkillEffects(attack, "normal", attackValue);
+
+    resolvePendingAttack(attack["id"], {
+      대응종류: "방어",
+      대응값: defenseValue,
+      최종피해: damage,
+      메모: defenseSuccess
+        ? "방어 성공. 공격 스킬 효과 무효"
+        : "방어 실패. 공격 스킬 효과 저항 판정"
+    });
+
+    const summary =
+      "[방어 대응]\n" +
+      statusSummaryLine +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격값: " + attackValue + "\n" +
+      "방어값: " + defenseValue + "\n" +
+      "결과: " + (defenseSuccess ? "방어 성공" : "방어 실패") + "\n" +
+      "최종피해: " + damage + "\n" +
+      compactDamageText(damageResult) +
+      (attackEffectText
+        ? "\n효과: " + (defenseSuccess ? "무효" : "저항 판정 / 상세보기")
+        : "");
+
+    const detail =
+      statusDetailPrefix +
+      "[방어 대응 상세]\n" +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격자: " + attackerAlias + "\n" +
+      "대상: " + targetAlias + "\n" +
+      "공격값: " + attackValue + "\n\n" +
+      response.detailText + "\n\n" +
+      "결과: " + (defenseSuccess ? "방어 성공" : "방어 실패") + "\n" +
+      "최종피해: " + damage + "\n\n" +
+      damageResult.text +
+      attackEffectText;
+
+    return makeFoldedResponse(summary, detail);
+  }
+
+  if (mode === "회피") {
+    let response;
+
+    try {
+      response = rollResponseValue(character, "회피", rest, attackerAlias);
+    } catch (e) {
+      return "[회피 대응 오류]\n" + e.message;
+    }
+
+    const evadeValue = response.value;
+    const success = evadeValue >= attackValue;
+    const damage = success ? 0 : attackValue;
+
+    const damageResult = damage > 0
+      ? applyDamageToCharacter(targetAlias, damage)
+      : { text: "피해 없음." };
+
+    const attackEffectText = success
+      ? (
+        getSkillFromPendingAttack(attack)
+          ? "\n\n[스킬 효과 무효]\n회피에 성공하여 공격 스킬의 효과가 발동하지 않습니다."
+          : ""
+      )
+      : processPendingAttackSkillEffects(attack, "normal", attackValue);
+
+    resolvePendingAttack(attack["id"], {
+      대응종류: "회피",
+      대응값: evadeValue,
+      최종피해: damage,
+      메모: success
+        ? "회피 성공. 공격 스킬 효과 무효"
+        : "회피 실패. 공격 스킬 효과 저항 판정"
+    });
+
+    const summary =
+      "[회피 대응]\n" +
+      statusSummaryLine +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격값: " + attackValue + "\n" +
+      "회피값: " + evadeValue + "\n" +
+      "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
+      "최종피해: " + damage + "\n" +
+      compactDamageText(damageResult) +
+      (attackEffectText
+        ? "\n효과: " + (success ? "무효" : "저항 판정 / 상세보기")
+        : "") +
+      (success ? "\n추가: 다음 판정에 이득 가능" : "");
+
+    const detail =
+      statusDetailPrefix +
+      "[회피 대응 상세]\n" +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격자: " + attackerAlias + "\n" +
+      "대상: " + targetAlias + "\n" +
+      "공격값: " + attackValue + "\n\n" +
+      response.detailText + "\n\n" +
+      "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
+      "최종피해: " + damage + "\n\n" +
+      damageResult.text +
+      attackEffectText +
+      (success ? "\n\n다음 판정에 추가 이득을 얻을 수 있습니다." : "");
+
+    return makeFoldedResponse(summary, detail);
+  }
+
+  if (mode === "맞대응") {
+    if (rest.length < 1) {
+      return (
+        "맞대응에 사용할 액션/이능/스킬을 입력하세요.\n" +
+        "예시:\n" +
+        "!대응 맞대응 참격\n" +
+        "!대응 맞대응 화력 A\n" +
+        "!대응 맞대응 스킬 월광참"
+      );
+    }
+
+    let response;
+
+    try {
+      response = rollResponseValue(character, "", rest, attackerAlias);
+    } catch (e) {
+      return "[맞대응 오류]\n" + e.message;
+    }
+
+    const counterValue = response.value;
+
+    if (counterValue > attackValue) {
+      const damage = counterValue;
+      const damageResult = applyDamageToRef(attackerAlias, damage);
+
+      let counterEffectText = "";
+
+      if (response.kind === "스킬" && response.skill) {
+        try {
+          counterEffectText = processSkillEffects(response.skill["효과"], {
+            userAlias: selfAlias,
+            targetAlias: attackerAlias,
+            finalValue: counterValue,
+            skillName: response.skill["스킬명"],
+            skill: response.skill,
+            resistanceMode: "forceFail"
+          });
+        } catch (e) {
+          return (
+            "[맞대응 효과 처리 오류]\n" +
+            response.name + "\n\n" +
+            "오류: " + e.message + "\n\n" +
+            "효과:\n```" +
+            (response.skill["효과"] || "") +
+            "```"
+          );
+        }
+      }
+
+      const attackEffectInvalidText = getSkillFromPendingAttack(attack)
+        ? "\n\n[공격 스킬 효과 무효]\n맞대응에 패배하여 공격자의 스킬 효과는 발동하지 않습니다."
+        : "";
+
+      resolvePendingAttack(attack["id"], {
+        대응종류: "맞대응",
+        대응값: counterValue,
+        최종피해: damage,
+        메모: "맞대응 성공. 공격자의 공격 무효화. 공격 스킬 효과 무효. 맞대응 스킬 효과 강제 적용"
+      });
+
+      const summary =
+        "[맞대응]\n" +
+        statusSummaryLine +
+        "공격번호: " + attack["id"] + "\n" +
+        "공격값: " + attackValue + "\n" +
+        "맞대응값: " + counterValue + "\n" +
+        "결과: 맞대응 성공\n" +
+        "반격피해: " + damage + "\n" +
+        compactDamageText(damageResult) +
+        (attackEffectInvalidText ? "\n공격 효과: 무효" : "") +
+        (counterEffectText ? "\n맞대응 효과: 강제 적용 / 상세보기" : "");
+
+      const detail =
+        statusDetailPrefix +
+        "[맞대응 상세]\n" +
+        "공격번호: " + attack["id"] + "\n" +
+        "공격자: " + attackerAlias + "\n" +
+        "대상: " + targetAlias + "\n" +
+        "공격값: " + attackValue + "\n\n" +
+        response.detailText + "\n\n" +
+        "결과: 맞대응 성공\n" +
+        "공격자의 공격은 무효화됩니다.\n" +
+        "공격자에게 맞대응값 전체 피해를 적용합니다.\n\n" +
+        "반격피해: " + damage + "\n\n" +
+        damageResult.text +
+        attackEffectInvalidText +
+        counterEffectText;
+
+      return makeFoldedResponse(summary, detail);
+    }
+
+    if (counterValue < attackValue) {
+      const damage = attackValue;
+      const damageResult = applyDamageToCharacter(targetAlias, damage);
+
+      const attackEffectText = processPendingAttackSkillEffects(
+        attack,
+        "forceFail",
+        attackValue
+      );
+
+      resolvePendingAttack(attack["id"], {
+        대응종류: "맞대응",
+        대응값: counterValue,
+        최종피해: damage,
+        메모: "맞대응 실패. 맞대응 무효화. 공격 스킬 효과 저항 자동 실패"
+      });
+
+      const summary =
+        "[맞대응]\n" +
+        statusSummaryLine +
+        "공격번호: " + attack["id"] + "\n" +
+        "공격값: " + attackValue + "\n" +
+        "맞대응값: " + counterValue + "\n" +
+        "결과: 맞대응 실패\n" +
+        "최종피해: " + damage + "\n" +
+        compactDamageText(damageResult) +
+        (attackEffectText ? "\n공격 효과: 저항 자동 실패 / 강제 적용" : "");
+
+      const detail =
+        statusDetailPrefix +
+        "[맞대응 상세]\n" +
+        "공격번호: " + attack["id"] + "\n" +
+        "공격자: " + attackerAlias + "\n" +
+        "대상: " + targetAlias + "\n" +
+        "공격값: " + attackValue + "\n\n" +
+        response.detailText + "\n\n" +
+        "결과: 맞대응 실패\n" +
+        "대상의 맞대응은 무효화됩니다.\n" +
+        "대상에게 공격값 전체 피해를 적용합니다.\n" +
+        "공격 스킬 효과에 대한 저항 판정은 수행하지 않습니다.\n\n" +
+        "최종피해: " + damage + "\n\n" +
+        damageResult.text +
+        attackEffectText;
+
+      return makeFoldedResponse(summary, detail);
+    }
+
+    const invalidText =
+      (getSkillFromPendingAttack(attack) || (response.kind === "스킬" && response.skill))
+        ? "\n스킬 효과도 발동하지 않습니다."
+        : "";
+
+    resolvePendingAttack(attack["id"], {
+      대응종류: "맞대응",
+      대응값: counterValue,
+      최종피해: 0,
+      메모: "동률. 양측 공격 상쇄. 양측 스킬 효과 무효"
+    });
+
+    const summary =
+      "[맞대응]\n" +
+      statusSummaryLine +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격값: " + attackValue + "\n" +
+      "맞대응값: " + counterValue + "\n" +
+      "결과: 동률 / 상쇄\n" +
+      "최종피해: 0" +
+      (invalidText ? "\n효과: 무효" : "");
+
+    const detail =
+      statusDetailPrefix +
+      "[맞대응 상세]\n" +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격자: " + attackerAlias + "\n" +
+      "대상: " + targetAlias + "\n" +
+      "공격값: " + attackValue + "\n\n" +
+      response.detailText + "\n\n" +
+      "동률.\n" +
+      "양측 공격이 상쇄됩니다." +
+      invalidText + "\n" +
+      "피해 없음.";
+
+    return makeFoldedResponse(summary, detail);
+  }
+
+  return "알 수 없는 대응입니다: " + mode + "\n가능한 대응: 방어 / 회피 / 맞대응 / 무대응";
+}
+
+function makeVarSafeName(name) {
+  return String(name || "")
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^가-힣A-Za-z0-9_]/g, "_");
+}
+
+function getStackRows(alias) {
+  try {
+    return getSheetData(SHEET_STACK_DB).filter(r => {
+      return String(r["대상"]).trim() === String(alias).trim();
+    });
+  } catch (e) {
+    return [];
+  }
+}
+
+function injectStackVariables(vars, alias, prefix) {
+  const rows = getStackRows(alias);
+  const p = prefix || "";
+
+  rows.forEach(r => {
+    const name = makeVarSafeName(r["스택명"]);
+    if (!name) return;
+
+    const value = Number(r["수치"] || 0);
+    vars[p + "스택_" + name] = isNaN(value) ? 0 : value;
+  });
+}
+
+function getActiveStatusRows(alias) {
+  try {
+    return getSheetData(SHEET_STATUS_DB).filter(r => {
+      return (
+        String(r["상태"]).trim() === "ACTIVE" &&
+        String(r["대상"]).trim() === String(alias).trim()
+      );
+    });
+  } catch (e) {
+    return [];
+  }
+}
+
+function injectStatusVariables(vars, alias, prefix) {
+  const rows = getActiveStatusRows(alias);
+  const p = prefix || "";
+
+  const grouped = {};
+
+  rows.forEach(r => {
+    const name = makeVarSafeName(r["상태명"]);
+    if (!name) return;
+
+    if (!grouped[name]) grouped[name] = [];
+    grouped[name].push(r);
+  });
+
+  Object.keys(grouped).forEach(name => {
+    const list = grouped[name];
+
+    let sum = 0;
+    let max = 0;
+    let chanceMax = 0;
+    let count = list.length;
+
+    list.forEach(r => {
+      const value = Number(r["수치"] || 0);
+      const chance = Number(r["확률"] || 0) + Number(r["누적확률"] || 0);
+
+      if (!isNaN(value)) {
+        sum += value;
+        if (value > max) max = value;
+      }
+
+      if (!isNaN(chance) && chance > chanceMax) {
+        chanceMax = chance;
+      }
+    });
+
+    vars[p + "상태_" + name + "_개수"] = count;
+    vars[p + "상태_" + name + "_수치"] = sum;
+    vars[p + "상태_" + name + "_최대"] = max;
+    vars[p + "상태_" + name + "_존재"] = count > 0 ? 1 : 0;
+    vars[p + "상태_" + name + "_확률"] = chanceMax;
+  });
+}
+
+function findStackRowInfo(alias, stackName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_STACK_DB);
+
+  if (!sheet) {
+    throw new Error("시트를 찾을 수 없습니다: " + SHEET_STACK_DB);
+  }
+
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(h => String(h).trim());
+
+  const targetIndex = headers.indexOf("대상");
+  const nameIndex = headers.indexOf("스택명");
+
+  if (targetIndex < 0 || nameIndex < 0) {
+    throw new Error("STACK_DB에 대상/스택명 열이 없습니다.");
+  }
+
+  for (let r = 1; r < values.length; r++) {
+    if (
+      String(values[r][targetIndex]).trim() === String(alias).trim() &&
+      String(values[r][nameIndex]).trim() === String(stackName).trim()
+    ) {
+      const obj = {};
+      headers.forEach((h, i) => {
+        obj[h] = values[r][i];
+      });
+
+      return {
+        sheet: sheet,
+        rowIndex: r + 1,
+        headers: headers,
+        stack: obj
+      };
+    }
+  }
+
+  return null;
+}
+
+function setStackValue(alias, stackName, value, maxValue, memo) {
+  const now = getNowText();
+  const max = Number(maxValue || 0);
+  let v = Math.floor(Number(value) || 0);
+
+  if (max > 0) {
+    v = Math.min(v, max);
+  }
+
+  v = Math.max(0, v);
+
+  const rowInfo = findStackRowInfo(alias, stackName);
+
+  if (!rowInfo) {
+    appendRowByHeaders(SHEET_STACK_DB, {
+      대상: alias,
+      스택명: stackName,
+      수치: v,
+      최대치: max || "",
+      메모: memo || "",
+      수정일: now
+    });
+
+    return "[스택 생성]\n" + alias + " / " + stackName + ": " + v;
+  }
+
+  setCellByHeader(rowInfo, "수치", v);
+
+  if (max > 0) {
+    setCellByHeader(rowInfo, "최대치", max);
+  }
+
+  setCellByHeader(rowInfo, "수정일", now);
+
+  return "[스택 변경]\n" + alias + " / " + stackName + ": " + v;
+}
+
+function modifyStackValue(alias, stackName, delta, maxValue, memo) {
+  const rowInfo = findStackRowInfo(alias, stackName);
+  const current = rowInfo ? Number(rowInfo.stack["수치"] || 0) : 0;
+
+  return setStackValue(
+    alias,
+    stackName,
+    current + Number(delta || 0),
+    maxValue,
+    memo
+  );
+}
+
+function makeStatusId() {
+  return makeId("ST", SHEET_STATUS_DB);
+}
+
+function addStatusToCharacter(targetAlias, statusName, category, effectCode, options) {
+  options = options || {};
+
+  const id = makeStatusId();
+  const now = getNowText();
+
+  appendRowByHeaders(SHEET_STATUS_DB, {
+    id: id,
+    상태: "ACTIVE",
+    대상: targetAlias,
+    상태명: statusName,
+    분류: category,
+    효과코드: effectCode,
+    수치: options.value || 0,
+    확률: options.chance || 100,
+    누적확률: options.accum || 0,
+    증가확률: options.increase || 0,
+    최대확률: options.maxChance || 100,
+    발동타이밍: options.trigger || "판정시작",
+    대상판정: options.checkType || "전체",
+    남은횟수: options.count || "",
+    중복방식: options.stackMode || "허용",
+    출처: options.source || "",
+    메모: options.memo || "",
+    생성일: now,
+    처리일: ""
+  });
+
+  return (
+    "[상태 부여]\n" +
+    "대상: " + targetAlias + "\n" +
+    "상태: " + statusName + "\n" +
+    "분류: " + category + "\n" +
+    "효과코드: " + effectCode
+  );
+}
+
+function removeStatusFromCharacter(targetAlias, statusName) {
+  const rows = getActiveStatusRows(targetAlias);
+  let count = 0;
+
+  rows.forEach(r => {
+    if (String(r["상태명"]).trim() === String(statusName).trim()) {
+      updateRowById(SHEET_STATUS_DB, "id", r["id"], {
+        상태: "REMOVED",
+        처리일: getNowText(),
+        메모: "상태해제"
+      });
+      count++;
+    }
+  });
+
+  return (
+    "[상태 해제]\n" +
+    "대상: " + targetAlias + "\n" +
+    "상태: " + statusName + "\n" +
+    "해제 수: " + count
+  );
+}
+
+function parseEffectOptions(tokens) {
+  const options = {};
+
+  tokens.forEach(token => {
+    token = String(token || "").trim();
+    if (!token) return;
+
+    const match = token.match(/^(.+?)[:：=](.+)$/);
+    if (!match) return;
+
+    const key = match[1].trim();
+    const value = match[2].trim();
+
+    options[key] = value;
+  });
+
+  return options;
+}
+
+function resolveEffectTarget(token, context) {
+  token = String(token || "").trim();
+  context = context || {};
+
+  if (token === "자신") {
+    return context.userAlias || "";
+  }
+
+  if (token === "대상") {
+    const targetAlias = String(context.targetAlias || "").trim();
+
+    // 대상 미지정이면 빈 값 반환.
+    // processSkillEffects()에서 해당 효과 줄을 무효 처리한다.
+    if (!targetAlias) {
+      return "";
+    }
+
+    // !스킬 스킬명 대상:자신 을 허용.
+    if (targetAlias === "자신") {
+      return context.userAlias || "";
+    }
+
+    return targetAlias;
+  }
+
+  // 직접 별명을 적은 경우.
+  // 예: 상태부여 몬스터A 출혈 ...
+  return token;
+}
+
+function readEffectNumber(value, context, fallback) {
+  value = String(value || "").trim();
+
+  if (!value) return fallback || 0;
+  if (value === "최종값") return context.finalValue;
+
+  const n = Number(value);
+  return isNaN(n) ? (fallback || 0) : n;
+}
+
+function parseResistanceMods(value) {
+  value = String(value || "").trim();
+
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(/[,，、\s]+/)
+    .map(v => String(v || "").trim())
+    .filter(Boolean);
+}
+
+function isResistanceEnabled(value) {
+  const v = String(value || "").trim();
+
+  return (
+    v === "가능" ||
+    v === "true" ||
+    v === "TRUE" ||
+    v === "1" ||
+    v === "yes" ||
+    v === "YES"
+  );
+}
+
+function rollResistanceForStatus(targetAlias, difficulty, mods) {
+  mods = mods || [];
+
+  const targetCharacter = findCharacterByAlias(targetAlias);
+
+  if (!targetCharacter) {
+    throw new Error("저항 대상 캐릭터를 찾을 수 없습니다: " + targetAlias);
+  }
+
+  const rolled = rollActionValueForCharacter(targetCharacter, "저항", mods);
+  const resistanceValue = rolled.sum;
+  const diff = Math.floor(Number(difficulty) || 0);
+  const success = resistanceValue >= diff;
+
+  return {
+    targetAlias: targetAlias,
+    difficulty: diff,
+    mods: mods,
+    rolled: rolled,
+    value: resistanceValue,
+    success: success,
+    text:
+      "[상태 저항]\n" +
+      "대상: " + targetAlias + "\n" +
+      "저항난이도: " + diff + "\n\n" +
+      "액션: 저항\n" +
+      "최종 계수: " + rolled.finalCoef + "\n" +
+      "주사위: " + rolled.diceCount + "d" + ACTION_DICE_SIDES + "\n" +
+      "결과: " + rolled.rolls.join(", ") + "\n" +
+      "합계: " + resistanceValue + "\n" +
+      "보정: " + (mods.join(" ") || "없음") + "\n\n" +
+      "판정: " + (success ? "저항 성공" : "저항 실패")
+  };
+}
+
+function getSkillFromPendingAttack(attack) {
+  if (!attack) return null;
+
+  const attackKind = String(attack["공격종류"] || "").trim();
+
+  if (attackKind !== "스킬") {
+    return null;
+  }
+
+  const attackerAlias = String(attack["공격자"] || "").trim();
+  const skillName = String(attack["공격명"] || "").trim();
+
+  if (!attackerAlias || !skillName) {
+    return null;
+  }
+
+  return findApprovedSkill(attackerAlias, skillName);
+}
+
+function processPendingAttackSkillEffects(attack, resistanceMode, finalValueForEffect) {
+  const skill = getSkillFromPendingAttack(attack);
+
+  if (!skill) {
+    return "";
+  }
+
+  const effectText = String(skill["효과"] || "").trim();
+
+  if (!effectText) {
+    return "";
+  }
+
+  const attackerAlias = String(attack["공격자"] || "").trim();
+  const targetAlias = String(attack["대상"] || "").trim();
+  const finalValue = Math.floor(Number(finalValueForEffect || attack["공격값"] || 0));
+
+  try {
+    return processSkillEffects(effectText, {
+      userAlias: attackerAlias,
+      targetAlias: targetAlias,
+      finalValue: finalValue,
+      skillName: skill["스킬명"],
+      skill: skill,
+      resistanceMode: resistanceMode
+    });
+  } catch (e) {
+    return (
+      "\n\n[공격 스킬 효과 처리 오류]\n" +
+      "스킬명: " + skill["스킬명"] + "\n" +
+      "오류: " + e.message + "\n\n" +
+      "효과:\n```" +
+      effectText +
+      "```"
+    );
+  }
+}
+
+function pickOption(opts, key, fallback) {
+  if (opts && opts[key] !== undefined && opts[key] !== "") {
+    return opts[key];
+  }
+  return fallback;
+}
+
+function buildStatusOptionsFromTemplate(template, opts, context) {
+  opts = opts || {};
+  context = context || {};
+
+  return {
+    value: readEffectNumber(pickOption(opts, "수치", template["수치"]), context, 0),
+    chance: readEffectNumber(pickOption(opts, "확률", template["확률"]), context, 100),
+    accum: readEffectNumber(
+      pickOption(opts, "누적", pickOption(opts, "누적확률", template["누적확률"])),
+      context,
+      0
+    ),
+    increase: readEffectNumber(
+      pickOption(opts, "증가", pickOption(opts, "증가확률", template["증가확률"])),
+      context,
+      0
+    ),
+    maxChance: readEffectNumber(pickOption(opts, "최대확률", template["최대확률"]), context, 100),
+    trigger: pickOption(opts, "발동", pickOption(opts, "발동타이밍", template["발동타이밍"] || "판정시작")),
+    checkType: pickOption(opts, "판정", pickOption(opts, "대상판정", template["대상판정"] || "전체")),
+    count: pickOption(opts, "횟수", pickOption(opts, "남은횟수", template["남은횟수"] || "")),
+    stackMode: pickOption(opts, "중복", pickOption(opts, "중복방식", template["중복방식"] || "허용")),
+    source: context.skillName || "상태템플릿",
+    memo: pickOption(opts, "메모", template["메모"] || "")
+  };
+}
+
+function applyStatusWithResistance(targetAlias, statusName, category, effectCode, opts, context, resistanceMode) {
+  opts = opts || {};
+  context = context || {};
+  resistanceMode = resistanceMode || "normal";
+
+  const logs = [];
+
+  if (!targetAlias) {
+    return (
+      "[효과 무효]\n" +
+      "효과: " + statusName + " 부여\n" +
+      "이유: 대상이 지정되지 않았습니다.\n" +
+      "자가 적용이 필요하면 효과 대상을 '자신'으로 쓰거나, 명령어에 대상:자신을 지정하세요."
+    );
+  }
+
+  const resistanceRequested = isResistanceEnabled(opts["저항"]);
+
+  if (resistanceRequested && resistanceMode === "normal") {
+    const difficulty = readEffectNumber(
+      opts["저항난이도"] || "최종값",
+      context,
+      context.finalValue || 0
+    );
+
+    const resistanceMods = parseResistanceMods(opts["저항보정"]);
+    const resistance = rollResistanceForStatus(targetAlias, difficulty, resistanceMods);
+
+    logs.push(
+      resistance.text + "\n\n" +
+      "대상 상태: " + statusName
+    );
+
+    if (resistance.success) {
+      logs.push(
+        "[상태 부여 실패]\n" +
+        "대상: " + targetAlias + "\n" +
+        "상태: " + statusName + "\n" +
+        "이유: 저항 성공"
+      );
+
+      return logs.join("\n\n");
+    }
+
+    logs.push(
+      "[상태 부여 진행]\n" +
+      "대상: " + targetAlias + "\n" +
+      "상태: " + statusName + "\n" +
+      "이유: 저항 실패"
+    );
+  }
+
+  if (resistanceRequested && resistanceMode === "forceFail") {
+    logs.push(
+      "[상태 저항 자동 실패]\n" +
+      "대상: " + targetAlias + "\n" +
+      "상태: " + statusName + "\n" +
+      "이 효과는 대응 실패/무대응/맞대응 패배로 강제 적용됩니다.\n" +
+      "저항 판정을 수행하지 않습니다."
+    );
+  }
+
+  if (resistanceRequested && resistanceMode === "none") {
+    logs.push(
+      "[상태 저항 생략]\n" +
+      "대상: " + targetAlias + "\n" +
+      "상태: " + statusName + "\n" +
+      "이미 선행 저항 판정 또는 별도 판정 절차가 처리되었습니다."
+    );
+  }
+
+  logs.push(addStatusToCharacter(targetAlias, statusName, category, effectCode, {
+    value: readEffectNumber(opts["수치"], context, 0),
+    chance: readEffectNumber(opts["확률"], context, 100),
+    accum: readEffectNumber(opts["누적"], context, 0),
+    increase: readEffectNumber(opts["증가"], context, 0),
+    maxChance: readEffectNumber(opts["최대확률"], context, 100),
+    trigger: opts["발동"] || "판정시작",
+    checkType: opts["판정"] || "전체",
+    count: opts["횟수"] || "",
+    stackMode: opts["중복"] || "허용",
+    source: context.skillName || "",
+    memo: opts["메모"] || ""
+  }));
+
+  return logs.join("\n\n");
+}
+
+function applyTemplateStatusWithResistance(targetAlias, templateName, opts, context, resistanceMode) {
+  opts = opts || {};
+  context = context || {};
+  resistanceMode = resistanceMode || "normal";
+
+  const template = findStatusTemplate(templateName);
+
+  if (!template) {
+    return (
+      "[효과 무효]\n" +
+      "상태 템플릿을 찾을 수 없습니다: " + templateName
+    );
+  }
+
+  if (!targetAlias) {
+    return (
+      "[효과 무효]\n" +
+      "효과: 상태템플릿부여 " + templateName + "\n" +
+      "이유: 대상이 지정되지 않았습니다.\n" +
+      "자가 적용이 필요하면 효과 대상을 '자신'으로 쓰거나, 명령어에 대상:자신을 지정하세요."
+    );
+  }
+
+  const statusName = opts["상태명"] || template["상태명"];
+  const category = opts["분류"] || template["분류"];
+  const effectCode = opts["효과코드"] || template["효과코드"];
+
+  const statusOptions = buildStatusOptionsFromTemplate(template, opts, context);
+
+  const mergedOpts = {
+    수치: statusOptions.value,
+    확률: statusOptions.chance,
+    누적: statusOptions.accum,
+    증가: statusOptions.increase,
+    최대확률: statusOptions.maxChance,
+    발동: statusOptions.trigger,
+    판정: statusOptions.checkType,
+    횟수: statusOptions.count,
+    중복: statusOptions.stackMode,
+    메모: statusOptions.memo,
+    저항: opts["저항"] || "",
+    저항난이도: opts["저항난이도"] || "",
+    저항보정: opts["저항보정"] || ""
+  };
+
+  const result = applyStatusWithResistance(
+    targetAlias,
+    statusName,
+    category,
+    effectCode,
+    mergedOpts,
+    context,
+    resistanceMode
+  );
+
+  return (
+    "[상태 템플릿 적용]\n" +
+    "템플릿: " + templateName + "\n" +
+    "대상: " + targetAlias + "\n\n" +
+    result
+  );
+}
+
+function processSkillEffects(effectText, context) {
+  effectText = String(effectText || "").trim();
+
+  if (!effectText) {
+    return "";
+  }
+
+  context = context || {};
+
+  let resistanceMode = String(context.resistanceMode || "").trim();
+
+  if (!resistanceMode) {
+    if (context.allowResistance === false) {
+      resistanceMode = "forceFail";
+    } else {
+      resistanceMode = "normal";
+    }
+  }
+
+  const lines = effectText.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const logs = [];
+
+  lines.forEach(line => {
+    const tokens = line.split(/\s+/);
+    const command = tokens[0];
+
+    if (command === "상태템플릿부여") {
+      if (tokens.length < 3) {
+        throw new Error("상태템플릿부여 효과 형식 오류: " + line);
+      }
+
+      const targetAlias = resolveEffectTarget(tokens[1], context);
+      const templateName = tokens[2];
+      const opts = parseEffectOptions(tokens.slice(3));
+
+      logs.push(applyTemplateStatusWithResistance(
+        targetAlias,
+        templateName,
+        opts,
+        context,
+        resistanceMode
+      ));
+
+      return;
+    }
+
+    if (command === "상태부여") {
+      if (tokens.length < 5) {
+        throw new Error("상태부여 효과 형식 오류: " + line);
+      }
+
+      const targetAlias = resolveEffectTarget(tokens[1], context);
+      const statusName = tokens[2];
+      const category = tokens[3];
+      const effectCode = tokens[4];
+      const opts = parseEffectOptions(tokens.slice(5));
+
+      logs.push(applyStatusWithResistance(
+        targetAlias,
+        statusName,
+        category,
+        effectCode,
+        opts,
+        context,
+        resistanceMode
+      ));
+
+      return;
+    }
+
+    if (command === "상태해제") {
+      if (tokens.length < 3) {
+        throw new Error("상태해제 효과 형식 오류: " + line);
+      }
+
+      const targetAlias = resolveEffectTarget(tokens[1], context);
+      const statusName = tokens[2];
+
+      if (!targetAlias) {
+        logs.push(
+          "[효과 무효]\n" +
+          "효과: 상태해제 " + statusName + "\n" +
+          "이유: 대상이 지정되지 않았습니다."
+        );
+        return;
+      }
+
+      logs.push(removeStatusFromCharacter(targetAlias, statusName));
+      return;
+    }
+
+    if (command === "스택증가") {
+      if (tokens.length < 4) {
+        throw new Error("스택증가 효과 형식 오류: " + line);
+      }
+
+      const targetAlias = resolveEffectTarget(tokens[1], context);
+      const stackName = tokens[2];
+      const delta = Number(String(tokens[3]).replace(/^\+/, "")) || 0;
+      const opts = parseEffectOptions(tokens.slice(4));
+
+      if (!targetAlias) {
+        logs.push(
+          "[효과 무효]\n" +
+          "효과: 스택증가 " + stackName + "\n" +
+          "이유: 대상이 지정되지 않았습니다."
+        );
+        return;
+      }
+
+      logs.push(modifyStackValue(
+        targetAlias,
+        stackName,
+        delta,
+        opts["최대"] || "",
+        context.skillName || ""
+      ));
+
+      return;
+    }
+
+    if (command === "스택감소") {
+      if (tokens.length < 4) {
+        throw new Error("스택감소 효과 형식 오류: " + line);
+      }
+
+      const targetAlias = resolveEffectTarget(tokens[1], context);
+      const stackName = tokens[2];
+      const delta = -Math.abs(Number(String(tokens[3]).replace(/^-/, "")) || 0);
+      const opts = parseEffectOptions(tokens.slice(4));
+
+      if (!targetAlias) {
+        logs.push(
+          "[효과 무효]\n" +
+          "효과: 스택감소 " + stackName + "\n" +
+          "이유: 대상이 지정되지 않았습니다."
+        );
+        return;
+      }
+
+      logs.push(modifyStackValue(
+        targetAlias,
+        stackName,
+        delta,
+        opts["최대"] || "",
+        context.skillName || ""
+      ));
+
+      return;
+    }
+
+    if (command === "스택설정") {
+      if (tokens.length < 4) {
+        throw new Error("스택설정 효과 형식 오류: " + line);
+      }
+
+      const targetAlias = resolveEffectTarget(tokens[1], context);
+      const stackName = tokens[2];
+      const value = Number(String(tokens[3]).replace(/^=/, "")) || 0;
+      const opts = parseEffectOptions(tokens.slice(4));
+
+      if (!targetAlias) {
+        logs.push(
+          "[효과 무효]\n" +
+          "효과: 스택설정 " + stackName + "\n" +
+          "이유: 대상이 지정되지 않았습니다."
+        );
+        return;
+      }
+
+      logs.push(setStackValue(
+        targetAlias,
+        stackName,
+        value,
+        opts["최대"] || "",
+        context.skillName || ""
+      ));
+
+      return;
+    }
+
+    throw new Error("알 수 없는 효과 명령입니다: " + command);
+  });
+
+  return "\n\n[스킬 효과]\n" + logs.join("\n\n");
+}
+
+function statusMatchesCheckType(status, checkType) {
+  const raw = String(status["대상판정"] || "전체").trim();
+
+  if (!raw || raw === "전체") return true;
+
+  const list = raw.split(/[,，、]/).map(s => s.trim()).filter(Boolean);
+  return list.includes(checkType);
+}
+
+function consumeStatusCount(status) {
+  const raw = String(status["남은횟수"] || "").trim();
+
+  if (!raw) return;
+
+  const count = Number(raw);
+  if (isNaN(count)) return;
+
+  const next = count - 1;
+
+  if (next <= 0) {
+    updateRowById(SHEET_STATUS_DB, "id", status["id"], {
+      상태: "EXPIRED",
+      남은횟수: 0,
+      처리일: getNowText()
+    });
+  } else {
+    updateRowById(SHEET_STATUS_DB, "id", status["id"], {
+      남은횟수: next
+    });
+  }
+}
+
+function processStatusBeforeCheck(alias, checkType) {
+  const rows = getActiveStatusRows(alias);
+  const logs = [];
+  let blocked = false;
+
+  rows.forEach(status => {
+    if (String(status["발동타이밍"] || "").trim() !== "판정시작") return;
+    if (!statusMatchesCheckType(status, checkType)) return;
+
+    const category = String(status["분류"] || "").trim();
+    const code = String(status["효과코드"] || "").trim();
+
+    if (category === "지속피해") {
+      const damage = Math.max(0, Math.floor(Number(status["수치"] || 0)));
+      const damageResult = applyDamageToCharacter(alias, damage);
+
+      logs.push(
+        "[상태 발동: " + status["상태명"] + "]\n" +
+        "지속피해: " + damage + "\n" +
+        damageResult.text
+      );
+
+      consumeStatusCount(status);
+      return;
+    }
+
+    // 구속 bind:
+    // 해제 성공 = 구속 해제 + 행동 가능
+    // 해제 실패 = 구속 유지 + 행동 불가 + 다음 해제 확률 증가
+    if (category === "행동방해" && code === "bind") {
+      const baseChance = Number(status["확률"] || 0);
+      const accum = Number(status["누적확률"] || 0);
+      const increase = Number(status["증가확률"] || 0);
+      const maxChance = Number(status["최대확률"] || 100);
+
+      const currentChance = Math.min(maxChance, baseChance + accum);
+      const roll = rollDie(100);
+
+      if (roll <= currentChance) {
+        // 해제 성공: 행동 가능
+        updateRowById(SHEET_STATUS_DB, "id", status["id"], {
+          상태: "REMOVED",
+          처리일: getNowText(),
+          메모: "구속 해제 성공"
+        });
+
+        logs.push(
+          "[상태 판정: 구속]\n" +
+          "해제 확률: " + currentChance + "%\n" +
+          "굴림: " + roll + "\n" +
+          "결과: 구속 해제 성공.\n" +
+          "구속 상태가 해제됩니다.\n" +
+          "이번 행동은 가능합니다."
+        );
+
+      } else {
+        // 해제 실패: 행동 불가
+        blocked = true;
+
+        // 누적확률은 '추가치'다.
+        // 실제 해제 확률은 확률 + 누적확률.
+        // 최대확률을 넘지 않도록 누적치의 상한은 최대확률 - 기본확률.
+        const maxAccum = Math.max(0, maxChance - baseChance);
+        const nextAccum = Math.min(maxAccum, accum + increase);
+        const nextChance = Math.min(maxChance, baseChance + nextAccum);
+
+        updateRowById(SHEET_STATUS_DB, "id", status["id"], {
+          누적확률: nextAccum
+        });
+
+        logs.push(
+          "[상태 판정: 구속]\n" +
+          "해제 확률: " + currentChance + "%\n" +
+          "굴림: " + roll + "\n" +
+          "결과: 구속 해제 실패.\n" +
+          "이번 행동은 불가능합니다.\n" +
+          "구속 상태는 유지됩니다.\n" +
+          "다음 해제 확률: " + nextChance + "%"
+        );
+      }
+
+      return;
+    }
+
+    // 일반 행동방해:
+    // 발동 성공 시 행동 저지.
+    if (category === "행동방해") {
+      const chance = Number(status["확률"] || 0);
+      const roll = rollDie(100);
+
+      if (roll <= chance) {
+        blocked = true;
+
+        logs.push(
+          "[상태 발동: " + status["상태명"] + "]\n" +
+          "확률: " + chance + "%\n" +
+          "굴림: " + roll + "\n" +
+          "결과: 행동이 저지됩니다."
+        );
+      } else {
+        logs.push(
+          "[상태 판정: " + status["상태명"] + "]\n" +
+          "확률: " + chance + "%\n" +
+          "굴림: " + roll + "\n" +
+          "결과: 발동하지 않았습니다."
+        );
+      }
+
+      consumeStatusCount(status);
+      return;
+    }
+  });
+
+  return {
+    blocked: blocked,
+    text: logs.length > 0 ? "[상태 처리]\n" + logs.join("\n\n") : ""
+  };
+}
+
+function compactDamageText(damageResult) {
+  if (!damageResult) {
+    return "";
+  }
+
+  if (damageResult.before !== undefined && damageResult.after !== undefined) {
+    return (
+      "체력: " +
+      damageResult.before +
+      " → " +
+      damageResult.after +
+      " / " +
+      damageResult.maxHp
+    );
+  }
+
+  if (damageResult.text) {
+    return String(damageResult.text).split("\n")[0];
+  }
+
+  return "";
+}
+
+function compactEffectText(effectText, fallbackText) {
+  effectText = String(effectText || "").trim();
+
+  if (!effectText) {
+    return "";
+  }
+
+  return fallbackText || "효과 처리: 상세보기 참고";
+}
+
+function sectionTitle(title) {
+  return "【" + title + "】";
+}
+
+function kv(label, value) {
+  if (value === "" || value === null || value === undefined) return "";
+  return label + ": " + value;
+}
+
+function joinLines(lines) {
+  return lines
+    .filter(line => line !== "" && line !== null && line !== undefined)
+    .join("\n");
+}
+
+function compactSkillHeader(skillName, alias, type, rank, rankValue, finalValue) {
+  return joinLines([
+    sectionTitle("스킬"),
+    skillName,
+    kv("사용자", alias),
+    kv("계열/랭크", type + " " + rank + "(" + rankValue + ")"),
+    kv("최종값", finalValue)
+  ]);
+}
+
+function compactAttackWaitText(pending, targetAlias) {
+  const id = pending.id || pending["id"] || "";
+  const target = targetAlias || pending.target || pending["대상"] || "";
+
+  return joinLines([
+    kv("공격번호", id),
+    kv("대상", target),
+    "대응: !대응 방어/회피/맞대응/무대응",
+    "지정 대응: !대응 " + id + " 방어/회피/맞대응/무대응"
+  ]);
+}
+
+function noneText(value) {
+  value = String(value || "").trim();
+  return value ? value : "-";
+}
+
+function summarizeEffectLine(line) {
+  line = String(line || "").trim();
+  if (!line) return "";
+
+  const tokens = line.split(/\s+/);
+  const command = tokens[0];
+
+  if (command === "상태부여") {
+    const target = tokens[1] || "대상";
+    const statusName = tokens[2] || "상태";
+    return target + "에게 " + statusName + " 부여";
+  }
+
+  if (command === "상태해제") {
+    const target = tokens[1] || "대상";
+    const statusName = tokens[2] || "상태";
+    return target + "의 " + statusName + " 해제";
+  }
+
+  if (command === "스택증가") {
+    const target = tokens[1] || "대상";
+    const stackName = tokens[2] || "스택";
+    const value = tokens[3] || "";
+    return target + " " + stackName + " " + value;
+  }
+
+  if (command === "스택감소") {
+    const target = tokens[1] || "대상";
+    const stackName = tokens[2] || "스택";
+    const value = tokens[3] || "";
+    return target + " " + stackName + " " + value;
+  }
+
+  if (command === "스택설정") {
+    const target = tokens[1] || "대상";
+    const stackName = tokens[2] || "스택";
+    const value = tokens[3] || "";
+    return target + " " + stackName + " " + value;
+  }
+
+  return line;
+}
+
+function summarizeSkillEffects(effectText) {
+  effectText = String(effectText || "").trim();
+
+  if (!effectText) {
+    return "없음";
+  }
+
+  const lines = effectText
+    .split(/\n/)
+    .map(l => l.trim())
+    .filter(Boolean);
+
+  const summaries = lines
+    .map(summarizeEffectLine)
+    .filter(Boolean);
+
+  if (summaries.length === 0) {
+    return "있음";
+  }
+
+  if (summaries.length <= 2) {
+    return summaries.join(" / ");
+  }
+
+  return summaries.slice(0, 2).join(" / ") + " 외 " + (summaries.length - 2) + "개";
+}
+
+function formatSkillSummaryBlock(skill, alias, targetAlias, rank, rankValue, finalValue, effectSummary, pendingId) {
+  const skillName = String(skill["스킬명"] || "").trim();
+  const type = String(skill["계열"] || "").trim();
+  const hasTarget = String(targetAlias || "").trim() !== "";
+
+  let text =
+    "【" + skillName + "】\n\n" +
+    "사용자: " + noneText(alias) + "\n" +
+    "대상: " + noneText(targetAlias) + "\n\n" +
+    "계열/랭크: " + type + " " + rank + "(" + rankValue + ")\n" +
+    "최종값: " + finalValue + "\n\n" +
+    "효과: " + noneText(effectSummary);
+
+  if (!hasTarget && String(effectSummary || "").includes("대상")) {
+    text += "\n※ 대상 지정 효과는 대상 미지정 시 적용되지 않습니다.";
+  }
+
+  if (pendingId) {
+    text +=
+      "\n\n" +
+      "공격번호: " + pendingId + "\n\n" +
+      "대응: !대응 방어/회피/맞대응/무대응\n" +
+      "지정 대응: !대응 " + pendingId + " 방어/회피/맞대응/무대응";
+  }
+
+  return text;
+}
+
+function getSelfAlias(displayName) {
+  const character = findCharacter(displayName);
+
+  if (!character) {
+    throw new Error("캐릭터를 찾을 수 없습니다.\n디스코드 별명: " + displayName);
+  }
+
+  return String(character["별명"]).trim();
+}
+
+function parseMaybeTarget(parts, displayName, startIndex) {
+  const selfAlias = getSelfAlias(displayName);
+  const first = String(parts[startIndex] || "").trim();
+
+  if (first && findCharacterByAlias(first)) {
+    return {
+      targetAlias: first,
+      nextIndex: startIndex + 1
+    };
+  }
+
+  return {
+    targetAlias: selfAlias,
+    nextIndex: startIndex
+  };
+}
+
+function statusListCommand(parts, displayName) {
+  let targetAlias = "";
+
+  if (parts.length >= 2) {
+    targetAlias = parts[1];
+  } else {
+    try {
+      targetAlias = getSelfAlias(displayName);
+    } catch (e) {
+      return e.message;
+    }
+  }
+
+  const rows = getActiveStatusRows(targetAlias);
+
+  if (rows.length === 0) {
+    return (
+      "【상태 목록】\n\n" +
+      "대상: " + targetAlias + "\n" +
+      "ACTIVE 상태 없음."
+    );
+  }
+
+  const lines = rows.map(r => {
+    const chance = Number(r["확률"] || 0) + Number(r["누적확률"] || 0);
+
+    return (
+      "- " + r["상태명"] +
+      " / " + r["분류"] +
+      " / " + r["효과코드"] +
+      " / 수치 " + (r["수치"] || 0) +
+      " / 확률 " + chance + "%" +
+      " / 판정 " + (r["대상판정"] || "전체") +
+      " / 횟수 " + noneText(r["남은횟수"])
+    );
+  });
+
+  return (
+    "【상태 목록】\n\n" +
+    "대상: " + targetAlias + "\n\n" +
+    lines.join("\n")
+  );
+}
+
+function statusAddCommand(parts, displayName) {
+  if (parts.length < 4) {
+    return (
+      "사용법:\n" +
+      "!상태부여 [대상] 상태명 분류 효과코드 [옵션]\n\n" +
+      "예시:\n" +
+      "!상태부여 테스트 출혈 지속피해 bleed 수치:5 확률:100 횟수:3 발동:판정시작 판정:액션,스킬 중복:허용\n" +
+      "!상태부여 구속 행동방해 bind 확률:30 누적:0 증가:10 최대확률:90"
+    );
+  }
+
+  let parsed;
+
+  try {
+    parsed = parseMaybeTarget(parts, displayName, 1);
+  } catch (e) {
+    return e.message;
+  }
+
+  const targetAlias = parsed.targetAlias;
+  const i = parsed.nextIndex;
+
+  if (parts.length < i + 3) {
+    return "상태명 / 분류 / 효과코드를 입력하세요.";
+  }
+
+  const statusName = parts[i];
+  const category = parts[i + 1];
+  const effectCode = parts[i + 2];
+  const opts = parseEffectOptions(parts.slice(i + 3));
+
+  const text = addStatusToCharacter(targetAlias, statusName, category, effectCode, {
+    value: readEffectNumber(opts["수치"], { finalValue: 0 }, 0),
+    chance: readEffectNumber(opts["확률"], { finalValue: 0 }, 100),
+    accum: readEffectNumber(opts["누적"], { finalValue: 0 }, 0),
+    increase: readEffectNumber(opts["증가"], { finalValue: 0 }, 0),
+    maxChance: readEffectNumber(opts["최대확률"], { finalValue: 0 }, 100),
+    trigger: opts["발동"] || "판정시작",
+    checkType: opts["판정"] || "전체",
+    count: opts["횟수"] || "",
+    stackMode: opts["중복"] || "허용",
+    source: "수동명령",
+    memo: opts["메모"] || ""
+  });
+
+  return text;
+}
+
+function statusRemoveCommand(parts, displayName) {
+  if (parts.length < 2) {
+    return (
+      "사용법:\n" +
+      "!상태해제 [대상] 상태명\n\n" +
+      "예시:\n" +
+      "!상태해제 테스트 출혈\n" +
+      "!상태해제 출혈"
+    );
+  }
+
+  let parsed;
+
+  try {
+    parsed = parseMaybeTarget(parts, displayName, 1);
+  } catch (e) {
+    return e.message;
+  }
+
+  const targetAlias = parsed.targetAlias;
+  const statusName = parts[parsed.nextIndex];
+
+  if (!statusName) {
+    return "해제할 상태명을 입력하세요.";
+  }
+
+  return removeStatusFromCharacter(targetAlias, statusName);
+}
+
+function stackListCommand(parts, displayName) {
+  let targetAlias = "";
+
+  if (parts.length >= 2) {
+    targetAlias = parts[1];
+  } else {
+    try {
+      targetAlias = getSelfAlias(displayName);
+    } catch (e) {
+      return e.message;
+    }
+  }
+
+  const rows = getStackRows(targetAlias);
+
+  if (rows.length === 0) {
+    return (
+      "【스택 목록】\n\n" +
+      "대상: " + targetAlias + "\n" +
+      "스택 없음."
+    );
+  }
+
+  const lines = rows.map(r => {
+    return (
+      "- " + r["스택명"] +
+      ": " + (r["수치"] || 0) +
+      (r["최대치"] ? " / " + r["최대치"] : "")
+    );
+  });
+
+  return (
+    "【스택 목록】\n\n" +
+    "대상: " + targetAlias + "\n\n" +
+    lines.join("\n")
+  );
+}
+
+function stackModifyCommand(parts, displayName) {
+  if (parts.length < 3) {
+    return (
+      "사용법:\n" +
+      "!스택 [대상] 스택명 +1 [최대:10]\n" +
+      "!스택 [대상] 스택명 -1\n" +
+      "!스택 [대상] 스택명 =5 [최대:10]\n\n" +
+      "예시:\n" +
+      "!스택 테스트 혈인 +1 최대:10\n" +
+      "!스택 혈인 +1 최대:10"
+    );
+  }
+
+  let parsed;
+
+  try {
+    parsed = parseMaybeTarget(parts, displayName, 1);
+  } catch (e) {
+    return e.message;
+  }
+
+  const targetAlias = parsed.targetAlias;
+  const i = parsed.nextIndex;
+
+  const stackName = parts[i];
+  const change = parts[i + 1];
+
+  if (!stackName || !change) {
+    return "스택명과 변경값을 입력하세요.";
+  }
+
+  const opts = parseEffectOptions(parts.slice(i + 2));
+  const maxValue = opts["최대"] || "";
+
+  if (String(change).startsWith("=")) {
+    const value = Number(String(change).replace(/^=/, ""));
+
+    if (isNaN(value)) {
+      return "스택 설정값이 숫자가 아닙니다: " + change;
+    }
+
+    return setStackValue(targetAlias, stackName, value, maxValue, "수동명령");
+  }
+
+  const delta = Number(String(change).replace(/^\+/, ""));
+
+  if (isNaN(delta)) {
+    return "스택 변경값이 숫자가 아닙니다: " + change;
+  }
+
+  return modifyStackValue(targetAlias, stackName, delta, maxValue, "수동명령");
+}
+
+function getStatusTemplateRows() {
+  return getSheetData(SHEET_STATUS_TEMPLATE);
+}
+
+function findStatusTemplate(templateName) {
+  const rows = getStatusTemplateRows();
+  const name = String(templateName || "").trim();
+
+  return rows.find(r => {
+    return String(r["상태명"] || "").trim() === name;
+  }) || null;
+}
+
+function statusTemplateListCommand(parts, displayName) {
+  let rows;
+
+  try {
+    rows = getStatusTemplateRows();
+  } catch (e) {
+    return (
+      "[상태 템플릿 오류]\n" +
+      "STATUS_TEMPLATE 시트를 찾을 수 없습니다.\n\n" +
+      "필요 헤더:\n" +
+      "상태명 / 분류 / 효과코드 / 수치 / 확률 / 누적확률 / 증가확률 / 최대확률 / 발동타이밍 / 대상판정 / 남은횟수 / 중복방식 / 메모 / 설명"
+    );
+  }
+
+  if (rows.length === 0) {
+    return "【상태 템플릿 목록】\n\n등록된 상태 템플릿이 없습니다.";
+  }
+
+  const lines = rows.map(r => {
+    return (
+      "- " + r["상태명"] +
+      " / " + r["분류"] +
+      " / " + r["효과코드"] +
+      " / 수치 " + noneText(r["수치"]) +
+      " / 확률 " + noneText(r["확률"]) + "%"
+    );
+  });
+
+  return (
+    "【상태 템플릿 목록】\n\n" +
+    lines.join("\n") + "\n\n" +
+    "상세 보기:\n" +
+    "!상태템플릿보기 구속\n\n" +
+    "부여:\n" +
+    "!상태템플릿부여 대상별명 구속"
+  );
+}
+
+function statusTemplateShowCommand(parts, displayName) {
+  if (parts.length < 2) {
+    return (
+      "사용법:\n" +
+      "!상태템플릿보기 상태명\n\n" +
+      "예시:\n" +
+      "!상태템플릿보기 구속"
+    );
+  }
+
+  const templateName = parts[1];
+  const t = findStatusTemplate(templateName);
+
+  if (!t) {
+    return "상태 템플릿을 찾을 수 없습니다: " + templateName;
+  }
+
+  return (
+    "【상태 템플릿】\n\n" +
+    "상태명: " + t["상태명"] + "\n" +
+    "분류: " + t["분류"] + "\n" +
+    "효과코드: " + t["효과코드"] + "\n" +
+    "수치: " + noneText(t["수치"]) + "\n" +
+    "확률: " + noneText(t["확률"]) + "%\n" +
+    "누적확률: " + noneText(t["누적확률"]) + "%\n" +
+    "증가확률: " + noneText(t["증가확률"]) + "%\n" +
+    "최대확률: " + noneText(t["최대확률"]) + "%\n" +
+    "발동타이밍: " + noneText(t["발동타이밍"]) + "\n" +
+    "대상판정: " + noneText(t["대상판정"]) + "\n" +
+    "남은횟수: " + noneText(t["남은횟수"]) + "\n" +
+    "중복방식: " + noneText(t["중복방식"]) + "\n" +
+    "메모: " + noneText(t["메모"]) + "\n\n" +
+    "설명:\n" +
+    noneText(t["설명"])
+  );
+}
+
+function resolveStatusTemplateApplyArgs(parts, displayName) {
+  if (parts.length < 2) {
+    throw new Error(
+      "사용법:\n" +
+      "!상태템플릿부여 [대상] 상태명 [옵션]\n\n" +
+      "예시:\n" +
+      "!상태템플릿부여 테스트 구속\n" +
+      "!상태템플릿부여 구속\n" +
+      "!상태템플릿부여 몬스터A 출혈 수치:8 횟수:3"
+    );
+  }
+
+  const first = String(parts[1] || "").trim();
+  const second = String(parts[2] || "").trim();
+
+  // 1) 첫 번째 값이 템플릿명이면 대상 생략 → 사용자 자신
+  const firstTemplate = findStatusTemplate(first);
+  if (firstTemplate) {
+    return {
+      targetAlias: getSelfAlias(displayName),
+      templateName: first,
+      optionStartIndex: 2,
+      template: firstTemplate
+    };
+  }
+
+  // 2) 두 번째 값이 템플릿명이면 첫 번째 값은 대상.
+  // 이 방식이면 BOT_DB에 없는 NPC/몬스터 이름도 대상명으로 쓸 수 있다.
+  const secondTemplate = findStatusTemplate(second);
+  if (secondTemplate) {
+    return {
+      targetAlias: first,
+      templateName: second,
+      optionStartIndex: 3,
+      template: secondTemplate
+    };
+  }
+
+  throw new Error(
+    "상태 템플릿을 찾을 수 없습니다.\n" +
+    "입력값: " + first + (second ? " / " + second : "") + "\n\n" +
+    "템플릿 목록 확인:\n" +
+    "!상태템플릿목록"
+  );
+}
+
+function statusTemplateApplyCommand(parts, displayName) {
+  let resolved;
+
+  try {
+    resolved = resolveStatusTemplateApplyArgs(parts, displayName);
+  } catch (e) {
+    return e.message;
+  }
+
+  const t = resolved.template;
+  const targetAlias = resolved.targetAlias;
+  const opts = parseEffectOptions(parts.slice(resolved.optionStartIndex));
+
+  // 명령어 옵션이 있으면 템플릿 값보다 우선한다.
+  const statusName = opts["상태명"] || t["상태명"];
+  const category = opts["분류"] || t["분류"];
+  const effectCode = opts["효과코드"] || t["효과코드"];
+
+  const text = addStatusToCharacter(targetAlias, statusName, category, effectCode, {
+    value: readEffectNumber(opts["수치"] || t["수치"], { finalValue: 0 }, 0),
+    chance: readEffectNumber(opts["확률"] || t["확률"], { finalValue: 0 }, 100),
+    accum: readEffectNumber(opts["누적"] || opts["누적확률"] || t["누적확률"], { finalValue: 0 }, 0),
+    increase: readEffectNumber(opts["증가"] || opts["증가확률"] || t["증가확률"], { finalValue: 0 }, 0),
+    maxChance: readEffectNumber(opts["최대확률"] || t["최대확률"], { finalValue: 0 }, 100),
+    trigger: opts["발동"] || opts["발동타이밍"] || t["발동타이밍"] || "판정시작",
+    checkType: opts["판정"] || opts["대상판정"] || t["대상판정"] || "전체",
+    count: opts["횟수"] || opts["남은횟수"] || t["남은횟수"] || "",
+    stackMode: opts["중복"] || opts["중복방식"] || t["중복방식"] || "허용",
+    source: "상태템플릿:" + t["상태명"],
+    memo: opts["메모"] || t["메모"] || ""
+  });
+
+  return (
+    "【상태 템플릿 부여】\n\n" +
+    "대상: " + targetAlias + "\n" +
+    "템플릿: " + t["상태명"] + "\n\n" +
+    text
+  );
+}
+
+function statusMatchesAnyCheckType(status, checkTypes) {
+  checkTypes = (checkTypes || []).map(v => String(v || "").trim()).filter(Boolean);
+
+  const raw = String(status["대상판정"] || "전체").trim();
+
+  if (!raw || raw === "전체") return true;
+
+  const list = raw.split(/[,，、]/).map(s => s.trim()).filter(Boolean);
+
+  return checkTypes.some(t => list.includes(t));
+}
+
+function getStatusValueModifier(alias, checkTypes) {
+  const rows = getActiveStatusRows(alias);
+  let delta = 0;
+  const logs = [];
+
+  rows.forEach(status => {
+    const category = String(status["분류"] || "").trim();
+    const code = String(status["효과코드"] || "").trim();
+    const name = String(status["상태명"] || "").trim();
+    const trigger = String(status["발동타이밍"] || "").trim();
+
+    if (category !== "쇠약강화") return;
+    if (trigger && trigger !== "판정계산전" && trigger !== "판정계산후" && trigger !== "전체") return;
+    if (!statusMatchesAnyCheckType(status, checkTypes)) return;
+
+    const rawValue = Math.floor(Number(status["수치"] || 0));
+    if (rawValue === 0) return;
+
+    let modValue = rawValue;
+
+    const isDebuff =
+      code === "weaken" ||
+      code === "debuff" ||
+      code === "slow" ||
+      code === "blind" ||
+      code === "쇠약" ||
+      name === "쇠약" ||
+      name === "둔화" ||
+      name === "실명";
+
+    const isBuff =
+      code === "enhance" ||
+      code === "haste" ||
+      code === "focus" ||
+      code === "buff" ||
+      code === "강화" ||
+      code === "가속" ||
+      name === "강화" ||
+      name === "가속" ||
+      name === "집중";
+
+    if (isDebuff) {
+      modValue = -Math.abs(rawValue);
+    } else if (isBuff) {
+      modValue = Math.abs(rawValue);
+    }
+
+    delta += modValue;
+
+    logs.push(
+      "[상태 보정: " + name + "]\n" +
+      "대상판정: " + (status["대상판정"] || "전체") + "\n" +
+      "보정: " + formatSigned(modValue)
+    );
+
+    consumeStatusCount(status);
+  });
+
+  return {
+    delta: delta,
+    text: logs.join("\n\n")
+  };
+}
+
+function applyStatusModifierToValue(alias, value, checkTypes) {
+  const modifier = getStatusValueModifier(alias, checkTypes);
+  const before = Math.floor(Number(value) || 0);
+  const after = before + modifier.delta;
+
+  return {
+    value: after,
+    delta: modifier.delta,
+    text: modifier.text,
+    before: before,
+    after: after
+  };
+}
+
+function formatCombatSummaryBlock(title, attack, responseName, responseValue, resultText, damage, effectSummary) {
+  return (
+    "【" + title + "】\n\n" +
+    "공격번호: " + attack["id"] + "\n" +
+    "공격자: " + attack["공격자"] + "\n" +
+    "대상: " + attack["대상"] + "\n\n" +
+    "공격값: " + attack["공격값"] + "\n" +
+    (responseName ? responseName + ": " + responseValue + "\n" : "") +
+    "결과: " + resultText + "\n" +
+    "최종피해: " + damage +
+    (effectSummary ? "\n\n효과: " + effectSummary : "")
+  );
+}
+
+function responseDetailText(response) {
+  if (!response) return "";
+  return response.detailText || response.text || "";
+}
+
+// =====================================================================
+// ENEMY SYSTEM v0.1
+// =====================================================================
+
+// ── Sheet setup ──────────────────────────────────────────────────────
+
+function ensureEnemySheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  if (!ss.getSheetByName(SHEET_ENEMY_TEMPLATES)) {
+    const sh = ss.insertSheet(SHEET_ENEMY_TEMPLATES);
+    const h = ["template_key", "name", "category", "threat", "max_hp"]
+      .concat(ENEMY_ACTION_FIELDS)
+      .concat(["rule", "signs", "memo"]);
+    sh.getRange(1, 1, 1, h.length).setValues([h]);
+  }
+
+  if (!ss.getSheetByName(SHEET_ENEMIES)) {
+    const sh = ss.insertSheet(SHEET_ENEMIES);
+    const h = ["enemy_id", "alias", "template_key", "name", "category", "threat",
+               "current_hp", "max_hp"]
+      .concat(ENEMY_ACTION_FIELDS)
+      .concat(["rule", "signs", "memo", "active", "created_at"]);
+    sh.getRange(1, 1, 1, h.length).setValues([h]);
+  }
+}
+
+// ── Core utilities ───────────────────────────────────────────────────
+
+function normalizeEnemyRef(v) {
+  return String(v || "").replace(/\s+/g, "").toLowerCase();
+}
+
+function getEnemyTemplates() {
+  ensureEnemySheets();
+  return getSheetData(SHEET_ENEMY_TEMPLATES);
+}
+
+function getActiveEnemies() {
+  ensureEnemySheets();
+  return getSheetData(SHEET_ENEMIES).filter(function(r) {
+    const v = r["active"];
+    if (v === true) return true;
+    const s = String(v || "").trim().toLowerCase();
+    return s === "true" || s === "1";
+  });
+}
+
+function resolveEnemy(ref) {
+  ensureEnemySheets();
+  const enemies = getActiveEnemies();
+  ref = String(ref || "").trim();
+  const normRef = normalizeEnemyRef(ref);
+
+  const byId = enemies.filter(function(e) {
+    return String(e["enemy_id"]).trim() === ref;
+  });
+  if (byId.length === 1) return byId[0];
+  if (byId.length > 1) throw new Error("에너미 지정이 애매합니다. ID로 지정해주세요: " + ref);
+
+  const byAlias = enemies.filter(function(e) {
+    return normalizeEnemyRef(e["alias"]) === normRef && normRef !== "";
+  });
+  if (byAlias.length === 1) return byAlias[0];
+  if (byAlias.length > 1) throw new Error("에너미 지정이 애매합니다. ID로 지정해주세요: " + ref);
+
+  const byName = enemies.filter(function(e) {
+    return normalizeEnemyRef(e["name"]) === normRef;
+  });
+  if (byName.length === 1) return byName[0];
+  if (byName.length > 1) throw new Error("에너미 지정이 애매합니다. ID로 지정해주세요: " + ref);
+
+  throw new Error("에너미를 찾을 수 없습니다: " + ref);
+}
+
+function isEnemyRef(ref) {
+  try {
+    resolveEnemy(ref);
+    return true;
+  } catch(e) {
+    return false;
+  }
+}
+
+function updateEnemy(enemy_id, patch) {
+  return updateRowById(SHEET_ENEMIES, "enemy_id", enemy_id, patch);
+}
+
+function rollEnemyAction(enemy, actionName, bonus) {
+  const diceCount = Math.max(1, Math.floor(Number(enemy[actionName]) || 1));
+  const rolls = rollDice(diceCount, ACTION_DICE_SIDES);
+  let total = rolls.reduce(function(a, b) { return a + b; }, 0);
+  bonus = Math.floor(Number(bonus) || 0);
+  total += bonus;
+  const bonusText = bonus !== 0 ? " " + formatSigned(bonus) : "";
+  return {
+    diceCount: diceCount,
+    rolls: rolls,
+    bonus: bonus,
+    total: total,
+    rollText: diceCount + "d6 [" + rolls.join(", ") + "]" + bonusText + " = " + total
+  };
+}
+
+function applyEnemyHpChange(enemy_id, delta, isHeal) {
+  ensureEnemySheets();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_ENEMIES);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(function(h) { return String(h).trim(); });
+  const idIdx   = headers.indexOf("enemy_id");
+  const curIdx  = headers.indexOf("current_hp");
+  const maxIdx  = headers.indexOf("max_hp");
+
+  for (let r = 1; r < values.length; r++) {
+    if (String(values[r][idIdx]).trim() === String(enemy_id).trim()) {
+      const before = Math.floor(Number(values[r][curIdx]) || 0);
+      const maxHp  = Math.floor(Number(values[r][maxIdx]) || 0);
+      const after  = isHeal
+        ? Math.min(maxHp, before + Math.abs(delta))
+        : Math.max(0, before - Math.abs(delta));
+      sheet.getRange(r + 1, curIdx + 1).setValue(after);
+      return { ok: true, before: before, after: after, maxHp: maxHp };
+    }
+  }
+  return { ok: false, before: 0, after: 0, maxHp: 0 };
+}
+
+function applyDamageToRef(ref, damage) {
+  var enemy = null;
+  try { enemy = resolveEnemy(ref); } catch(e) {}
+
+  if (enemy) {
+    const result = applyEnemyHpChange(enemy["enemy_id"], damage, false);
+    const label  = enemy["alias"] || enemy["name"];
+    if (!result.ok) {
+      return { ok: false, text: "[에너미 피해 오류]\n에너미를 찾을 수 없습니다: " + ref };
+    }
+    const downText = (result.after <= 0 && result.before > 0)
+      ? "\n\n[에너미 전투불능]\n" + label + "의 체력이 0이 되었습니다."
+      : "";
+    return {
+      ok: true,
+      before: result.before,
+      after:  result.after,
+      maxHp:  result.maxHp,
+      damage: damage,
+      text:
+        "[에너미 피해]\n" +
+        "대상: " + label + "\n" +
+        "피해: " + damage + "\n" +
+        "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+        downText
+    };
+  }
+
+  return applyDamageToCharacter(ref, damage);
+}
+
+// ── Pending attack helpers ────────────────────────────────────────────
+
+function createPendingAttackFlex(attackerRef, targetRef, attackKind, attackName, attackValue) {
+  ensureEnemySheets();
+
+  var enemy = null;
+  try { enemy = resolveEnemy(targetRef); } catch(e) {}
+
+  if (!enemy) {
+    return createPendingAttack(attackerRef, targetRef, attackKind, attackName, attackValue);
+  }
+
+  const id             = makeAttackId();
+  const now            = getNowText();
+  const canonicalId    = enemy["enemy_id"];
+  const targetDisplay  = enemy["alias"] || enemy["name"];
+
+  appendRowByHeaders(SHEET_COMBAT_PENDING, {
+    id:       id,
+    상태:     "PENDING",
+    공격자:   attackerRef,
+    대상:     canonicalId,
+    공격종류: attackKind,
+    공격명:   attackName,
+    공격값:   Math.floor(Number(attackValue) || 0),
+    생성일:   now,
+    처리일:   "",
+    대응종류: "",
+    대응값:   "",
+    최종피해: "",
+    메모:     "TARGET_TYPE:ENEMY"
+  });
+
+  return {
+    ok:            true,
+    id:            id,
+    attacker:      attackerRef,
+    target:        canonicalId,
+    targetDisplay: targetDisplay,
+    attackKind:    attackKind,
+    attackName:    attackName,
+    attackValue:   Math.floor(Number(attackValue) || 0),
+    isEnemyTarget: true,
+    메모:          "TARGET_TYPE:ENEMY"
+  };
+}
+
+function makeCombatChoiceTextFlex(attack) {
+  const memo = String(attack["메모"] || attack.memo || "");
+  if (memo.indexOf("TARGET_TYPE:ENEMY") < 0) {
+    return makeCombatChoiceText(attack);
+  }
+
+  const id          = attack.id          || attack["id"]    || "";
+  const attacker    = attack.attacker    || attack["공격자"] || "";
+  const target      = attack.targetDisplay || attack.target || attack["대상"] || "";
+  const attackName  = attack.attackName  || attack["공격명"] || "";
+  const attackValue = attack.attackValue !== undefined
+    ? attack.attackValue
+    : (attack["공격값"] || "");
+
+  return (
+    "[에너미 대응 대기]\n" +
+    "공격번호: " + id        + "\n" +
+    "공격자: "  + attacker   + "\n" +
+    "대상: "    + target     + "\n\n" +
+    "공격: "    + attackName + "\n" +
+    "공격값: "  + attackValue + "\n\n" +
+    "에너미 대응: !에너미대응 " + target + " 방어/회피/맞대응/무대응\n" +
+    "번호 지정:  !에너미대응 " + target + " " + id + " 방어/회피/맞대응/무대응"
+  );
+}
+
+function findLatestPendingAttackForEnemy(ref) {
+  ensureEnemySheets();
+  var enemy;
+  try { enemy = resolveEnemy(ref); } catch(e) {
+    throw new Error("에너미를 찾을 수 없습니다: " + ref);
+  }
+  const enemyId = enemy["enemy_id"];
+  const rows    = getSheetData(SHEET_COMBAT_PENDING);
+
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if (String(r["상태"]).trim() === "PENDING" &&
+        String(r["대상"]).trim() === enemyId) {
+      return r;
+    }
+  }
+  return null;
+}
+
+// ── Command: !에너미불러오기 ─────────────────────────────────────────
+
+function enemyLoad(parts, displayName, utterance) {
+  ensureEnemySheets();
+
+  if (parts.length < 2) {
+    return (
+      "사용법: !에너미불러오기 <template_key 또는 이름> [별명:별명]\n" +
+      "예시: !에너미불러오기 골목괴이\n" +
+      "      !에너미불러오기 골목괴이 별명:A조"
+    );
+  }
+
+  const templateRef = parts[1];
+  var alias = "";
+
+  for (let i = 2; i < parts.length; i++) {
+    const t = String(parts[i] || "").trim();
+    if (t.startsWith("별명:") || t.startsWith("별명=")) {
+      alias = t.replace(/^별명[:=]/, "").trim();
+    }
+  }
+
+  const templates = getEnemyTemplates();
+  var tpl = templates.find(function(r) {
+    return String(r["template_key"]).trim() === templateRef;
+  });
+  if (!tpl) {
+    tpl = templates.find(function(r) {
+      return normalizeEnemyRef(r["name"]) === normalizeEnemyRef(templateRef);
+    });
+  }
+
+  if (!tpl) {
+    return (
+      "[에너미 불러오기 실패]\n" +
+      "ENEMY_TEMPLATES에서 찾을 수 없습니다: " + templateRef + "\n\n" +
+      "!에너미목록 으로 등록된 에너미를 확인하세요."
+    );
+  }
+
+  const baseName = String(tpl["name"] || tpl["template_key"]).trim();
+
+  if (!alias) {
+    const sameNameCount = getActiveEnemies().filter(function(e) {
+      return normalizeEnemyRef(e["name"]) === normalizeEnemyRef(baseName);
+    }).length;
+    alias = sameNameCount > 0 ? baseName + "-" + (sameNameCount + 1) : baseName;
+  }
+
+  const dupAlias = getActiveEnemies().find(function(e) {
+    return normalizeEnemyRef(e["alias"]) === normalizeEnemyRef(alias);
+  });
+  if (dupAlias) {
+    return "[에너미 불러오기 실패]\n별명이 이미 사용 중입니다: " + alias;
+  }
+
+  const id    = makeId("E", SHEET_ENEMIES);
+  const now   = getNowText();
+  const maxHp = Math.floor(Number(tpl["max_hp"]) || 0);
+
+  const row = {
+    enemy_id:     id,
+    alias:        alias,
+    template_key: String(tpl["template_key"] || "").trim(),
+    name:         baseName,
+    category:     String(tpl["category"]     || "").trim(),
+    threat:       String(tpl["threat"]       || "").trim(),
+    current_hp:   maxHp,
+    max_hp:       maxHp,
+    rule:         String(tpl["rule"]         || "").trim(),
+    signs:        String(tpl["signs"]        || "").trim(),
+    memo:         String(tpl["memo"]         || "").trim(),
+    active:       "true",
+    created_at:   now
+  };
+
+  ENEMY_ACTION_FIELDS.forEach(function(a) {
+    row[a] = (tpl[a] !== undefined && tpl[a] !== "") ? tpl[a] : 0;
+  });
+
+  appendRowByHeaders(SHEET_ENEMIES, row);
+
+  return (
+    "[에너미 생성]\n" +
+    "ID: "    + id                        + "\n" +
+    "별명: "  + alias                     + "\n" +
+    "이름: "  + row.name                  + "\n" +
+    "분류: "  + (row.category || "—")     + "\n" +
+    "위험도: " + (row.threat  || "—")    + "\n" +
+    "체력: "  + maxHp + " / " + maxHp
+  );
+}
+
+// ── Command: !에너미목록 ─────────────────────────────────────────────
+
+function enemyList(displayName) {
+  ensureEnemySheets();
+  const enemies = getActiveEnemies();
+
+  if (enemies.length === 0) {
+    return "[에너미 목록]\n현재 활성 에너미가 없습니다.";
+  }
+
+  const lines = enemies.map(function(e) {
+    const hp    = Math.floor(Number(e["current_hp"]) || 0);
+    const maxHp = Math.floor(Number(e["max_hp"])     || 0);
+    return (
+      e["enemy_id"] + " / " +
+      (e["alias"] || "—") + " / " +
+      e["name"] +
+      " / HP " + hp + "/" + maxHp
+    );
+  });
+
+  return "[에너미 목록]\n" + lines.join("\n");
+}
+
+// ── Command: !에너미정보 ─────────────────────────────────────────────
+
+function enemyInfo(parts, displayName) {
+  ensureEnemySheets();
+
+  if (parts.length < 2) {
+    return "사용법: !에너미정보 <에너미 ID/별명/이름>";
+  }
+
+  var enemy;
+  try { enemy = resolveEnemy(parts[1]); } catch(e) {
+    return "[에너미 정보 오류]\n" + e.message;
+  }
+
+  const hp    = Math.floor(Number(enemy["current_hp"]) || 0);
+  const maxHp = Math.floor(Number(enemy["max_hp"])     || 0);
+
+  const actionLines = ENEMY_ACTION_FIELDS.map(function(a) {
+    return a + ":" + Math.floor(Number(enemy[a]) || 0) + "d6";
+  }).join("  ");
+
+  return (
+    "[에너미 정보]\n" +
+    "ID: "   + enemy["enemy_id"]            + "\n" +
+    "별명: " + (enemy["alias"] || "—")      + "\n" +
+    "이름: " + enemy["name"]                + "\n" +
+    "분류: " + (enemy["category"] || "—")   + "\n" +
+    "위험도: " + (enemy["threat"] || "—")   + "\n" +
+    "체력: " + hp + " / " + maxHp           + "\n\n" +
+    actionLines +
+    (enemy["rule"]  ? "\n\n규칙: " + enemy["rule"]  : "") +
+    (enemy["signs"] ? "\n징표: "   + enemy["signs"] : "") +
+    (enemy["memo"]  ? "\n메모: "   + enemy["memo"]  : "")
+  );
+}
+
+// ── Command: !에너미삭제 ─────────────────────────────────────────────
+
+function enemyDelete(parts, displayName) {
+  ensureEnemySheets();
+
+  if (parts.length < 2) {
+    return "사용법: !에너미삭제 <에너미 ID/별명/이름>";
+  }
+
+  var enemy;
+  try { enemy = resolveEnemy(parts[1]); } catch(e) {
+    return "[에너미 삭제 오류]\n" + e.message;
+  }
+
+  updateEnemy(enemy["enemy_id"], { active: "false" });
+
+  return (
+    "[에너미 비활성화]\n" +
+    "ID: "   + enemy["enemy_id"]       + "\n" +
+    "별명: " + (enemy["alias"] || "—") + "\n" +
+    "이름: " + enemy["name"]
+  );
+}
+
+// ── Command: !에너미피해 ─────────────────────────────────────────────
+
+function enemyDamage(parts, displayName) {
+  ensureEnemySheets();
+
+  if (parts.length < 3) {
+    return "사용법: !에너미피해 <에너미 ID/별명/이름> <수치>";
+  }
+
+  var enemy;
+  try { enemy = resolveEnemy(parts[1]); } catch(e) {
+    return "[에너미 피해 오류]\n" + e.message;
+  }
+
+  const amount = Math.max(0, Math.floor(Number(parts[2]) || 0));
+  const result = applyEnemyHpChange(enemy["enemy_id"], amount, false);
+
+  return (
+    "[에너미 피해]\n" +
+    "대상: " + (enemy["alias"] || enemy["name"]) + "\n" +
+    "피해: " + amount + "\n" +
+    "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+    (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]\n체력이 0이 되었습니다." : "")
+  );
+}
+
+// ── Command: !에너미회복 ─────────────────────────────────────────────
+
+function enemyHeal(parts, displayName) {
+  ensureEnemySheets();
+
+  if (parts.length < 3) {
+    return "사용법: !에너미회복 <에너미 ID/별명/이름> <수치>";
+  }
+
+  var enemy;
+  try { enemy = resolveEnemy(parts[1]); } catch(e) {
+    return "[에너미 회복 오류]\n" + e.message;
+  }
+
+  const amount = Math.max(0, Math.floor(Number(parts[2]) || 0));
+  const result = applyEnemyHpChange(enemy["enemy_id"], amount, true);
+
+  return (
+    "[에너미 회복]\n" +
+    "대상: " + (enemy["alias"] || enemy["name"]) + "\n" +
+    "회복: " + amount + "\n" +
+    "체력: " + result.before + " → " + result.after + " / " + result.maxHp
+  );
+}
+
+// ── Command: !에너미별명 ─────────────────────────────────────────────
+
+function enemyRename(parts, displayName) {
+  ensureEnemySheets();
+
+  if (parts.length < 3) {
+    return "사용법: !에너미별명 <에너미 ID/별명/이름> <새별명>";
+  }
+
+  var enemy;
+  try { enemy = resolveEnemy(parts[1]); } catch(e) {
+    return "[에너미 별명 오류]\n" + e.message;
+  }
+
+  const newAlias = String(parts[2] || "").trim();
+  if (!newAlias) return "[에너미 별명 오류]\n새 별명을 입력하세요.";
+
+  const dup = getActiveEnemies().find(function(e) {
+    return e["enemy_id"] !== enemy["enemy_id"] &&
+           normalizeEnemyRef(e["alias"]) === normalizeEnemyRef(newAlias);
+  });
+  if (dup) return "[에너미 별명 오류]\n별명이 이미 사용 중입니다: " + newAlias;
+
+  const oldAlias = String(enemy["alias"] || "—");
+  updateEnemy(enemy["enemy_id"], { alias: newAlias });
+
+  return (
+    "[에너미 별명 변경]\n" +
+    "ID: "        + enemy["enemy_id"] + "\n" +
+    "이전 별명: " + oldAlias          + "\n" +
+    "새 별명: "   + newAlias
+  );
+}
+
+// ── Command: !에너미공격 ─────────────────────────────────────────────
+
+function enemyAttack(parts, displayName, utterance) {
+  ensureEnemySheets();
+
+  if (parts.length < 3) {
+    return (
+      "사용법: !에너미공격 <에너미 ID/별명> <액션명> [대상:캐릭터별명] [보정]\n" +
+      "예시: !에너미공격 골목괴이 참격 대상:월하륜\n" +
+      "      !에너미공격 E-0001 사격 대상:아르 +2"
+    );
+  }
+
+  var enemy;
+  try { enemy = resolveEnemy(parts[1]); } catch(e) {
+    return "[에너미 공격 오류]\n" + e.message;
+  }
+
+  const actionName = String(parts[2] || "").trim();
+  if (!ENEMY_ACTION_FIELDS.includes(actionName)) {
+    return (
+      "[에너미 공격 오류]\n" +
+      "알 수 없는 액션: " + actionName + "\n" +
+      "사용 가능: " + ENEMY_ACTION_FIELDS.join(", ")
+    );
+  }
+
+  const diceCount = Math.floor(Number(enemy[actionName]) || 0);
+  if (diceCount <= 0) {
+    return (
+      "[에너미 공격 오류]\n" +
+      (enemy["alias"] || enemy["name"]) + "의 " + actionName + " 수치가 0입니다."
+    );
+  }
+
+  var targetAlias = "";
+  var bonus = 0;
+
+  parts.slice(3).forEach(function(t) {
+    t = String(t || "").trim();
+    if (t.startsWith("대상:") || t.startsWith("대상=")) {
+      targetAlias = t.replace(/^대상[:=]/, "").trim();
+    } else if (/^[+\-]?\d+$/.test(t)) {
+      bonus += Number(t);
+    }
+  });
+
+  const result      = rollEnemyAction(enemy, actionName, bonus);
+  const enemyLabel  = enemy["alias"] || enemy["name"];
+
+  var combatText = "";
+
+  if (targetAlias) {
+    const pcTarget = findCharacterByAlias(targetAlias);
+    if (!pcTarget) {
+      combatText = "\n\n대상 캐릭터를 찾을 수 없습니다: " + targetAlias;
+    } else {
+      const attackName = actionName + "(" + enemyLabel + ")";
+      const pending = createPendingAttack(
+        enemy["enemy_id"],
+        targetAlias,
+        "에너미액션",
+        attackName,
+        result.total
+      );
+      if (pending.ok) {
+        combatText = "\n\n" + makeCombatChoiceText(pending);
+      } else {
+        combatText = "\n\n" + pending.text;
+      }
+    }
+  }
+
+  return (
+    "[에너미 공격]\n" +
+    "공격자: " + enemyLabel  + " (" + enemy["enemy_id"] + ")\n" +
+    "액션: "   + actionName  + "\n" +
+    "굴림: "   + result.rollText +
+    combatText
+  );
+}
+
+// ── Command: !에너미대응 ─────────────────────────────────────────────
+
+function enemyRespond(parts, displayName) {
+  ensureEnemySheets();
+
+  if (parts.length < 3) {
+    return (
+      "사용법: !에너미대응 <에너미 ID/별명> <대응방식> [액션명(맞대응 시)]\n" +
+      "또는:   !에너미대응 <에너미 ID/별명> <공격번호> <대응방식> [액션명]\n\n" +
+      "대응방식: 방어 / 회피 / 무대응 / 맞대응"
+    );
+  }
+
+  var enemy;
+  try { enemy = resolveEnemy(parts[1]); } catch(e) {
+    return "[에너미 대응 오류]\n" + e.message;
+  }
+
+  var index = 2;
+  var attackId = "";
+
+  if (/^ATK-\d+/i.test(String(parts[index] || ""))) {
+    attackId = parts[index];
+    index++;
+  }
+
+  const mode = String(parts[index] || "").trim();
+  const rest = parts.slice(index + 1);
+
+  if (!mode) {
+    return "[에너미 대응 오류]\n대응 방식을 입력하세요: 방어 / 회피 / 무대응 / 맞대응";
+  }
+
+  var attack;
+  try {
+    attack = attackId
+      ? findPendingAttackById(attackId)
+      : findLatestPendingAttackForEnemy(parts[1]);
+  } catch(e) {
+    return "[에너미 대응 오류]\n" + e.message;
+  }
+
+  if (!attack) {
+    return (
+      "[에너미 대응 오류]\n" +
+      (enemy["alias"] || enemy["name"]) + "을(를) 대상으로 한 미처리 공격이 없습니다.\n" +
+      "공격번호로 지정: !에너미대응 " + parts[1] + " ATK-0001 방어"
+    );
+  }
+
+  const attackValue  = Math.floor(Number(attack["공격값"]) || 0);
+  const attackerRef  = String(attack["공격자"]).trim();
+  const enemyLabel   = enemy["alias"] || enemy["name"];
+
+  // ── 무대응 ──
+  if (mode === "무대응") {
+    const result = applyEnemyHpChange(enemy["enemy_id"], attackValue, false);
+    resolvePendingAttack(attack["id"], {
+      대응종류: "무대응",
+      대응값:   0,
+      최종피해: attackValue,
+      메모:     "에너미 무대응. 피해 전부 적용"
+    });
+    return (
+      "[에너미 무대응]\n" +
+      "공격번호: " + attack["id"]  + "\n" +
+      "공격값: "   + attackValue   + "\n" +
+      "최종피해: " + attackValue   + "\n" +
+      "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+      (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "")
+    );
+  }
+
+  // ── 방어 ──
+  if (mode === "방어") {
+    const defDice = Math.floor(Number(enemy["방어"]) || 0);
+    if (defDice <= 0) {
+      return "[에너미 대응 오류]\n방어 수치가 0입니다. 무대응 또는 회피를 사용하세요.";
+    }
+    const defRoll  = rollEnemyAction(enemy, "방어", 0);
+    const damage   = Math.max(0, attackValue - defRoll.total);
+    const success  = damage <= 0;
+    const result   = damage > 0
+      ? applyEnemyHpChange(enemy["enemy_id"], damage, false)
+      : { before: Math.floor(Number(enemy["current_hp"]) || 0),
+          after:  Math.floor(Number(enemy["current_hp"]) || 0),
+          maxHp:  Math.floor(Number(enemy["max_hp"])     || 0) };
+
+    resolvePendingAttack(attack["id"], {
+      대응종류: "방어",
+      대응값:   defRoll.total,
+      최종피해: damage,
+      메모:     success ? "에너미 방어 성공" : "에너미 방어 실패"
+    });
+
+    return (
+      "[에너미 방어]\n" +
+      "공격번호: " + attack["id"]   + "\n" +
+      "공격값: "   + attackValue    + "\n" +
+      "방어 굴림: " + defRoll.rollText + "\n" +
+      "결과: "     + (success ? "방어 성공" : "방어 실패") + "\n" +
+      "최종피해: " + damage + "\n" +
+      (damage > 0
+        ? "체력: " + result.before + " → " + result.after + " / " + result.maxHp
+        : "피해 없음") +
+      (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "")
+    );
+  }
+
+  // ── 회피 ──
+  if (mode === "회피") {
+    const evDice = Math.floor(Number(enemy["회피"]) || 0);
+    if (evDice <= 0) {
+      return "[에너미 대응 오류]\n회피 수치가 0입니다. 무대응 또는 방어를 사용하세요.";
+    }
+    const evRoll   = rollEnemyAction(enemy, "회피", 0);
+    const success  = evRoll.total >= attackValue;
+    const damage   = success ? 0 : attackValue;
+    const result   = damage > 0
+      ? applyEnemyHpChange(enemy["enemy_id"], damage, false)
+      : { before: Math.floor(Number(enemy["current_hp"]) || 0),
+          after:  Math.floor(Number(enemy["current_hp"]) || 0),
+          maxHp:  Math.floor(Number(enemy["max_hp"])     || 0) };
+
+    resolvePendingAttack(attack["id"], {
+      대응종류: "회피",
+      대응값:   evRoll.total,
+      최종피해: damage,
+      메모:     success ? "에너미 회피 성공" : "에너미 회피 실패"
+    });
+
+    return (
+      "[에너미 회피]\n" +
+      "공격번호: " + attack["id"]  + "\n" +
+      "공격값: "   + attackValue   + "\n" +
+      "회피 굴림: " + evRoll.rollText + "\n" +
+      "결과: "     + (success ? "회피 성공" : "회피 실패") + "\n" +
+      "최종피해: " + damage + "\n" +
+      (damage > 0
+        ? "체력: " + result.before + " → " + result.after + " / " + result.maxHp
+        : "피해 없음") +
+      (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "")
+    );
+  }
+
+  // ── 맞대응 ──
+  if (mode === "맞대응") {
+    const counterActionName = String(rest[0] || "").trim();
+    if (!counterActionName || !ENEMY_ACTION_FIELDS.includes(counterActionName)) {
+      return (
+        "[에너미 맞대응 오류]\n" +
+        "맞대응에 사용할 액션명을 입력하세요.\n" +
+        "예: !에너미대응 " + parts[1] + " 맞대응 참격\n" +
+        "사용 가능: " + ENEMY_ACTION_FIELDS.join(", ")
+      );
+    }
+
+    const ctrDice = Math.floor(Number(enemy[counterActionName]) || 0);
+    if (ctrDice <= 0) {
+      return "[에너미 대응 오류]\n" + counterActionName + " 수치가 0입니다.";
+    }
+
+    const ctrRoll    = rollEnemyAction(enemy, counterActionName, 0);
+    const ctrValue   = ctrRoll.total;
+
+    // 에너미 승리: 반격피해를 공격자(PC)에게
+    if (ctrValue > attackValue) {
+      const damageResult = applyDamageToRef(attackerRef, ctrValue);
+      resolvePendingAttack(attack["id"], {
+        대응종류: "맞대응",
+        대응값:   ctrValue,
+        최종피해: ctrValue,
+        메모:     "에너미 맞대응 성공. 공격자에게 반격 피해"
+      });
+      return (
+        "[에너미 맞대응]\n" +
+        "공격번호: "  + attack["id"]    + "\n" +
+        "공격값: "    + attackValue     + "\n" +
+        "맞대응 굴림: " + ctrRoll.rollText + "\n" +
+        "결과: 에너미 맞대응 성공\n" +
+        "반격피해: "  + ctrValue        + "\n\n" +
+        damageResult.text
+      );
+    }
+
+    // PC 승리: 피해를 에너미에게
+    if (ctrValue < attackValue) {
+      const result = applyEnemyHpChange(enemy["enemy_id"], attackValue, false);
+      resolvePendingAttack(attack["id"], {
+        대응종류: "맞대응",
+        대응값:   ctrValue,
+        최종피해: attackValue,
+        메모:     "에너미 맞대응 실패. 에너미에게 피해"
+      });
+      return (
+        "[에너미 맞대응]\n" +
+        "공격번호: "  + attack["id"]    + "\n" +
+        "공격값: "    + attackValue     + "\n" +
+        "맞대응 굴림: " + ctrRoll.rollText + "\n" +
+        "결과: 에너미 맞대응 실패\n" +
+        "최종피해: " + attackValue + "\n" +
+        "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+        (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "")
+      );
+    }
+
+    // 동률: 상쇄
+    resolvePendingAttack(attack["id"], {
+      대응종류: "맞대응",
+      대응값:   ctrValue,
+      최종피해: 0,
+      메모:     "에너미 맞대응 동률. 상쇄"
+    });
+    return (
+      "[에너미 맞대응]\n" +
+      "공격번호: "  + attack["id"]    + "\n" +
+      "공격값: "    + attackValue     + "\n" +
+      "맞대응 굴림: " + ctrRoll.rollText + "\n" +
+      "결과: 동률 / 상쇄\n" +
+      "최종피해: 0"
+    );
+  }
+
+  return (
+    "[에너미 대응 오류]\n" +
+    "알 수 없는 대응 방식: " + mode + "\n" +
+    "방어 / 회피 / 무대응 / 맞대응 액션명"
+  );
+}
+
+// ── End of Enemy System v0.1 ─────────────────────────────────────────
