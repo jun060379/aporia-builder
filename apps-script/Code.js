@@ -15,6 +15,7 @@ const SHEET_STATUS_TEMPLATE = "STATUS_TEMPLATE";
 
 const SHEET_ENEMY_TEMPLATES = "ENEMY_TEMPLATES";
 const SHEET_ENEMIES = "ENEMIES";
+const SHEET_ENEMY_SKILLS = "ENEMY_SKILLS";
 const ENEMY_ACTION_FIELDS = [
   "참격", "관통", "타격", "격투", "사격",
   "방어", "회피", "저항",
@@ -205,6 +206,9 @@ function handleCommand(utterance, displayName) {
   if (command === "!에너미별명")     return enemyRename(parts, displayName);
   if (command === "!에너미공격")     return enemyAttack(parts, displayName, utterance);
   if (command === "!에너미대응")     return enemyRespond(parts, displayName);
+  if (command === "!에너미생성")     return enemyCreate(utterance, displayName);
+  if (command === "!에너미스킬목록") return enemySkillList(parts, displayName);
+  if (command === "!에너미스킬")     return enemySkillUse(parts, displayName);
 
   const dynamicName = command.replace(/^!/, "").trim();
   
@@ -6154,6 +6158,13 @@ function ensureEnemySheets() {
       .concat(["rule", "signs", "memo", "active", "created_at"]);
     sh.getRange(1, 1, 1, h.length).setValues([h]);
   }
+
+  if (!ss.getSheetByName(SHEET_ENEMY_SKILLS)) {
+    const sh = ss.insertSheet(SHEET_ENEMY_SKILLS);
+    const h = ["skill_key", "owner_type", "owner_key", "name", "category",
+               "rank", "formula", "effect", "target_mode", "memo"];
+    sh.getRange(1, 1, 1, h.length).setValues([h]);
+  }
 }
 
 // ── Core utilities ───────────────────────────────────────────────────
@@ -6956,3 +6967,418 @@ function enemyRespond(parts, displayName) {
 }
 
 // ── End of Enemy System v0.1 ─────────────────────────────────────────
+
+// =====================================================================
+// ENEMY SYSTEM v0.2
+// =====================================================================
+
+// ── Skill sheet utilities ─────────────────────────────────────────────
+
+function getEnemySkills() {
+  ensureEnemySheets();
+  return getSheetData(SHEET_ENEMY_SKILLS);
+}
+
+function getAvailableEnemySkills(enemy) {
+  const skills      = getEnemySkills();
+  const enemyId     = String(enemy["enemy_id"]     || "").trim();
+  const templateKey = String(enemy["template_key"] || "").trim();
+
+  return skills.filter(function(s) {
+    const ownerType = String(s["owner_type"] || "").trim().toLowerCase();
+    const ownerKey  = String(s["owner_key"]  || "").trim();
+
+    if (ownerType === "global") return true;
+    if (ownerType === "enemy"    && ownerKey === enemyId)                          return true;
+    if (ownerType === "template" && templateKey && ownerKey === templateKey)       return true;
+    return false;
+  });
+}
+
+function resolveEnemySkill(enemy, skillRef) {
+  const available = getAvailableEnemySkills(enemy);
+  skillRef = String(skillRef || "").trim();
+
+  const byKey = available.filter(function(s) {
+    return String(s["skill_key"]).trim() === skillRef;
+  });
+  if (byKey.length === 1) return byKey[0];
+  if (byKey.length > 1)   throw new Error("스킬 지정이 애매합니다: " + skillRef);
+
+  const byName = available.filter(function(s) {
+    return String(s["name"]).trim() === skillRef;
+  });
+  if (byName.length === 1) return byName[0];
+  if (byName.length > 1)   throw new Error("스킬 지정이 애매합니다: " + skillRef);
+
+  throw new Error("사용 가능한 스킬을 찾을 수 없습니다: " + skillRef);
+}
+
+// ── Formula evaluation ────────────────────────────────────────────────
+
+function evaluateEnemySkillFormula(formula, rankValue) {
+  var expr = String(formula || "랭크").trim();
+  expr = expr.replace(/랭크/g, String(rankValue));
+
+  var expanded;
+  try {
+    expanded = expandDiceNotationInFormula(expr);
+  } catch(e) {
+    throw new Error("계산식 오류: " + formula + " → " + e.message);
+  }
+
+  var total;
+  try {
+    // eval is safe here: formula is GM-authored spreadsheet data
+    total = Math.floor(eval(expanded.expression)); // eslint-disable-line no-eval
+  } catch(e) {
+    throw new Error("계산식 평가 오류: " + expanded.expression + " → " + e.message);
+  }
+
+  return {
+    total:    total,
+    diceLogs: expanded.diceLogs,
+    original: formula
+  };
+}
+
+function rollEnemySkill(enemy, skill, bonus) {
+  const rank = String(skill["rank"] || "E").trim().toUpperCase();
+  var rankValue;
+  try { rankValue = rankToValue(rank); } catch(e) { rankValue = 10; }
+
+  bonus = Math.floor(Number(bonus) || 0);
+
+  const ev    = evaluateEnemySkillFormula(String(skill["formula"] || "랭크"), rankValue);
+  const total = ev.total + bonus;
+
+  return {
+    rank:      rank,
+    rankValue: rankValue,
+    base:      ev.total,
+    total:     total,
+    diceLogs:  ev.diceLogs,
+    bonus:     bonus
+  };
+}
+
+// ── Key-value parser for !에너미생성 ─────────────────────────────────
+
+function parseKeyValueArgs(text) {
+  const knownKeys = [
+    "이름", "별명", "분류", "위험도", "체력",
+    "참격", "관통", "타격", "격투", "사격",
+    "방어", "회피", "저항", "조사", "해석", "은신", "추적", "설득",
+    "규칙", "징후", "메모"
+  ];
+
+  text = String(text || "");
+  const positions = [];
+
+  knownKeys.forEach(function(key) {
+    const pattern = key + ":";
+    var searchFrom = 0;
+    while (searchFrom < text.length) {
+      const idx = text.indexOf(pattern, searchFrom);
+      if (idx === -1) break;
+      const prevChar = idx > 0 ? text[idx - 1] : " ";
+      if (/\s/.test(prevChar) || idx === 0) {
+        positions.push({ key: key, start: idx, valueStart: idx + pattern.length });
+      }
+      searchFrom = idx + 1;
+    }
+  });
+
+  positions.sort(function(a, b) { return a.start - b.start; });
+
+  const result = {};
+  for (var i = 0; i < positions.length; i++) {
+    const valueStart = positions[i].valueStart;
+    const end        = i + 1 < positions.length ? positions[i + 1].start : text.length;
+    result[positions[i].key] = text.slice(valueStart, end).trim();
+  }
+  return result;
+}
+
+// ── Command: !에너미생성 ─────────────────────────────────────────────
+
+function enemyCreate(utterance, displayName) {
+  ensureEnemySheets();
+
+  const rawArgs = String(utterance || "").replace(/^!에너미생성\s*/, "").trim();
+
+  if (!rawArgs) {
+    return (
+      "사용법: !에너미생성 이름:<이름> 체력:<체력> [별명:<별명>] [분류:<분류>] [위험도:<위험도>]\n" +
+      "         [참격:<n>] [관통:<n>] ... [규칙:<텍스트>] [징후:<텍스트>] [메모:<텍스트>]\n\n" +
+      "예시:\n!에너미생성 이름:골목괴이 별명:A조 분류:괴이 위험도:2 체력:50 참격:5 방어:3 회피:4"
+    );
+  }
+
+  const args = parseKeyValueArgs(rawArgs);
+
+  const name = String(args["이름"] || "").trim();
+  const hpRaw = String(args["체력"] || "").trim();
+
+  if (!name) {
+    return "[에너미 생성 실패]\n이름은 필수 항목입니다.\n이름:<이름> 을 포함해주세요.";
+  }
+  if (!hpRaw || isNaN(Number(hpRaw))) {
+    return "[에너미 생성 실패]\n체력은 필수 항목입니다.\n체력:<숫자> 를 포함해주세요.";
+  }
+
+  const maxHp = Math.max(0, Math.floor(Number(hpRaw)));
+
+  var alias = String(args["별명"] || "").trim();
+  if (!alias) {
+    const sameNameCount = getActiveEnemies().filter(function(e) {
+      return normalizeEnemyRef(e["name"]) === normalizeEnemyRef(name);
+    }).length;
+    alias = sameNameCount > 0 ? name + "-" + (sameNameCount + 1) : name;
+  }
+
+  const dupAlias = getActiveEnemies().find(function(e) {
+    return normalizeEnemyRef(e["alias"]) === normalizeEnemyRef(alias);
+  });
+  if (dupAlias) {
+    return "[에너미 생성 실패]\n별명이 이미 사용 중입니다: " + alias;
+  }
+
+  const id  = makeId("E", SHEET_ENEMIES);
+  const now = getNowText();
+
+  const row = {
+    enemy_id:     id,
+    alias:        alias,
+    template_key: "manual",
+    name:         name,
+    category:     String(args["분류"]   || "").trim(),
+    threat:       String(args["위험도"] || "").trim(),
+    current_hp:   maxHp,
+    max_hp:       maxHp,
+    rule:         String(args["규칙"]   || "").trim(),
+    signs:        String(args["징후"]   || "").trim(),
+    memo:         String(args["메모"]   || "").trim(),
+    active:       "true",
+    created_at:   now
+  };
+
+  ENEMY_ACTION_FIELDS.forEach(function(a) {
+    const v = args[a];
+    row[a] = (v !== undefined && v !== "") ? Math.max(0, Math.floor(Number(v) || 0)) : 0;
+  });
+
+  appendRowByHeaders(SHEET_ENEMIES, row);
+
+  return (
+    "[에너미 생성]\n" +
+    "ID: "       + id                        + "\n" +
+    "별명: "     + alias                     + "\n" +
+    "이름: "     + name                      + "\n" +
+    "분류: "     + (row.category || "—")     + "\n" +
+    "위험도: "   + (row.threat   || "—")     + "\n" +
+    "체력: "     + maxHp + " / " + maxHp     + "\n" +
+    "생성 방식: 수동"
+  );
+}
+
+// ── Command: !에너미스킬목록 ─────────────────────────────────────────
+
+function enemySkillList(parts, displayName) {
+  ensureEnemySheets();
+
+  if (parts.length < 2) {
+    return "사용법: !에너미스킬목록 <에너미 ID/별명/이름>";
+  }
+
+  var enemy;
+  try { enemy = resolveEnemy(parts[1]); } catch(e) {
+    return "[에너미 스킬 목록 오류]\n" + e.message;
+  }
+
+  const available = getAvailableEnemySkills(enemy);
+  const label     = enemy["alias"] || enemy["name"];
+
+  if (available.length === 0) {
+    return (
+      "[에너미 스킬 목록]\n" +
+      "사용자: " + label + "\n\n" +
+      "사용 가능한 스킬이 없습니다.\n" +
+      "ENEMY_SKILLS 시트에 스킬을 등록하세요."
+    );
+  }
+
+  const lines = available.map(function(s) {
+    return (
+      (s["skill_key"] || "—") + " / " +
+      (s["name"]      || "—") + " / " +
+      (s["category"]  || "—") + " / " +
+      (s["rank"]      || "—") + " / " +
+      (s["formula"]   || "—")
+    );
+  });
+
+  return (
+    "[에너미 스킬 목록]\n" +
+    "사용자: " + label + "\n\n" +
+    lines.join("\n")
+  );
+}
+
+// ── Command: !에너미스킬 ─────────────────────────────────────────────
+
+function enemySkillUse(parts, displayName) {
+  ensureEnemySheets();
+
+  if (parts.length < 3) {
+    return (
+      "사용법: !에너미스킬 <에너미 ID/별명> <skill_key 또는 이름> [대상:<대상명>] [보정]\n" +
+      "예시:\n" +
+      "  !에너미스킬 골목괴이 절단선 대상:월하륜\n" +
+      "  !에너미스킬 E-0001 cut_line 대상:아르 +2"
+    );
+  }
+
+  var enemy;
+  try { enemy = resolveEnemy(parts[1]); } catch(e) {
+    return "[에너미 스킬 오류]\n" + e.message;
+  }
+
+  var skill;
+  try { skill = resolveEnemySkill(enemy, parts[2]); } catch(e) {
+    return "[에너미 스킬 오류]\n" + e.message;
+  }
+
+  // Parse 대상: and bonus from remaining tokens
+  var targetRef   = "";
+  var bonus       = 0;
+
+  parts.slice(3).forEach(function(t) {
+    t = String(t || "").trim();
+    if (t.startsWith("대상:") || t.startsWith("대상=")) {
+      targetRef = t.replace(/^대상[:=]/, "").trim();
+    } else if (/^[+\-]?\d+$/.test(t)) {
+      bonus += Number(t);
+    }
+  });
+
+  const targetMode = String(skill["target_mode"] || "none").trim().toLowerCase();
+  if (targetMode === "required" && !targetRef) {
+    return (
+      "[에너미 스킬 오류]\n" +
+      skill["name"] + " 스킬은 대상이 필요합니다.\n" +
+      "대상:<캐릭터 또는 에너미 별명> 을 추가해주세요."
+    );
+  }
+
+  // ── Resolve target ────────────────────────────────────────────────
+  var targetIsPC     = false;
+  var targetIsEnemy  = false;
+  var targetEnemyObj = null;
+
+  if (targetRef) {
+    const pcChar   = findCharacterByAlias(targetRef);
+    var   enemyObj = null;
+    try { enemyObj = resolveEnemy(targetRef); } catch(e2) {}
+
+    if (pcChar && enemyObj) {
+      return (
+        "[에너미 스킬 오류]\n" +
+        "대상 지정이 애매합니다. 캐릭터명 또는 에너미 ID를 정확히 입력해주세요.\n" +
+        "대상: " + targetRef
+      );
+    }
+    if (!pcChar && !enemyObj) {
+      return "[에너미 스킬 오류]\n대상을 찾을 수 없습니다: " + targetRef;
+    }
+    targetIsPC     = !!pcChar;
+    targetIsEnemy  = !!enemyObj;
+    targetEnemyObj = enemyObj;
+  }
+
+  // ── Roll ──────────────────────────────────────────────────────────
+  var rollResult;
+  try { rollResult = rollEnemySkill(enemy, skill, bonus); } catch(e) {
+    return "[에너미 스킬 오류]\n" + e.message;
+  }
+
+  const skillName  = String(skill["name"]     || skill["skill_key"] || "").trim();
+  const category   = String(skill["category"] || "").trim();
+  const rank       = rollResult.rank;
+  const effectText = String(skill["effect"]   || "").trim();
+  const enemyLabel = enemy["alias"] || enemy["name"];
+  const targetLine = targetRef ? "대상: " + targetRef + "\n" : "";
+  const diceDetail = rollResult.diceLogs.length > 0
+    ? rollResult.diceLogs.join("\n") + "\n"
+    : "";
+  const bonusLine  = rollResult.bonus !== 0
+    ? "보정: " + formatSigned(rollResult.bonus) + "\n"
+    : "";
+
+  var combatText = "";
+  var healText   = "";
+
+  // ── Combat (화력) ─────────────────────────────────────────────────
+  if (category === "화력" && targetRef) {
+    const pending = createPendingAttackFlex(
+      enemy["enemy_id"],
+      targetRef,
+      "에너미스킬",
+      skillName,
+      rollResult.total
+    );
+    if (pending.ok) {
+      combatText = "\n" + makeCombatChoiceTextFlex(pending);
+    } else {
+      combatText = "\n공격 대기 생성 실패: " + (pending.text || "");
+    }
+  }
+
+  // ── Heal (치유/재생) ──────────────────────────────────────────────
+  if (category === "치유" || category === "재생") {
+    var healTargetLabel = "";
+
+    if (!targetRef || targetRef === enemy["alias"] || targetRef === enemy["name"] ||
+        targetRef === enemy["enemy_id"]) {
+      // self-heal
+      const result = applyEnemyHpChange(enemy["enemy_id"], rollResult.total, true);
+      healTargetLabel = enemyLabel;
+      healText = (
+        "\n[회복 적용]\n" +
+        "대상: " + healTargetLabel + "\n" +
+        "회복량: " + rollResult.total + "\n" +
+        "체력: " + result.before + " → " + result.after + " / " + result.maxHp
+      );
+    } else if (targetIsEnemy && targetEnemyObj) {
+      const result = applyEnemyHpChange(targetEnemyObj["enemy_id"], rollResult.total, true);
+      healTargetLabel = targetEnemyObj["alias"] || targetEnemyObj["name"];
+      healText = (
+        "\n[회복 적용]\n" +
+        "대상: " + healTargetLabel + "\n" +
+        "회복량: " + rollResult.total + "\n" +
+        "체력: " + result.before + " → " + result.after + " / " + result.maxHp
+      );
+    } else if (targetIsPC) {
+      const result = applyHealingToCharacter(targetRef, rollResult.total);
+      healText = "\n" + result.text;
+    }
+  }
+
+  // ── Build output ──────────────────────────────────────────────────
+  return (
+    "【" + skillName + "】\n" +
+    "사용자: " + enemyLabel + "\n" +
+    targetLine +
+    "\n" +
+    "계열/랭크: " + category + " " + rank + "\n" +
+    "계산식: "   + skill["formula"] + "\n" +
+    diceDetail  +
+    bonusLine   +
+    "최종값: "   + rollResult.total +
+    (effectText ? "\n\n효과: " + effectText : "") +
+    combatText  +
+    healText
+  );
+}
+
+// ── End of Enemy System v0.2 ─────────────────────────────────────────
