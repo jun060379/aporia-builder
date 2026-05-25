@@ -17,6 +17,7 @@ import ActionDetail from './components/ActionDetail';
 import SkillMaker from './components/SkillMaker';
 import SkillList from './components/SkillList';
 import ApplicationText from './components/ApplicationText';
+import SubmitApplicationPanel from './components/SubmitApplicationPanel';
 import SaveLoad from './components/SaveLoad';
 import Checklist from './components/Checklist';
 import ValidationPanel from './components/ValidationPanel';
@@ -281,6 +282,7 @@ export default function App() {
           {rightTab === '신청텍스트' && (
             <div className="space-y-3">
               <Checklist remaining={remaining} skills={skills} />
+              <SubmitApplicationPanel char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
               <ApplicationText char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
             </div>
           )}
