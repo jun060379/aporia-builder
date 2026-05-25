@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import PlaceholderPage from './PlaceholderPage.jsx';
 import CharacterApplicationView from '../components/CharacterApplicationView.jsx';
+import EnemyTemplateApplicationView from '../components/EnemyTemplateApplicationView.jsx';
+import EnemySkillApplicationView from '../components/EnemySkillApplicationView.jsx';
 import {
   getMyApplications,
   TYPE_LABEL,
@@ -175,9 +177,10 @@ function MyApplicationCard({ item }) {
               {item.review_comment}
             </div>
           )}
-          {item.type === 'character_data' ? (
-            <CharacterApplicationView application={item} />
-          ) : (
+          {item.type === 'character_data' && <CharacterApplicationView application={item} />}
+          {item.type === 'enemy_template' && <EnemyTemplateApplicationView application={item} />}
+          {item.type === 'enemy_skill' && <EnemySkillApplicationView application={item} />}
+          {item.type !== 'character_data' && item.type !== 'enemy_template' && item.type !== 'enemy_skill' && (
             <FallbackPayloadView item={item} />
           )}
         </div>
