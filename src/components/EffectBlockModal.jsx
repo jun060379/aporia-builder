@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import EffectVariableHelp from './EffectVariableHelp';
 
 const EFFECT_TYPES = [
   { id: 'template',     label: '상태 템플릿 부여' },
@@ -43,6 +44,7 @@ function buildText(type, params) {
     if (params.value)       t += ` 수치:${params.value}`;
     if (params.probability) t += ` 확률:${params.probability}`;
     if (params.count)       t += ` 횟수:${params.count}`;
+    if (params.max)         t += ` 최대:${params.max}`;
     if (params.activation)  t += ` 발동:${params.activation}`;
     if (params.judgment)    t += ` 판정:${params.judgment}`;
     if (params.duplicate)   t += ` 중복:${params.duplicate}`;
@@ -156,12 +158,15 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-sm p-2 sm:p-4">
       <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl shadow-slate-300/50">
 
-        <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-3.5 flex items-center justify-between z-10">
-          <div>
+        <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-3.5 flex items-center justify-between z-10 gap-2">
+          <div className="min-w-0">
             <h3 className="text-sm font-semibold text-slate-800">효과 블럭 선택</h3>
             <p className="text-[10px] text-slate-400 mt-0.5">Effect Block</p>
           </div>
-          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 text-sm transition-colors">✕</button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <EffectVariableHelp compact />
+            <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 text-sm transition-colors">✕</button>
+          </div>
         </div>
 
         <div className="p-5 space-y-4">
@@ -234,8 +239,12 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
                   <input className={`${inputCls} mt-1`} value={params.customEffectCode || ''} onChange={e => setParam('customEffectCode', e.target.value)} placeholder="효과 코드 직접 입력" />
                 )}
               </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-400 uppercase tracking-widest">고급 변수</span>
+                <EffectVariableHelp compact />
+              </div>
               <div className="grid grid-cols-2 gap-2">
-                {[['수치','value'], ['확률','probability'], ['횟수','count'], ['발동','activation'], ['판정','judgment'], ['중복','duplicate']].map(([lbl, key]) => (
+                {[['수치','value'], ['확률','probability'], ['횟수','count'], ['최대(수치/횟수 상한)','max'], ['발동','activation'], ['판정','judgment'], ['중복','duplicate']].map(([lbl, key]) => (
                   <label key={key} className="flex flex-col gap-1">
                     <span className="text-[11px] text-slate-500">{lbl}</span>
                     <input className={inputCls} value={params[key] || ''} onChange={e => setParam(key, e.target.value)} placeholder={lbl} />

@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { EFFECT_PREFIXES, isEffectAutoApplicable } from '../lib/enemyText';
+import EffectVariableHelp from './EffectVariableHelp';
 
 const BLOCKS = [
   { label: '상태 부여',     text: '상태템플릿부여 대상 상태명 수치:5 횟수:3' },
@@ -50,6 +51,10 @@ export default function EnemySkillEffectBuilder({ value, onChange, textareaRef }
 
   return (
     <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-slate-400 uppercase tracking-widest">효과 블럭</span>
+        <EffectVariableHelp compact />
+      </div>
       <div className="flex flex-wrap gap-1.5">
         {BLOCKS.map((b) => (
           <button

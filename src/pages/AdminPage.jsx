@@ -6,6 +6,7 @@ import CharacterApplicationView from '../components/CharacterApplicationView.jsx
 import EnemyTemplateApplicationView from '../components/EnemyTemplateApplicationView.jsx';
 import EnemySkillApplicationView from '../components/EnemySkillApplicationView.jsx';
 import AdminCategoryTabs, { ADMIN_CATEGORIES } from '../components/AdminCategoryTabs.jsx';
+import CommonSkillMaker from '../components/CommonSkillMaker.jsx';
 import {
   getAdminApplications,
   updateApplicationStatus,
@@ -49,6 +50,7 @@ export default function AdminPage() {
   const [category, setCategory] = useState('all');
   const [filter, setFilter] = useState('all');
   const [expandedId, setExpandedId] = useState(null);
+  const [adminView, setAdminView] = useState('review');
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -140,6 +142,32 @@ export default function AdminPage() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+        <div className="flex gap-2 mb-5 overflow-x-auto -mx-1 px-1 pb-1">
+          {[
+            { key: 'review', label: '신청 검수' },
+            { key: 'common-skill', label: '공용 스킬 제작기' },
+          ].map((v) => {
+            const active = adminView === v.key;
+            return (
+              <button
+                key={v.key}
+                onClick={() => setAdminView(v.key)}
+                className={`shrink-0 inline-flex items-center rounded-full px-4 py-1.5 text-xs font-medium border transition ${
+                  active
+                    ? 'bg-slate-800 text-white border-transparent'
+                    : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                {v.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {adminView === 'common-skill' && <CommonSkillMaker />}
+
+        {adminView === 'review' && (
+        <>
         <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
           <div>
             <h2 className="text-xl sm:text-2xl font-semibold text-slate-800">신청 검수</h2>
@@ -205,6 +233,8 @@ export default function AdminPage() {
             />
           ))}
         </div>
+        </>
+        )}
       </main>
     </div>
   );
