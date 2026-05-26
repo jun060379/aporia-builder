@@ -4564,11 +4564,13 @@ function injectStatusVariables(vars, alias, prefix) {
     let sum = 0;
     let max = 0;
     let chanceMax = 0;
+    let capMax = 0;
     let count = list.length;
 
     list.forEach(r => {
       const value = Number(r["수치"] || 0);
       const chance = Number(r["확률"] || 0) + Number(r["누적확률"] || 0);
+      const cap = Number(r["최대값"] || r["최대치"] || 0);
 
       if (!isNaN(value)) {
         sum += value;
@@ -4578,11 +4580,16 @@ function injectStatusVariables(vars, alias, prefix) {
       if (!isNaN(chance) && chance > chanceMax) {
         chanceMax = chance;
       }
+
+      if (!isNaN(cap) && cap > capMax) {
+        capMax = cap;
+      }
     });
 
+    // _최대: STATUS_DB에 최대값/최대치 열이 있고 값이 있으면 그 cap을, 없으면 기존처럼 단일 수치 최댓값.
     vars[p + "상태_" + name + "_개수"] = count;
     vars[p + "상태_" + name + "_수치"] = sum;
-    vars[p + "상태_" + name + "_최대"] = max;
+    vars[p + "상태_" + name + "_최대"] = capMax > 0 ? capMax : max;
     vars[p + "상태_" + name + "_존재"] = count > 0 ? 1 : 0;
     vars[p + "상태_" + name + "_확률"] = chanceMax;
   });
@@ -4682,41 +4689,210 @@ function makeStatusId() {
   return makeId("ST", SHEET_STATUS_DB);
 }
 
+// 숫자 안전 변환 (status 전용 헬퍼)
+function _statusToNum(v) {
+  if (v === undefined || v === null || v === "") return 0;
+  var n = Number(v);
+  return isFinite(n) ? n : 0;
+}
+
+// 옵션 maxValue 후보(최대/최대값/최대치) 중 첫 유효값 반환. 없으면 "".
+function _pickMaxOption(opts) {
+  if (!opts) return "";
+  var keys = ["최대", "최대값", "최대치"];
+  for (var i = 0; i < keys.length; i++) {
+    var v = opts[keys[i]];
+    if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+  }
+  return "";
+}
+
+// STATUS_DB에서 같은 대상/상태명의 ACTIVE 행 찾기 (가장 최근 = 가장 아래 행)
+function findActiveStatusRowInfo(targetAlias, statusName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_STATUS_DB);
+  if (!sheet) return null;
+
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 2) return null;
+
+  var headers = values[0].map(function(h){ return String(h).trim(); });
+  var iStatus = headers.indexOf("상태");
+  var iTarget = headers.indexOf("대상");
+  var iName   = headers.indexOf("상태명");
+  if (iStatus < 0 || iTarget < 0 || iName < 0) return null;
+
+  var alias = String(targetAlias || "").trim();
+  var name  = String(statusName  || "").trim();
+
+  // 가장 최근(아래쪽) ACTIVE 행을 찾는다.
+  for (var r = values.length - 1; r >= 1; r--) {
+    if (String(values[r][iStatus]).trim() !== "ACTIVE") continue;
+    if (String(values[r][iTarget]).trim() !== alias) continue;
+    if (String(values[r][iName]).trim()   !== name)  continue;
+
+    var obj = {};
+    headers.forEach(function(h, i){ obj[h] = values[r][i]; });
+
+    return { sheet: sheet, rowIndex: r + 1, headers: headers, status: obj };
+  }
+  return null;
+}
+
+// 헤더가 있을 때만 셀에 값 쓰기. STATUS_DB 행 전용 (rowInfo.status 미러).
+function setStatusCell(rowInfo, headerName, value) {
+  if (!rowInfo || !rowInfo.headers) return false;
+  var idx = rowInfo.headers.indexOf(headerName);
+  if (idx < 0) return false;
+  rowInfo.sheet.getRange(rowInfo.rowIndex, idx + 1).setValue(value);
+  if (rowInfo.status) rowInfo.status[headerName] = value;
+  return true;
+}
+
+// 덮어쓰기 계열 stackMode 인지 판별
+function _isOverwriteStackMode(mode) {
+  var m = String(mode || "").trim();
+  return m === "덮어쓰기" || m === "불가" || m === "갱신" || m === "교체";
+}
+
 function addStatusToCharacter(targetAlias, statusName, category, effectCode, options) {
   options = options || {};
+  var now = getNowText();
+  var stackMode = String(options.stackMode || "허용").trim();
 
-  const id = makeStatusId();
-  const now = getNowText();
+  // 옵션 maxValue (없으면 "")
+  var optMax = options.maxValue;
+  if (optMax === undefined || optMax === null || String(optMax).trim() === "") {
+    optMax = "";
+  }
+  var optMaxNum = _statusToNum(optMax);
 
-  appendRowByHeaders(SHEET_STATUS_DB, {
-    id: id,
-    상태: "ACTIVE",
-    대상: targetAlias,
-    상태명: statusName,
-    분류: category,
-    효과코드: effectCode,
-    수치: options.value || 0,
-    확률: options.chance || 100,
-    누적확률: options.accum || 0,
-    증가확률: options.increase || 0,
-    최대확률: options.maxChance || 100,
-    발동타이밍: options.trigger || "판정시작",
-    대상판정: options.checkType || "전체",
-    남은횟수: options.count || "",
-    중복방식: options.stackMode || "허용",
-    출처: options.source || "",
-    메모: options.memo || "",
-    생성일: now,
-    처리일: ""
-  });
+  var existing = findActiveStatusRowInfo(targetAlias, statusName);
 
-  return (
-    "[상태 부여]\n" +
-    "대상: " + targetAlias + "\n" +
-    "상태: " + statusName + "\n" +
-    "분류: " + category + "\n" +
-    "효과코드: " + effectCode
-  );
+  // ─── A. 신규 행 ───────────────────────────────────────────────
+  if (!existing) {
+    var id = makeStatusId();
+    var initValue = _statusToNum(options.value);
+    var initCount = (options.count === undefined || options.count === null || options.count === "")
+      ? "" : _statusToNum(options.count);
+    if (optMaxNum > 0) {
+      if (initValue > optMaxNum) initValue = optMaxNum;
+      if (initCount !== "" && initCount > optMaxNum) initCount = optMaxNum;
+    }
+
+    var row = {
+      id: id,
+      상태: "ACTIVE",
+      대상: targetAlias,
+      상태명: statusName,
+      분류: category,
+      효과코드: effectCode,
+      수치: initValue,
+      확률: options.chance || 100,
+      누적확률: options.accum || 0,
+      증가확률: options.increase || 0,
+      최대확률: options.maxChance || 100,
+      발동타이밍: options.trigger || "판정시작",
+      대상판정: options.checkType || "전체",
+      남은횟수: initCount,
+      중복방식: stackMode,
+      출처: options.source || "",
+      메모: options.memo || "",
+      생성일: now,
+      처리일: ""
+    };
+    // 최대값/최대치 헤더가 있으면 기록 (없으면 appendRowByHeaders가 무시)
+    if (optMax !== "") {
+      row["최대값"] = optMax;
+      row["최대치"] = optMax;
+    }
+    appendRowByHeaders(SHEET_STATUS_DB, row);
+
+    var out = "[상태 부여]\n" +
+              "대상: " + targetAlias + "\n" +
+              "상태: " + statusName + "\n" +
+              "분류: " + category + "\n" +
+              "효과코드: " + effectCode +
+              "\n수치: " + initValue;
+    if (initCount !== "") out += "\n남은횟수: " + initCount;
+    if (optMax !== "")    out += "\n최대: " + optMax;
+    return out;
+  }
+
+  // ─── B/C. 기존 ACTIVE 갱신 ────────────────────────────────────
+  var existingMax = _statusToNum(existing.status["최대값"]);
+  if (existingMax <= 0) existingMax = _statusToNum(existing.status["최대치"]);
+  var maxCap = optMaxNum > 0 ? optMaxNum : existingMax;  // 0이면 제한 없음
+
+  var prevValue = _statusToNum(existing.status["수치"]);
+  var prevCountRaw = existing.status["남은횟수"];
+  var prevCount = _statusToNum(prevCountRaw);
+  var prevCountBlank = (prevCountRaw === undefined || prevCountRaw === null || String(prevCountRaw).trim() === "");
+
+  // options.count는 명시적으로 들어왔을 때만 의미가 있다 (공란/미지정 시 기존 횟수 유지).
+  var countProvided = (options.count !== undefined && options.count !== null && String(options.count).trim() !== "");
+  var addValue = _statusToNum(options.value);
+  var addCount = countProvided ? _statusToNum(options.count) : 0;
+
+  var newValue;
+  var isOverwrite = _isOverwriteStackMode(stackMode);
+  if (isOverwrite) {
+    newValue = addValue;
+  } else {
+    newValue = prevValue + addValue;
+  }
+  if (maxCap > 0 && newValue > maxCap) newValue = maxCap;
+
+  // newCount: 미지정 시 기존값 보존. 지정 시 모드별 처리.
+  var newCount;        // 최종 셀에 쓸 값 (공란 가능)
+  var newCountForLog;  // 로그용 숫자
+  if (!countProvided) {
+    newCount = prevCountBlank ? "" : prevCount;
+    newCountForLog = prevCountBlank ? "-" : prevCount;
+  } else {
+    var calc = isOverwrite ? addCount : (prevCountBlank ? addCount : (prevCount + addCount));
+    if (maxCap > 0 && calc > maxCap) calc = maxCap;
+    newCount = calc;
+    newCountForLog = calc;
+  }
+
+  setStatusCell(existing, "수치", newValue);
+  if (countProvided) {
+    setStatusCell(existing, "남은횟수", newCount);
+  }
+
+  // 기타 옵션은 값이 들어왔을 때만 갱신 (헤더 없으면 setStatusCell이 무시)
+  if (category)   setStatusCell(existing, "분류", category);
+  if (effectCode) setStatusCell(existing, "효과코드", effectCode);
+  if (options.chance    !== undefined && options.chance    !== "") setStatusCell(existing, "확률", options.chance);
+  if (options.accum     !== undefined && options.accum     !== "") setStatusCell(existing, "누적확률", options.accum);
+  if (options.increase  !== undefined && options.increase  !== "") setStatusCell(existing, "증가확률", options.increase);
+  if (options.maxChance !== undefined && options.maxChance !== "") setStatusCell(existing, "최대확률", options.maxChance);
+  if (options.trigger)   setStatusCell(existing, "발동타이밍", options.trigger);
+  if (options.checkType) setStatusCell(existing, "대상판정", options.checkType);
+  setStatusCell(existing, "중복방식", stackMode);
+  if (options.source) setStatusCell(existing, "출처", options.source);
+  if (options.memo)   setStatusCell(existing, "메모", options.memo);
+  if (maxCap > 0) {
+    setStatusCell(existing, "최대값", maxCap);
+    setStatusCell(existing, "최대치", maxCap);
+  }
+  setStatusCell(existing, "처리일", now);
+  setStatusCell(existing, "수정일", now);
+
+  var header = isOverwrite ? "[상태 갱신]" : "[상태 누적 갱신]";
+  var body = header + "\n" +
+             "대상: " + targetAlias + "\n" +
+             "상태: " + statusName + "\n";
+  if (isOverwrite) {
+    body += "수치: " + newValue + "\n" +
+            "남은횟수: " + newCountForLog;
+  } else {
+    body += "수치: " + prevValue + " → " + newValue + "\n" +
+            "남은횟수: " + (prevCountBlank ? "-" : prevCount) + " → " + newCountForLog;
+  }
+  if (maxCap > 0) body += "\n최대: " + maxCap;
+  return body;
 }
 
 function removeStatusFromCharacter(targetAlias, statusName) {
@@ -4964,6 +5140,7 @@ function buildStatusOptionsFromTemplate(template, opts, context) {
     checkType: pickOption(opts, "판정", pickOption(opts, "대상판정", template["대상판정"] || "전체")),
     count: pickOption(opts, "횟수", pickOption(opts, "남은횟수", template["남은횟수"] || "")),
     stackMode: pickOption(opts, "중복", pickOption(opts, "중복방식", template["중복방식"] || "허용")),
+    maxValue: _pickMaxOption(opts) || template["최대값"] || template["최대치"] || "",
     source: context.skillName || "상태템플릿",
     memo: pickOption(opts, "메모", template["메모"] || "")
   };
@@ -5050,6 +5227,7 @@ function applyStatusWithResistance(targetAlias, statusName, category, effectCode
     checkType: opts["판정"] || "전체",
     count: opts["횟수"] || "",
     stackMode: opts["중복"] || "허용",
+    maxValue: _pickMaxOption(opts),
     source: context.skillName || "",
     memo: opts["메모"] || ""
   }));
@@ -5096,6 +5274,7 @@ function applyTemplateStatusWithResistance(targetAlias, templateName, opts, cont
     판정: statusOptions.checkType,
     횟수: statusOptions.count,
     중복: statusOptions.stackMode,
+    최대: statusOptions.maxValue,
     메모: statusOptions.memo,
     저항: opts["저항"] || "",
     저항난이도: opts["저항난이도"] || "",
@@ -5683,12 +5862,15 @@ function statusListCommand(parts, displayName) {
 
   const lines = rows.map(r => {
     const chance = Number(r["확률"] || 0) + Number(r["누적확률"] || 0);
+    const cap = Number(r["최대값"] || r["최대치"] || 0);
+    const capPart = cap > 0 ? " / 최대 " + cap : "";
 
     return (
       "- " + r["상태명"] +
       " / " + r["분류"] +
       " / " + r["효과코드"] +
       " / 수치 " + (r["수치"] || 0) +
+      capPart +
       " / 확률 " + chance + "%" +
       " / 판정 " + (r["대상판정"] || "전체") +
       " / 횟수 " + noneText(r["남은횟수"])
@@ -5743,6 +5925,7 @@ function statusAddCommand(parts, displayName) {
     checkType: opts["판정"] || "전체",
     count: opts["횟수"] || "",
     stackMode: opts["중복"] || "허용",
+    maxValue: _pickMaxOption(opts),
     source: "수동명령",
     memo: opts["메모"] || ""
   });
@@ -6032,6 +6215,7 @@ function statusTemplateApplyCommand(parts, displayName) {
     checkType: opts["판정"] || opts["대상판정"] || t["대상판정"] || "전체",
     count: opts["횟수"] || opts["남은횟수"] || t["남은횟수"] || "",
     stackMode: opts["중복"] || opts["중복방식"] || t["중복방식"] || "허용",
+    maxValue: _pickMaxOption(opts) || t["최대값"] || t["최대치"] || "",
     source: "상태템플릿:" + t["상태명"],
     memo: opts["메모"] || t["메모"] || ""
   });
