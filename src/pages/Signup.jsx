@@ -1,17 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import AuthShell from './AuthShell.jsx';
 
 export default function Signup() {
   const navigate = useNavigate();
-  const { signUp, isConfigured } = useAuth();
+  const { signUp, isConfigured, user, loading } = useAuth();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+
+  // 이미 로그인된 사용자가 들어오면 홈으로 리다이렉트
+  useEffect(() => {
+    if (!loading && user) navigate('/', { replace: true });
+  }, [loading, user, navigate]);
 
   const onSubmit = async (e) => {
     e.preventDefault();

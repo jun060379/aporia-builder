@@ -42,7 +42,7 @@ function shortId(id) {
 }
 
 export default function AdminPage() {
-  const { user, isAdmin, loading: authLoading } = useAuth();
+  const { user, isAdmin, loading: authLoading, profileLoading } = useAuth();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -92,7 +92,7 @@ export default function AdminPage() {
     return byCategory.filter((it) => it.status === filter);
   }, [byCategory, filter]);
 
-  if (authLoading) {
+  if (authLoading || (user && profileLoading)) {
     return <PlaceholderPage title="관리자 페이지" body="권한 확인 중입니다…" />;
   }
   if (!user) {

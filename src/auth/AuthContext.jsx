@@ -4,14 +4,21 @@ import { withTimeout } from '../lib/withTimeout';
 
 const AuthContext = createContext(null);
 const AUTH_TIMEOUT_MS = 15000;
+const PROFILE_TIMEOUT_MS = 8000;
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
+  // loading은 "세션 확인 중"만을 의미한다. profile 조회는 백그라운드로 처리한다.
   const [loading, setLoading] = useState(true);
+  // profileLoading: user 가 있고 profile 조회가 아직 끝나지 않은 상태.
+  // isAdmin 같은 권한 게이트는 이 값이 false 가 될 때까지 판정을 미뤄야 한다.
+  const [profileLoading, setProfileLoading] = useState(false);
 
   const mountedRef = useRef(true);
   const profileReqRef = useRef(0);
+  // 현재 user.id를 기억해서 TOKEN_REFRESHED 같은 이벤트에서 같은 사용자면 profile을 재조회하지 않게 한다.
+  const currentUserIdRef = useRef(null);
 
   /**
    * profiles 조회. 없으면 현재 user 정보로 upsert 시도.
@@ -19,11 +26,15 @@ export function AuthProvider({ children }) {
    */
   const fetchProfile = useCallback(async (authUser) => {
     if (!supabase || !authUser?.id) {
-      if (mountedRef.current) setProfile(null);
+      if (mountedRef.current) {
+        setProfile(null);
+        setProfileLoading(false);
+      }
       return null;
     }
     const reqId = ++profileReqRef.current;
     const isLatest = () => mountedRef.current && reqId === profileReqRef.current;
+    if (mountedRef.current) setProfileLoading(true);
 
     try {
       const { data, error } = await withTimeout(
@@ -32,7 +43,7 @@ export function AuthProvider({ children }) {
           .select('id, display_name, role')
           .eq('id', authUser.id)
           .maybeSingle(),
-        AUTH_TIMEOUT_MS
+        PROFILE_TIMEOUT_MS
       );
 
       if (!isLatest()) return null;
@@ -40,12 +51,13 @@ export function AuthProvider({ children }) {
       if (error) {
         // eslint-disable-next-line no-console
         console.warn('[Auth] profile 조회 실패:', error.message);
-        setProfile(null);
+        setProfileLoading(false);
         return null;
       }
 
       if (data) {
         setProfile(data);
+        setProfileLoading(false);
         return data;
       }
 
@@ -61,29 +73,30 @@ export function AuthProvider({ children }) {
             )
             .select('id, display_name, role')
             .maybeSingle(),
-          AUTH_TIMEOUT_MS
+          PROFILE_TIMEOUT_MS
         );
         if (!isLatest()) return null;
         if (upErr) {
           // eslint-disable-next-line no-console
           console.warn('[Auth] profile upsert 실패 (RLS 등):', upErr.message);
-          setProfile(null);
+          setProfileLoading(false);
           return null;
         }
-        setProfile(upserted || null);
+        if (upserted) setProfile(upserted);
+        setProfileLoading(false);
         return upserted || null;
       } catch (e) {
         if (!isLatest()) return null;
         // eslint-disable-next-line no-console
         console.warn('[Auth] profile upsert 예외:', e.message);
-        setProfile(null);
+        setProfileLoading(false);
         return null;
       }
     } catch (e) {
       if (!isLatest()) return null;
       // eslint-disable-next-line no-console
       console.warn('[Auth] profile 조회 예외:', e.message);
-      setProfile(null);
+      setProfileLoading(false);
       return null;
     }
   }, []);
@@ -98,7 +111,9 @@ export function AuthProvider({ children }) {
       };
     }
 
-    // 초기 세션 부트스트랩. 어떤 경우에도 loading=false가 되도록 finally로 보장.
+    // 초기 세션 부트스트랩.
+    // ⚠ profile 조회는 await 하지 않는다 — getSession이 끝나는 즉시 loading=false 로 풀어서
+    //   새로고침 후 가드된 페이지가 placeholder로 오래 깜빡이는 문제를 막는다.
     (async () => {
       try {
         const { data, error } = await withTimeout(supabase.auth.getSession(), AUTH_TIMEOUT_MS);
@@ -108,10 +123,11 @@ export function AuthProvider({ children }) {
           console.warn('[Auth] getSession 실패:', error.message);
         }
         const u = data?.session?.user || null;
+        currentUserIdRef.current = u?.id || null;
         setUser(u);
         if (u) {
-          // profile 조회 실패해도 무시
-          await fetchProfile(u);
+          // 백그라운드에서 profile 채움. 결과는 setProfile 으로만 흘러간다.
+          fetchProfile(u);
         }
       } catch (e) {
         // eslint-disable-next-line no-console
@@ -121,22 +137,35 @@ export function AuthProvider({ children }) {
       }
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mountedRef.current) return;
       const u = session?.user || null;
-      setUser(u);
-      if (u) {
-        setProfile(null);
+      const nextId = u?.id || null;
+      const prevId = currentUserIdRef.current;
+
+      // SIGNED_OUT — 명시적 로그아웃 / 세션 만료
+      if (event === 'SIGNED_OUT' || !u) {
+        currentUserIdRef.current = null;
         profileReqRef.current++;
-        try {
-          await fetchProfile(u);
-        } catch {
-          /* fetchProfile은 throw하지 않지만 방어용 */
-        }
-      } else {
-        profileReqRef.current++;
+        setUser(null);
         setProfile(null);
+        setProfileLoading(false);
+        return;
       }
+
+      // 같은 사용자에 대한 TOKEN_REFRESHED / USER_UPDATED / INITIAL_SESSION 등은
+      // user 객체만 업데이트하고 profile 은 그대로 둔다 (깜빡임 방지).
+      if (prevId && prevId === nextId) {
+        setUser(u);
+        return;
+      }
+
+      // 새 로그인 또는 사용자 변경
+      currentUserIdRef.current = nextId;
+      setUser(u);
+      setProfile(null);
+      profileReqRef.current++;
+      fetchProfile(u);
     });
 
     return () => {
@@ -187,7 +216,7 @@ export function AuthProvider({ children }) {
               { id: data.user.id, display_name: displayName || '', role: 'user' },
               { onConflict: 'id' }
             ),
-            AUTH_TIMEOUT_MS
+            PROFILE_TIMEOUT_MS
           );
         } catch {
           /* ignore */
@@ -199,15 +228,28 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  /**
+   * signOut: UI는 즉시 비로그인 상태로 전환하고, supabase 호출은 백그라운드로.
+   * 서버 응답을 기다리지 않아 "로그아웃 눌렀는데 한참 그대로" 문제를 막는다.
+   */
   const signOut = useCallback(async () => {
+    // 1) 로컬 상태 즉시 클리어 → UI 즉시 반영
+    currentUserIdRef.current = null;
+    profileReqRef.current++;
+    setUser(null);
+    setProfile(null);
+    setProfileLoading(false);
+
     if (!supabase) return { error: null };
+
+    // 2) 서버에는 백그라운드로 알림. 실패해도 UI는 이미 로그아웃 상태이지만,
+    //    호출자가 복구/재시도 신호를 받을 수 있도록 error 는 그대로 전달한다.
     try {
       const res = await withTimeout(supabase.auth.signOut(), AUTH_TIMEOUT_MS);
-      profileReqRef.current++;
-      setUser(null);
-      setProfile(null);
       return { error: res?.error || null };
     } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[Auth] signOut 네트워크 오류 (UI는 이미 로그아웃):', e?.message);
       return { error: { message: e?.message || '로그아웃 요청에 실패했습니다.' } };
     }
   }, []);
@@ -221,6 +263,7 @@ export function AuthProvider({ children }) {
     user,
     profile,
     loading,
+    profileLoading,
     isAdmin: profile?.role === 'admin',
     isConfigured: isSupabaseConfigured,
     signIn,
