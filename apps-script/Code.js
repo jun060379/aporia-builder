@@ -7998,19 +7998,23 @@ function handlePortalWebhook(body) {
 
   if (type === "enemy_template") return registerPortalEnemyTemplate(payload, outputText, application);
   if (type === "enemy_skill")    return registerPortalEnemySkill(payload, outputText, application);
-  if (type === "character_data") {
-    return {
-      ok: false,
-      error: "캐릭터 데이터 자동 등록은 아직 구현되지 않았습니다. 에너미 템플릿/스킬 자동 등록만 지원합니다."
-    };
-  }
+  if (type === "character_data") return registerPortalCharacterData(payload, outputText, application);
 
   return { ok: false, error: "Unsupported type: " + type };
 }
 
 function _portalLooksLikeFailure(text) {
-  var s = String(text || "");
-  return /^\[.*실패\]/.test(s) || /^\[.*오류\]/.test(s) || /^사용법:/.test(s);
+  var s = String(text || "").trim();
+  if (!s) return true;
+  if (/^\[[^\]]*(실패|오류)\]/.test(s)) return true;
+  if (/^사용법:/.test(s)) return true;
+  // 평문 실패 패턴 (characterApprove/skillApprove 등이 [..실패] 없이 그대로 돌려주는 케이스)
+  if (/찾을 수 없습니다/.test(s)) return true;
+  if (/이미 처리된 신청입니다/.test(s)) return true;
+  if (/이미 BOT_DB에/.test(s)) return true;
+  if (/이미 같은 이름의 스킬이 등록되어 있습니다/.test(s)) return true;
+  if (/스킬 소유자 캐릭터를 찾을 수 없습니다/.test(s)) return true;
+  return false;
 }
 
 function registerPortalEnemyTemplate(payload, outputText, application) {
@@ -8116,6 +8120,143 @@ function _portalBuildEnemySkillUtterance(p) {
   if (p.target_mode) parts.push("대상:" + String(p.target_mode));
   if (p.memo)        parts.push("메모:" + String(p.memo));
   return parts.join(" ");
+}
+
+// 캐릭터 + 플레이어 스킬 묶음 자동 등록.
+// outputText는 buildFullApplicationText 결과:
+//   "!캐릭터신청\n이름: ...\n...\n\n!스킬신청\n이름: ...\n...\n\n!스킬신청\n..."
+// 따라서 빈 줄(\n\n+)로 split 하면 [characterBlock, ...skillBlocks].
+function registerPortalCharacterData(payload, outputText, application) {
+  var rawText = String(outputText || "");
+  if (!rawText) {
+    return { ok: false, error: "캐릭터 신청 텍스트(output_text)가 비어 있습니다." };
+  }
+
+  // 별명(alias) — Discord 봇에서 character["별명"]로 쓰는 키. 캐릭터 이름을 사용한다.
+  var charName = "";
+  try {
+    charName = String((payload && payload.char && payload.char.name) || "").trim();
+  } catch (_) { charName = ""; }
+  if (!charName) {
+    return { ok: false, error: "payload.char.name(캐릭터 이름)이 비어 있어 별명을 만들 수 없습니다." };
+  }
+
+  var blocks = rawText.split(/\n\s*\n+/).map(function(b){ return String(b || "").trim(); }).filter(Boolean);
+  if (blocks.length === 0) {
+    return { ok: false, error: "캐릭터 신청 텍스트를 파싱할 수 없습니다." };
+  }
+
+  var charBlock = blocks[0];
+  if (!/^!캐릭터신청\b/.test(charBlock)) {
+    return { ok: false, error: "첫 블록이 !캐릭터신청으로 시작하지 않습니다." };
+  }
+  var skillBlocks = blocks.slice(1).filter(function(b){ return /^!스킬신청\b/.test(b); });
+
+  // 1) 캐릭터 신청 → CH-xxxx
+  var charSubmitResp;
+  try {
+    charSubmitResp = characterSubmit(charBlock, charName);
+  } catch (err) {
+    return { ok: false, error: "[캐릭터 신청 예외] " + (err && err.message ? err.message : String(err)) };
+  }
+  if (_portalLooksLikeFailure(charSubmitResp)) {
+    return { ok: false, error: String(charSubmitResp) };
+  }
+  var charId = _portalExtractId(charSubmitResp);
+  if (!charId) {
+    return { ok: false, error: "캐릭터 신청 번호를 응답에서 추출하지 못했습니다.\n원응답:\n" + charSubmitResp };
+  }
+
+  // 2) 캐릭터 승인 → BOT_DB 등록
+  var charApproveResp;
+  try {
+    charApproveResp = characterApprove(["!캐릭터승인", charId], "aporia-portal");
+  } catch (err) {
+    return { ok: false, error: "[캐릭터 승인 예외] " + (err && err.message ? err.message : String(err)) };
+  }
+  if (_portalLooksLikeFailure(charApproveResp) || !/\[캐릭터 승인 완료\]/.test(String(charApproveResp))) {
+    return { ok: false, error: "캐릭터는 접수됐으나 승인 단계에서 실패했습니다.\n" + String(charApproveResp) };
+  }
+
+  // 3) 플레이어 스킬들 신청 + 승인 (개별 실패는 경고로만 누적)
+  var skillResults = [];
+  var skillWarnings = [];
+  for (var i = 0; i < skillBlocks.length; i++) {
+    var sBlock = skillBlocks[i];
+    var sName = _portalPeekField(sBlock, "이름") || ("(스킬 " + (i + 1) + ")");
+
+    var sSubmitResp;
+    try {
+      sSubmitResp = skillSubmit(sBlock, charName);
+    } catch (err) {
+      skillWarnings.push("[" + sName + "] 신청 예외: " + (err && err.message ? err.message : String(err)));
+      continue;
+    }
+    if (_portalLooksLikeFailure(sSubmitResp)) {
+      skillWarnings.push("[" + sName + "] 신청 실패: " + String(sSubmitResp).split("\n")[0]);
+      continue;
+    }
+    var sId = _portalExtractId(sSubmitResp);
+    if (!sId) {
+      skillWarnings.push("[" + sName + "] 신청 번호 추출 실패");
+      continue;
+    }
+
+    var sApproveResp;
+    try {
+      sApproveResp = skillApprove(["!스킬승인", sId], "aporia-portal");
+    } catch (err) {
+      skillWarnings.push("[" + sName + "] 승인 예외: " + (err && err.message ? err.message : String(err)));
+      continue;
+    }
+    if (_portalLooksLikeFailure(sApproveResp) || !/\[스킬 승인 완료\]/.test(String(sApproveResp))) {
+      // 가장 흔한 실패: 성장예산 초과 (신규 캐릭터는 예산이 0이라 모든 스킬이 실패할 수 있음)
+      skillWarnings.push("[" + sName + "] 승인 실패: " + String(sApproveResp).split("\n").slice(0, 3).join(" / "));
+      continue;
+    }
+    skillResults.push(sName);
+  }
+
+  try {
+    Logger.log("[portal webhook] character_data registered alias=" + charName +
+               " charId=" + charId +
+               " skillsOk=" + skillResults.length +
+               " skillsWarn=" + skillWarnings.length);
+  } catch (_) { /* noop */ }
+
+  var msg = "[캐릭터 자동 등록 완료]\n" +
+            "별명: " + charName + "\n" +
+            "신청번호: " + charId + "\n" +
+            "등록된 스킬: " + skillResults.length + " / " + skillBlocks.length;
+  if (skillResults.length > 0) {
+    msg += "\n- " + skillResults.join("\n- ");
+  }
+  if (skillWarnings.length > 0) {
+    msg += "\n\n[스킬 경고]\n- " + skillWarnings.join("\n- ");
+  }
+
+  return {
+    ok: true,
+    message: msg,
+    registeredType: "character_data",
+    registeredKey: charName,
+    skillRegistered: skillResults.length,
+    skillTotal: skillBlocks.length,
+    skillWarnings: skillWarnings
+  };
+}
+
+// 봇 응답에서 "신청번호: CH-0001" / "신청번호: SK-0003" 형태의 id를 추출.
+function _portalExtractId(text) {
+  var m = String(text || "").match(/신청번호\s*[:：]\s*([A-Za-z0-9_\-]+)/);
+  return m ? m[1].trim() : "";
+}
+
+// 블록에서 "키: 값"의 값만 한 번 꺼낸다 (멀티라인 미고려, 라벨 표시용).
+function _portalPeekField(block, key) {
+  var re = new RegExp("(?:^|\\n)\\s*" + key + "\\s*[:：]\\s*([^\\n]+)");
+  var m = String(block || "").match(re);
+  return m ? m[1].trim() : "";
 }
 
 // ── End of Aporia Portal Webhook ─────────────────────────────────────
