@@ -1,5 +1,5 @@
 import { LEVEL_TABLE } from '../data/levels';
-import { FACTION_OPTIONS } from '../data/factions';
+import { FACTION_OPTIONS, DEFAULT_FACTION } from '../data/factions';
 
 const inputCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
 const selectCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none transition-colors cursor-pointer";
@@ -26,7 +26,7 @@ export default function CharacterForm({ char, onChange }) {
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[11px] text-slate-500 tracking-wide">소속</span>
-          <select className={selectCls} value={char.faction ?? '무소속'} onChange={field('faction')}>
+          <select className={selectCls} value={char.faction ?? DEFAULT_FACTION} onChange={field('faction')}>
             {FACTION_OPTIONS.map(f => (
               <option key={f} value={f}>{f}</option>
             ))}

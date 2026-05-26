@@ -1,4 +1,4 @@
-import { FACTION_OPTIONS, DEFAULT_FACTION } from './factions';
+import { FACTION_OPTIONS } from './factions';
 
 export const COMMON_SKILL_TYPES = [
   { value: 'global',  label: 'global (전체)' },
@@ -16,7 +16,7 @@ export const COMMON_TARGET_SPECS = [
 
 export const COMMON_SPECIES_OPTIONS = ['인간', '마녀', '흡혈귀', '요괴', '반인', '기타'];
 
-export const COMMON_SKILL_FACTIONS = FACTION_OPTIONS.filter((f) => f !== DEFAULT_FACTION);
+export const COMMON_SKILL_FACTIONS = [...FACTION_OPTIONS];
 
 export const COMMON_SKILLS_HEADERS = [
   'key', '이름', '유형', '소속', '종족', '해금레벨',
