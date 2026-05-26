@@ -74,7 +74,13 @@ export function hasTargetReference(formula) {
   return /대상상태_|대상스택_/.test(formula);
 }
 
-export function previewFormula(formula, stats, rank, dbOverrides = {}) {
+function toNumber(value, fallback = 0) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export function previewFormula(formula, stats, rank, dbOverrides = {}, abilities = {}, proficiencies = {}) {
   if (!formula.trim()) return { value: null, warnings: [], infos: [] };
 
   const warnings = [];
@@ -94,24 +100,17 @@ export function previewFormula(formula, stats, rank, dbOverrides = {}) {
   // 3. 랭크
   expr = expr.replace(/랭크/g, String(getRankValue(rank)));
 
-  // 4. 스탯
-  for (const s of STAT_NAMES) {
-    if (expr.includes(s)) {
-      expr = expr.replace(new RegExp(s, 'g'), String(getStatValue(stats[s] ?? 'E')));
-    }
-  }
+  // 4. 스탯/기능/숙련 — 변수명 길이 내림차순으로 치환해 부분일치 사고 방지
+  //    (예: '해석숙련'을 '해석'보다 먼저 치환)
+  const namedVars = [
+    ...STAT_NAMES.map(s => ({ name: s, value: getStatValue((stats || {})[s] ?? 'E') })),
+    ...ABILITY_NAMES.map(a => ({ name: a, value: toNumber((abilities || {})[a], 0) })),
+    ...PROFICIENCY_NAMES.map(p => ({ name: p, value: toNumber((proficiencies || {})[p], 0) })),
+  ].sort((a, b) => b.name.length - a.name.length);
 
-  // 5. 기능
-  for (const a of ABILITY_NAMES) {
-    if (expr.includes(a)) {
-      expr = expr.replace(new RegExp(a, 'g'), '0');
-    }
-  }
-
-  // 6. 숙련
-  for (const p of PROFICIENCY_NAMES) {
-    if (expr.includes(p)) {
-      expr = expr.replace(new RegExp(p, 'g'), '0');
+  for (const { name, value } of namedVars) {
+    if (expr.includes(name)) {
+      expr = expr.replace(new RegExp(name, 'g'), String(value));
     }
   }
 

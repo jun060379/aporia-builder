@@ -51,13 +51,13 @@ const FORMULA_CATEGORIES = [
 const inputCls = "w-full min-w-0 bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
 const selectCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 outline-none transition-colors";
 
-function FormulaPreview({ formula, stats, rank }) {
+function FormulaPreview({ formula, stats, rank, abilities, proficiencies }) {
   if (!formula.trim()) return null;
-  const base = previewFormula(formula, stats, rank);
+  const base = previewFormula(formula, stats, rank, {}, abilities, proficiencies);
   const hasDbVar = /이면침식/.test(formula);
-  const 침식0 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 0 }) : null;
-  const 침식6 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 6 }) : null;
-  const 침식9 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 9 }) : null;
+  const 침식0 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 0 }, abilities, proficiencies) : null;
+  const 침식6 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 6 }, abilities, proficiencies) : null;
+  const 침식9 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 9 }, abilities, proficiencies) : null;
   const show = base.value !== null || base.warnings.length > 0;
   if (!show) return null;
 
@@ -190,7 +190,7 @@ const HELP_ITEMS = [
   { title: '이면침식 변수', desc: '이면침식 변수를 포함하면 침식 0/6/9 기대값이 미리보기에 자동 표시됩니다.' },
 ];
 
-export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
+export default function SkillMaker({ editingSkill, stats, abilities, proficiencies, onSave, onCancel }) {
   const [skill, setSkill] = useState(() => {
     const s = editingSkill || defaultSkill();
     return { ...s, effects: s.effects ?? [] };
@@ -440,7 +440,7 @@ export default function SkillMaker({ editingSkill, stats, onSave, onCancel }) {
           <p className="text-[10px] text-slate-400 italic">누르면 현재 계산식이 교체됩니다.</p>
         </div>
 
-        <FormulaPreview formula={skill.formula} stats={stats} rank={skill.rank} />
+        <FormulaPreview formula={skill.formula} stats={stats} rank={skill.rank} abilities={abilities} proficiencies={proficiencies} />
       </div>
 
       {/* ── 효과 목록 ── */}

@@ -257,7 +257,7 @@ export default function App() {
           {leftTab === '스킬' && (
             <div className="space-y-3">
               <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} editingSkill={editingSkill} />
-              <SkillMaker editingSkill={editingSkill} stats={stats} onSave={handleSaveSkill} onCancel={handleCancelEdit} />
+              <SkillMaker editingSkill={editingSkill} stats={stats} abilities={abilities} proficiencies={proficiencies} onSave={handleSaveSkill} onCancel={handleCancelEdit} />
               <SkillList skills={skills} onEdit={handleEditSkill} onRemove={handleRemoveSkill} />
             </div>
           )}
