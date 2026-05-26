@@ -124,14 +124,15 @@ function doGet(e) {
 
     const result = handleCommand(q, name);
 
-    return jsonResponse({ text: result });
+    return jsonResponse({ text: formatDiscordReply(result) });
   } catch (err) {
     return jsonResponse({
-      text:
+      text: formatDiscordReply(
         "[Apps Script 오류]\n" +
         "오류명: " + err.name + "\n" +
         "메시지: " + err.message + "\n\n" +
         "스택:\n" + (err.stack || "스택 정보 없음")
+      )
     });
   }
 }
@@ -140,6 +141,64 @@ function jsonResponse(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ── Discord 출력 유틸 ────────────────────────────────────────────────
+// 사용처:
+//   - doGet의 일반 텍스트 응답에만 적용 (handleCommand 결과 + 예외 메시지).
+//   - doPost/returnJson(Portal Webhook JSON 응답)에는 절대 적용하지 않음.
+//   - buttons/components/멘션이 필요한 응답이 추가될 경우, 해당 경로에서는 호출하지 말 것.
+
+// 코드펜스 토큰. 큰따옴표 안 백틱은 이스케이프 불필요하지만 가독성을 위해 상수로 분리.
+var DISCORD_FENCE = "" + String.fromCharCode(96, 96, 96);  // ```
+var DISCORD_FENCE_SAFE = "" + String.fromCharCode(65344, 65344, 65344);  // 전각 ｀｀｀ (펜스 깨짐 방지)
+
+// 일반 텍스트를 ```text ... ``` 형태로 감싼다.
+// - null/undefined → 빈 문자열
+// - 이미 유효한 단일 코드펜스 블록이면 그대로 반환 (이중 래핑 방지)
+// - 내용에 ```가 있으면 전각 ｀｀｀로 치환해 펜스가 깨지지 않게 한다.
+function fenceText(text) {
+  if (text === null || text === undefined) return "";
+  var s = String(text);
+  if (s === "") return "";
+
+  // 유효한 단일 펜스 블록만 통과 (선택적 lang 태그 + 줄바꿈 + 본문 + 마지막 ```).
+  // 본문에 ``` 가 추가로 등장하면 안 됨.
+  var trimmed = s.replace(/^[\s\n]+|[\s\n]+$/g, "");
+  var fenceRe = /^```[A-Za-z0-9_-]*\n([\s\S]*?)\n```$/;
+  var m = trimmed.match(fenceRe);
+  if (m && m[1].indexOf(DISCORD_FENCE) === -1) {
+    return s;
+  }
+
+  var safe = s.split(DISCORD_FENCE).join(DISCORD_FENCE_SAFE);
+  return DISCORD_FENCE + "text\n" + safe + "\n" + DISCORD_FENCE;
+}
+
+// 향후 components/mention/링크 등 펜스를 적용하면 안 되는 응답을 위한 opt-out sentinel.
+// 핸들러가 반환 문자열 맨 앞에 NOFENCE_SENTINEL을 붙이면 chokepoint가 펜스를 건너뛴다.
+// 현재 핸들러는 모두 평문 텍스트라 사용처 없음 — 확장 대비용.
+var NOFENCE_SENTINEL = "\u0000NOFENCE\u0000";
+
+// doGet 응답 텍스트를 디스코드용으로 포맷한다 (펜스 + 길이 제한).
+// NOFENCE_SENTINEL 접두어가 있으면 펜스를 적용하지 않고 잘라내기만 한다.
+function formatDiscordReply(text) {
+  if (text === null || text === undefined) return "";
+  var s = String(text);
+  if (s.indexOf(NOFENCE_SENTINEL) === 0) {
+    return truncateForDiscord(s.slice(NOFENCE_SENTINEL.length), 1990);
+  }
+  return fenceText(truncateForDiscord(s, 1900));
+}
+
+// 디스코드 2000자 한도를 고려해 내부 텍스트를 자른다.
+// 코드펜스 오버헤드(```text\n + \n``` = 12자)까지 감안해 기본 1900자.
+function truncateForDiscord(text, maxLen) {
+  if (text === null || text === undefined) return "";
+  var s = String(text);
+  var lim = Math.max(50, Math.floor(Number(maxLen) || 1900));
+  if (s.length <= lim) return s;
+  return s.slice(0, lim - 8) + "\n...(생략)";
 }
 
 function handleCommand(utterance, displayName) {

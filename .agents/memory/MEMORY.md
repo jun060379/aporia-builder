@@ -1,2 +1,3 @@
 - [setCellByHeader 캐릭터 전용](set-cell-by-header.md) — `rowInfo.character[h] = v` 미러 때문에 STATUS/STACK 등 다른 시트 행에는 사용 금지. 시트별 전용 setter 필요.
 - [상태부여 누적 갱신 규칙](status-add-stacking.md) — addStatusToCharacter는 stackMode/maxValue/공란 횟수 보존 규칙을 따른다.
+- [디스코드 출력 포맷 chokepoint](discord-output-chokepoint.md) — Discord 응답은 doGet 단일 진입점에서만 포맷. doPost/returnJson(포털 Webhook JSON)은 절대 손대지 말 것.
