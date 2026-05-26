@@ -80,8 +80,8 @@ const STAT_COST = {
   D: 3,
   C: 7,
   B: 13,
-  A: 25,
-  S: 45
+  A: 30,
+  S: 55
 };
 
 const FEATURE_COST = {

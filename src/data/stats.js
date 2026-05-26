@@ -5,8 +5,8 @@ export const STAT_GRADES = [
   { grade: 'D', value: 5,  cost: 3  },
   { grade: 'C', value: 10, cost: 7  },
   { grade: 'B', value: 20, cost: 13 },
-  { grade: 'A', value: 30, cost: 25 },
-  { grade: 'S', value: 40, cost: 45 },
+  { grade: 'A', value: 30, cost: 30 },
+  { grade: 'S', value: 40, cost: 55 },
 ];
 
 export const GRADE_MAP = Object.fromEntries(STAT_GRADES.map(g => [g.grade, g]));
