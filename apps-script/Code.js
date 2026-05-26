@@ -181,13 +181,30 @@ function fenceText(text) {
 var NOFENCE_SENTINEL = "\u0000NOFENCE\u0000";
 
 // doGet 응답 텍스트를 디스코드용으로 포맷한다 (펜스 + 길이 제한).
-// NOFENCE_SENTINEL 접두어가 있으면 펜스를 적용하지 않고 잘라내기만 한다.
+// - NOFENCE_SENTINEL 접두어가 있으면 펜스를 적용하지 않고 잘라내기만 한다.
+// - makeFoldedResponse가 만든 "@@SUMMARY@@\n...\n@@DETAIL@@\n..." 마커 포맷이면
+//   summary/detail 본문만 각각 펜스로 감싸 마커 구조를 보존한다(상세 보기 버튼 호환).
 function formatDiscordReply(text) {
   if (text === null || text === undefined) return "";
   var s = String(text);
   if (s.indexOf(NOFENCE_SENTINEL) === 0) {
     return truncateForDiscord(s.slice(NOFENCE_SENTINEL.length), 1990);
   }
+
+  var SUMMARY_MARK = "@@SUMMARY@@";
+  var DETAIL_MARK = "@@DETAIL@@";
+  if (s.indexOf(SUMMARY_MARK) === 0 && s.indexOf(DETAIL_MARK) > 0) {
+    var detailAt = s.indexOf(DETAIL_MARK);
+    var summaryBody = s.slice(SUMMARY_MARK.length, detailAt).replace(/^\n+|\n+$/g, "");
+    var detailBody  = s.slice(detailAt + DETAIL_MARK.length).replace(/^\n+|\n+$/g, "");
+    return (
+      SUMMARY_MARK + "\n" +
+      fenceText(truncateForDiscord(summaryBody, 1900)) + "\n" +
+      DETAIL_MARK + "\n" +
+      fenceText(truncateForDiscord(detailBody, 1900))
+    );
+  }
+
   return fenceText(truncateForDiscord(s, 1900));
 }
 

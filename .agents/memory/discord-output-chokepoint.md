@@ -8,7 +8,10 @@ Code.js의 응답 경로는 두 갈래로 명확히 분리되어 있다.
 - **Discord 명령 경로**: `doGet` → `handleCommand(...)` → `jsonResponse({text: formatDiscordReply(result)})`. 모든 명령 핸들러가 반환하는 문자열이 이 chokepoint를 통과한다. 포맷(코드펜스/길이 제한)은 여기서만 적용한다.
 - **포털 Webhook 경로**: `doPost` → `returnJson(obj)`. 외부 API용 JSON 응답이므로 코드펜스/길이 제한을 절대 적용하지 않는다.
 
-`formatDiscordReply(text)`는 `fenceText(truncateForDiscord(text, 1900))`을 호출한다. 단, 입력이 `NOFENCE_SENTINEL`("\u0000NOFENCE\u0000")로 시작하면 펜스를 건너뛰고 잘라내기만 한다 — 향후 buttons/components/멘션/링크 응답을 위한 opt-out 통로.
+`formatDiscordReply(text)`는 세 갈래로 동작한다.
+1. 입력이 `NOFENCE_SENTINEL`("\u0000NOFENCE\u0000")로 시작 → 펜스 생략, 잘라내기만(buttons/멘션/링크용 opt-out).
+2. 입력이 `@@SUMMARY@@\n...\n@@DETAIL@@\n...` 마커 포맷(=`makeFoldedResponse` 출력) → 마커를 그대로 두고 summary/detail 본문만 각각 fenceText로 감싼다. 외부 Discord 봇이 마커 기준으로 split해서 summary는 message.content, detail은 "상세 보기" 버튼 콘텐츠로 사용하므로 마커가 펜스 안에 묻히면 안 된다.
+3. 그 외 평문 → 전체를 `fenceText(truncateForDiscord(text, 1900))`.
 
 `fenceText`는 이미 유효한 단일 펜스 블록(`^```lang?\n…\n```$`)이고 본문에 추가 ```가 없을 때만 그대로 반환한다. 내부 ```는 전각 ｀｀｀(U+FF40)로 치환해 펜스 깨짐을 막는다.
 
