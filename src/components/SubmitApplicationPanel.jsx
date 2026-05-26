@@ -25,6 +25,7 @@ export default function SubmitApplicationPanel({ char, stats, abilities, profici
         skills,
         level: char?.level,
         species: char?.race,
+        faction: char?.faction || '무소속',
         erosion: char?.erosion,
       };
       const { error: err } = await createApplication({

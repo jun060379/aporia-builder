@@ -91,6 +91,7 @@ export default function CharacterApplicationView({ application }) {
 
   const name = char.name || payload.name || '(이름 없음)';
   const race = char.race || payload.species || '-';
+  const faction = char.faction || payload.faction || '무소속';
   const level = char.level ?? payload.level ?? '-';
   const erosion = char.erosion ?? payload.erosion ?? '0';
 
@@ -98,9 +99,10 @@ export default function CharacterApplicationView({ application }) {
     <div className="space-y-5">
       {/* 기본 정보 */}
       <Section title="기본 정보">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           <MiniStatCard label="이름" value={name} />
           <MiniStatCard label="종족" value={race} />
+          <MiniStatCard label="소속" value={faction} />
           <MiniStatCard label="레벨" value={`Lv.${level}`} />
           <MiniStatCard label="이면침식" value={erosion} />
         </div>

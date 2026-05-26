@@ -8,6 +8,7 @@ export function buildCharacterText({ char, stats, abilities, proficiencies }) {
     '!캐릭터신청',
     `이름: ${char.name}`,
     `종족: ${char.race}`,
+    `소속: ${char.faction || '무소속'}`,
     ...STAT_NAMES.map((s) => `${s}: ${stats[s]}`),
     ...ABILITY_NAMES.map((a) => `${a}: ${abilities[a]}`),
     ...PROFICIENCY_NAMES.map((p) => `${p}: ${proficiencies[p]}`),

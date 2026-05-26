@@ -1,4 +1,5 @@
 import { LEVEL_TABLE } from '../data/levels';
+import { FACTION_OPTIONS } from '../data/factions';
 
 const inputCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
 const selectCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none transition-colors cursor-pointer";
@@ -12,7 +13,7 @@ export default function CharacterForm({ char, onChange }) {
         <span className="text-[10px] text-violet-300 font-mono tracking-widest">01</span>
         <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">기본 정보</h2>
       </div>
-      <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">캐릭터의 이름과 종족을 입력하고, 시뮬레이션할 레벨을 선택합니다.</p>
+      <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">캐릭터의 이름·종족·소속을 입력하고, 시뮬레이션할 레벨을 선택합니다.</p>
 
       <div className="grid grid-cols-2 gap-2.5">
         <label className="flex flex-col gap-1">
@@ -22,6 +23,14 @@ export default function CharacterForm({ char, onChange }) {
         <label className="flex flex-col gap-1">
           <span className="text-[11px] text-slate-500 tracking-wide">종족</span>
           <input className={inputCls} value={char.race} onChange={field('race')} placeholder="종족" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-slate-500 tracking-wide">소속</span>
+          <select className={selectCls} value={char.faction ?? '무소속'} onChange={field('faction')}>
+            {FACTION_OPTIONS.map(f => (
+              <option key={f} value={f}>{f}</option>
+            ))}
+          </select>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[11px] text-slate-500 tracking-wide">빌드 기준 레벨</span>

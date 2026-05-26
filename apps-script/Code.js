@@ -16,6 +16,9 @@ const SHEET_STATUS_TEMPLATE = "STATUS_TEMPLATE";
 const SHEET_ENEMY_TEMPLATES = "ENEMY_TEMPLATES";
 const SHEET_ENEMIES = "ENEMIES";
 const SHEET_ENEMY_SKILLS = "ENEMY_SKILLS";
+const SHEET_COMMON_SKILLS = "COMMON_SKILLS";
+const COMMON_UNLOCK_LEVELS = [1, 2, 4, 6, 8, 12];
+const DEFAULT_FACTION = "무소속";
 const ENEMY_ACTION_FIELDS = [
   "참격", "관통", "타격", "격투", "사격",
   "방어", "회피", "저항",
@@ -244,6 +247,9 @@ function handleCommand(utterance, displayName) {
   if (command === "!스킬목록") return skillList(displayName);
   if (command === "!스킬") return skillUse(parts, displayName);
 
+  if (command === "!공용스킬목록") return commonSkillListCommand(parts, displayName);
+  if (command === "!공용스킬") return commonSkillUseCommand(parts, displayName);
+
   if (command === "!캐릭터신청") return characterSubmit(utterance, displayName);
   if (command === "!캐릭터승인") return characterApprove(parts, displayName);
   if (command === "!캐릭터반려") return characterReject(parts, displayName, utterance);
@@ -342,6 +348,10 @@ function commandListCommand() {
     "  !스킬반려    <신청번호> <사유>",
     "  !스킬목록",
     "  !스킬        <스킬명>",
+    "",
+    "[ 공용 스킬 ]",
+    "  !공용스킬목록 [캐릭터별명]",
+    "  !공용스킬    [캐릭터별명] <스킬명> [대상:대상명] [보정]",
     "",
     "[ 상태 · 스택 ]",
     "  !상태목록",
@@ -1597,6 +1607,7 @@ function showMyInfo(displayName) {
 
   const name = fresh["이름"] || "이름 없음";
   const race = fresh["종족"] || "종족 미상";
+  const faction = getCharacterFaction(fresh);
   const level = fresh["레벨"] || readCharacterLevel(fresh);
   const exp = fresh["경험치"] || 0;
 
@@ -1654,7 +1665,7 @@ function showMyInfo(displayName) {
   return (
     "╔═══ 〔 CHARACTER STATUS 〕 ═══╗\n" +
     name + "\n" +
-    race + " / Lv." + level + "\n\n" +
+    race + " / " + faction + " / Lv." + level + "\n\n" +
     "HP  " + currentHp + " / " + maxHp + "  " + hpBar + "\n" +
     "EXP " + exp + "\n" +
     "성장예산 " + budget + "\n" +
@@ -2791,6 +2802,7 @@ function characterSubmit(utterance, displayName) {
     별명: alias,
     이름: data["이름"],
     종족: data["종족"],
+    소속: (data["소속"] && String(data["소속"]).trim()) || DEFAULT_FACTION,
 
     레벨: "",
     경험치: getNumberField(data, "경험치", 0),
@@ -2962,6 +2974,7 @@ function getCharacterFormText() {
     "!캐릭터신청\n" +
     "이름:\n" +
     "종족:\n" +
+    "소속:\n" +
     "근력:\n" +
     "민첩:\n" +
     "내구:\n" +
@@ -8562,3 +8575,495 @@ function _portalPeekField(block, key) {
 }
 
 // ── End of Aporia Portal Webhook ─────────────────────────────────────
+
+// ── 공용 스킬 (COMMON_SKILLS) ────────────────────────────────────────
+
+function getCharacterFaction(character) {
+  if (!character) return DEFAULT_FACTION;
+  const raw = character["소속"];
+  if (raw === undefined || raw === null) return DEFAULT_FACTION;
+  const v = String(raw).trim();
+  return v || DEFAULT_FACTION;
+}
+
+function getCharacterRaceText(character) {
+  if (!character) return "";
+  const raw = character["종족"];
+  if (raw === undefined || raw === null) return "";
+  return String(raw).trim();
+}
+
+function readCommonSkills() {
+  try {
+    return getSheetData(SHEET_COMMON_SKILLS);
+  } catch (e) {
+    return null;
+  }
+}
+
+function _normalizeCommonSkillType(skill) {
+  const t = String(skill["유형"] || "").trim().toLowerCase();
+  if (t === "global" || t === "faction" || t === "species") return t;
+  return "global";
+}
+
+function _commonSkillUnlockStatus(skill, character) {
+  const type = _normalizeCommonSkillType(skill);
+  const unlockLevel = Number(skill["해금레벨"] || 0) || 0;
+  const charLevel = Number(readCharacterLevel(character) || 0) || 0;
+  const charFaction = getCharacterFaction(character);
+  const charRace = getCharacterRaceText(character);
+
+  let conditionMatched = true;
+  let conditionReason = "";
+
+  if (type === "faction") {
+    const skillFaction = String(skill["소속"] || "").trim() || DEFAULT_FACTION;
+    if (skillFaction !== charFaction) {
+      conditionMatched = false;
+      conditionReason = "소속 불일치 (필요: " + skillFaction + " / 캐릭터: " + charFaction + ")";
+    }
+  } else if (type === "species") {
+    const skillRace = String(skill["종족"] || "").trim();
+    if (skillRace !== charRace) {
+      conditionMatched = false;
+      conditionReason = "종족 불일치 (필요: " + skillRace + " / 캐릭터: " + (charRace || "-") + ")";
+    }
+  }
+
+  const levelMatched = charLevel >= unlockLevel;
+  const unlocked = conditionMatched && levelMatched;
+
+  return {
+    type: type,
+    unlockLevel: unlockLevel,
+    charLevel: charLevel,
+    conditionMatched: conditionMatched,
+    conditionReason: conditionReason,
+    levelMatched: levelMatched,
+    unlocked: unlocked
+  };
+}
+
+function findCommonSkill(nameOrKey) {
+  const rows = readCommonSkills();
+  if (!rows) return null;
+  const needle = String(nameOrKey || "").trim();
+  if (!needle) return null;
+
+  return rows.find(r => {
+    const k = String(r["key"] || "").trim();
+    const n = String(r["이름"] || "").trim();
+    return k === needle || n === needle;
+  }) || null;
+}
+
+function _resolveCommandCharacter(parts, displayName) {
+  if (parts.length >= 2) {
+    const candidate = String(parts[1] || "").trim();
+    if (candidate) {
+      const byAlias = findCharacterByAlias(candidate);
+      if (byAlias) {
+        return { character: byAlias, alias: String(byAlias["별명"]).trim(), consumed: 2 };
+      }
+    }
+  }
+  const self = findCharacter(displayName);
+  if (self) {
+    return { character: self, alias: String(self["별명"]).trim(), consumed: 1 };
+  }
+  return null;
+}
+
+function commonSkillListCommand(parts, displayName) {
+  const resolved = _resolveCommandCharacter(parts, displayName);
+  if (!resolved) {
+    return (
+      "캐릭터를 찾을 수 없습니다.\n" +
+      "디스코드 별명: " + displayName + "\n" +
+      "BOT_DB의 별명 열과 디스코드 서버 별명이 같은지 확인하세요."
+    );
+  }
+
+  const character = resolved.character;
+  const rows = readCommonSkills();
+
+  if (rows === null) {
+    return "COMMON_SKILLS 시트가 없습니다.\n관리자가 시트를 생성해야 합니다.";
+  }
+
+  const faction = getCharacterFaction(character);
+  const race = getCharacterRaceText(character) || "-";
+  const level = Number(readCharacterLevel(character) || 0) || 0;
+
+  const available = [];
+  const locked = [];
+
+  rows.forEach(r => {
+    const name = String(r["이름"] || "").trim();
+    if (!name) return;
+    const status = _commonSkillUnlockStatus(r, character);
+    if (!status.conditionMatched) return;
+
+    const series = String(r["계열"] || "").trim() || "-";
+    const rank = String(r["랭크"] || "").trim() || "-";
+    const line = "- Lv." + (status.unlockLevel || "?") + " " + name + " / " + series + " " + rank;
+
+    if (status.unlocked) available.push(line);
+    else locked.push(line);
+  });
+
+  if (available.length === 0 && locked.length === 0) {
+    return (
+      "[공용 스킬 목록]\n" +
+      "캐릭터: " + resolved.alias + "\n" +
+      "소속: " + faction + "\n" +
+      "종족: " + race + "\n" +
+      "레벨: " + level + "\n\n" +
+      "표시 가능한 공용 스킬이 없습니다.\n" +
+      "(COMMON_SKILLS 시트에 해당 캐릭터 조건의 행이 없습니다)"
+    );
+  }
+
+  let text =
+    "[공용 스킬 목록]\n" +
+    "캐릭터: " + resolved.alias + "\n" +
+    "소속: " + faction + "\n" +
+    "종족: " + race + "\n" +
+    "레벨: " + level + "\n";
+
+  if (available.length > 0) {
+    text += "\n사용 가능:\n" + available.join("\n");
+  }
+  if (locked.length > 0) {
+    text += "\n\n잠김:\n" + locked.join("\n");
+  }
+
+  return text;
+}
+
+function commonSkillUseCommand(parts, displayName) {
+  if (parts.length < 2) {
+    return (
+      "사용법: !공용스킬 [캐릭터별명] <스킬명> [대상:대상명] [보정]\n" +
+      "예시:\n" +
+      "  !공용스킬 마탄 대상:에너미A\n" +
+      "  !공용스킬 월하륜 마탄 대상:에너미A +2"
+    );
+  }
+
+  const resolved = _resolveCommandCharacter(parts, displayName);
+  if (!resolved) {
+    return (
+      "캐릭터를 찾을 수 없습니다.\n" +
+      "디스코드 별명: " + displayName
+    );
+  }
+
+  const character = resolved.character;
+  const alias = resolved.alias;
+  const rest = parts.slice(resolved.consumed);
+
+  if (rest.length < 1) {
+    return "스킬명이 필요합니다.\n사용법: !공용스킬 [캐릭터별명] <스킬명> [대상:대상명] [보정]";
+  }
+
+  const skillName = rest[0];
+  const targetParsed = parseTargetAndMods(rest.slice(1));
+  const mods = targetParsed.mods;
+  const targetAlias = targetParsed.target;
+
+  const skillRows = readCommonSkills();
+  if (skillRows === null) {
+    return "COMMON_SKILLS 시트가 없습니다.\n관리자가 시트를 생성해야 합니다.";
+  }
+
+  const commonSkill = findCommonSkill(skillName);
+  if (!commonSkill) {
+    return (
+      "공용 스킬을 찾을 수 없습니다.\n" +
+      "스킬명: " + skillName + "\n\n" +
+      "확인: !공용스킬목록"
+    );
+  }
+
+  const displaySkillName = String(commonSkill["이름"] || skillName).trim();
+  const status = _commonSkillUnlockStatus(commonSkill, character);
+
+  if (!status.conditionMatched) {
+    return (
+      "[공용 스킬 사용 불가]\n" +
+      "캐릭터: " + alias + "\n" +
+      "스킬: " + displaySkillName + "\n\n" +
+      "사유: " + status.conditionReason
+    );
+  }
+
+  if (!status.levelMatched) {
+    return (
+      "[공용 스킬 잠김]\n" +
+      "캐릭터: " + alias + "\n" +
+      "스킬: " + displaySkillName + "\n\n" +
+      "필요 레벨: " + status.unlockLevel + " / 현재 레벨: " + status.charLevel
+    );
+  }
+
+  const targetSpec = String(commonSkill["대상"] || "").trim().toLowerCase();
+  let targetWarning = "";
+
+  if (targetSpec === "required" && !targetAlias) {
+    return (
+      "[공용 스킬 오류]\n" +
+      displaySkillName + "\n\n" +
+      "이 공용 스킬은 대상 지정이 필수입니다.\n" +
+      "사용법: !공용스킬 " + displaySkillName + " 대상:대상명"
+    );
+  }
+  if (targetSpec === "none" && targetAlias) {
+    targetWarning = "\n※ 이 공용 스킬은 대상 지정이 없는 스킬입니다. 대상값은 무시되었습니다.\n";
+  }
+  const effectiveTarget = (targetSpec === "none") ? "" : targetAlias;
+
+  const erosion = Number(character["이면침식"] || 0);
+  const erosionStage = getErosionStageText(erosion);
+
+  if (erosion >= MAX_EROSION) {
+    return (
+      "[로스트]\n" +
+      alias + "은/는 이미 경계를 넘어섰습니다.\n\n" +
+      "이면침식: " + erosion + " / " + MAX_EROSION + "\n" +
+      "상태: " + erosionStage + "\n\n" +
+      "이 캐릭터는 더 이상 플레이어 캐릭터로 사용할 수 없습니다."
+    );
+  }
+
+  const rank = String(commonSkill["랭크"] || "").trim().toUpperCase();
+  let rankValue;
+  try {
+    rankValue = rankToValue(rank);
+  } catch (e) {
+    return (
+      "[공용 스킬 오류]\n" +
+      displaySkillName + "\n\n" +
+      "허용되지 않은 랭크입니다: " + rank
+    );
+  }
+
+  const statusResult = processStatusBeforeCheck(alias, "스킬");
+  if (statusResult.blocked) {
+    return statusResult.text;
+  }
+
+  const variables = buildFormulaVariables(character, rankValue, effectiveTarget);
+
+  let calc;
+  try {
+    calc = safeEvalFormula(commonSkill["계산식"], variables);
+  } catch (e) {
+    return (
+      "[공용 스킬 계산 오류]\n" +
+      displaySkillName + "\n\n" +
+      "오류: " + e.message + "\n\n" +
+      "계산식:\n```" +
+      commonSkill["계산식"] +
+      "```"
+    );
+  }
+
+  let result = Math.floor(calc.value);
+  const erosionMultiplier = getErosionMultiplier(erosion);
+  const beforeErosionMultiplier = result;
+  result = Math.floor(result * erosionMultiplier);
+
+  let typeBonusText = "";
+  const type = String(commonSkill["계열"] || "").trim();
+  if (type === "방호") {
+    result += 3;
+    typeBonusText = "방호 보정: +3\n";
+  }
+
+  let finalValue;
+  try {
+    finalValue = applyMods(result, mods);
+    const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type]);
+    finalValue = statusMod.value;
+  } catch (e) {
+    return (
+      "[공용 스킬 판정 오류]\n" +
+      displaySkillName + "\n\n" +
+      "보정 처리 중 오류가 발생했습니다.\n\n" +
+      "오류: " + e.message
+    );
+  }
+
+  const resultText = getSkillResultText(type, finalValue);
+  const rawEffectText = String(commonSkill["효과"] || "").trim();
+
+  let pendingId = "";
+  let healingDetailText = "";
+  let combatDetailText = "";
+  let interferenceDetailText = "";
+  let effectDetailText = "";
+  let effectSummary = summarizeSkillEffects(rawEffectText);
+
+  const isTargetedAttackSkill = ATTACK_SKILL_TYPES.includes(type) && effectiveTarget;
+  const isTargetedInterferenceSkill = type === "간섭" && effectiveTarget;
+
+  // 공용 스킬을 일반 스킬 처리 함수에 넘기기 위한 호환 객체 (스킬명 키 매핑)
+  const skillForEffects = {
+    "스킬명": displaySkillName,
+    "계통": commonSkill["계통"] || "",
+    "계열": type,
+    "랭크": rank,
+    "계산식": commonSkill["계산식"] || "",
+    "효과": rawEffectText,
+    "조건": commonSkill["조건"] || "",
+    "대가": "",
+    "설명": commonSkill["설명"] || ""
+  };
+
+  if (type === "치유" || type === "재생") {
+    const healTarget = effectiveTarget || alias;
+    const healResult = applyHealingToCharacter(healTarget, finalValue);
+    healingDetailText = "\n\n" + healResult.text;
+    effectSummary = rawEffectText ? effectSummary : "회복 적용";
+  }
+
+  if (isTargetedAttackSkill) {
+    const pending = createPendingAttackFlex(
+      alias,
+      effectiveTarget,
+      "스킬",
+      displaySkillName,
+      finalValue
+    );
+
+    if (pending.ok) {
+      pendingId = pending.id;
+      combatDetailText = "\n\n" + makeCombatChoiceTextFlex(pending);
+
+      if (rawEffectText) {
+        effectSummary = "맞게 될 시 " + summarizeSkillEffects(rawEffectText);
+        effectDetailText =
+          "\n\n[스킬 효과 대기]\n" +
+          "화력계 대상 지정 스킬의 효과는 즉시 발동하지 않습니다.\n" +
+          "대상의 대응 결과에 따라 처리됩니다.";
+      } else {
+        effectSummary = "없음";
+      }
+    } else {
+      combatDetailText = "\n\n" + pending.text;
+      effectSummary = "공격 대기 생성 실패";
+    }
+  } else if (isTargetedInterferenceSkill) {
+    let resistance;
+    try {
+      resistance = rollResistanceForStatus(effectiveTarget, finalValue, []);
+    } catch (e) {
+      return (
+        "[간섭 저항 오류]\n" +
+        displaySkillName + "\n\n" +
+        "오류: " + e.message
+      );
+    }
+
+    interferenceDetailText =
+      "\n\n[간섭 저항]\n" +
+      resistance.text + "\n\n" +
+      "결과: " + (resistance.success ? "간섭 무효" : "간섭 적중");
+
+    if (resistance.success) {
+      effectSummary = rawEffectText ? "저항 성공으로 무효" : "간섭 무효";
+      effectDetailText =
+        rawEffectText
+          ? "\n\n[스킬 효과 무효]\n대상이 간섭 저항에 성공하여 효과가 발동하지 않습니다."
+          : "";
+    } else {
+      try {
+        const processed = processSkillEffects(rawEffectText, {
+          userAlias: alias,
+          targetAlias: effectiveTarget,
+          finalValue: finalValue,
+          skillName: displaySkillName,
+          skill: skillForEffects,
+          resistanceMode: "none"
+        });
+        effectDetailText = processed;
+        effectSummary = processed ? "적용됨 / " + summarizeSkillEffects(rawEffectText) : "없음";
+      } catch (e) {
+        return (
+          "[간섭 효과 처리 오류]\n" +
+          displaySkillName + "\n\n" +
+          "오류: " + e.message
+        );
+      }
+    }
+  } else {
+    try {
+      const processed = processSkillEffects(rawEffectText, {
+        userAlias: alias,
+        targetAlias: effectiveTarget,
+        finalValue: finalValue,
+        skillName: displaySkillName,
+        skill: skillForEffects,
+        resistanceMode: "normal"
+      });
+      effectDetailText = processed;
+      effectSummary = processed ? "처리됨 / " + summarizeSkillEffects(rawEffectText) : "없음";
+    } catch (e) {
+      return (
+        "[공용 스킬 효과 처리 오류]\n" +
+        displaySkillName + "\n\n" +
+        "오류: " + e.message
+      );
+    }
+  }
+
+  const diceText = formatDiceLogs(calc.diceLogs);
+
+  const summaryBlock = formatSkillSummaryBlock(
+    skillForEffects,
+    alias,
+    effectiveTarget,
+    rank,
+    rankValue,
+    finalValue,
+    effectSummary,
+    pendingId
+  );
+
+  const summary = "[공용 스킬]\n" + alias + " - " + displaySkillName + "\n\n" + summaryBlock + targetWarning;
+
+  const detail =
+    (statusResult.text ? statusResult.text + "\n\n" : "") +
+    "[공용 스킬 사용 상세]\n" +
+    alias + " - " + displaySkillName + "\n\n" +
+    "유형: " + status.type + "\n" +
+    "해금레벨: " + status.unlockLevel + " (현재 Lv." + status.charLevel + ")\n" +
+    "소속: " + getCharacterFaction(character) + "\n" +
+    "종족: " + (getCharacterRaceText(character) || "-") + "\n\n" +
+    "계통: " + (commonSkill["계통"] || "-") + "\n" +
+    "계열: " + (type || "-") + "\n" +
+    "랭크: " + rank + "(" + rankValue + ")\n\n" +
+    "조건:\n" + (commonSkill["조건"] || "-") + "\n\n" +
+    "설명:\n" + (commonSkill["설명"] || "-") + "\n\n" +
+    "주사위:\n" + diceText + "\n\n" +
+    "계산식:\n```" + (commonSkill["계산식"] || "") + "```\n\n" +
+    "대입식:\n```" + calc.expression + "```\n" +
+    "계산 결과: " + Math.floor(calc.value) + "\n" +
+    "이면침식: " + erosion + " / " + MAX_EROSION + "\n" +
+    "침식단계: " + erosionStage + "\n" +
+    "침식배율: ×" + erosionMultiplier + "\n" +
+    "배율 적용 결과: " + beforeErosionMultiplier + " → " + result + "\n" +
+    typeBonusText +
+    "보정: " + (mods.join(" ") || "없음") + "\n\n" +
+    "최종값: " + finalValue + "\n" +
+    resultText +
+    healingDetailText +
+    combatDetailText +
+    interferenceDetailText +
+    effectDetailText;
+
+  return makeFoldedResponse(summary, detail);
+}
+

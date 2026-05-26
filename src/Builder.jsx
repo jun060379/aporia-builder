@@ -42,7 +42,7 @@ function buildSaveData(char, stats, abilities, proficiencies, skills) {
   };
 }
 
-const DEFAULT_CHAR = { name: '', race: '', level: '1', erosion: '0' };
+const DEFAULT_CHAR = { name: '', race: '', faction: '무소속', level: '1', erosion: '0' };
 
 // ── tabs ─────────────────────────────────────────────────
 const TABS_LEFT  = ['캐릭터', '기능/숙련', '스킬'];
@@ -83,6 +83,8 @@ function CharacterSummary({ char, stats }) {
         <span className="text-slate-900 font-semibold">{char.name || '—'}</span>
         <span className="text-slate-400">종족</span>
         <span className="text-slate-700">{char.race || '—'}</span>
+        <span className="text-slate-400">소속</span>
+        <span className="text-slate-700">{char.faction || '무소속'}</span>
         <span className="text-slate-400">빌드 레벨</span>
         <span className="text-amber-600 font-bold">Lv.{levelInfo.level} 기준</span>
         <span className="text-slate-400">성장예산</span>
