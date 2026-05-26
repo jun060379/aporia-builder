@@ -313,9 +313,26 @@ function handleCommand(utterance, displayName) {
     if (actionRows.length > 0) {
       return actionCheck(["!액션", dynamicName].concat(parts.slice(1)), displayName);
     }
+
+    // 스킬 이름 직접 단축: 개인 스킬 → 공용 스킬 순으로 검색
+    const skillCharacter = findCharacter(displayName);
+    if (skillCharacter) {
+      const skillAlias = String(skillCharacter["별명"]).trim();
+      if (findApprovedSkill(skillAlias, dynamicName)) {
+        return skillUse(["!스킬", dynamicName].concat(parts.slice(1)), displayName);
+      }
+      if (findCommonSkill(dynamicName)) {
+        // alias를 명시 삽입 → _resolveCommandCharacter에서 스킬명이 별명으로 오인되는 것 방지
+        return commonSkillUseCommand(["!공용스킬", skillAlias, dynamicName].concat(parts.slice(1)), displayName);
+      }
+    }
   }
 
-  return "❓ 알 수 없는 명령어입니다: " + command + "\n\n" + commandListCommand();
+  return (
+    "❓ 알 수 없는 명령어입니다: " + command + "\n" +
+    "스킬 이름을 직접 입력한 경우, 개인 스킬 또는 해금된 공용 스킬인지 확인해주세요.\n\n" +
+    commandListCommand()
+  );
 }
 
 function commandListCommand() {
@@ -2423,11 +2440,19 @@ function skillUse(parts, displayName) {
   const skill = findApprovedSkill(alias, skillName);
 
   if (!skill) {
+    // 개인 스킬에 없으면 공용 스킬로 폴백
+    // (alias를 명시 삽입해 스킬명이 다른 캐릭터 별명과 같을 때의 오인 방지)
+    if (findCommonSkill(skillName)) {
+      return commonSkillUseCommand(["!공용스킬", alias, skillName].concat(parts.slice(2)), displayName);
+    }
+
     return (
-      "등록된 스킬을 찾을 수 없습니다.\n" +
+      "스킬을 찾을 수 없습니다.\n" +
+      "개인 스킬 또는 해금된 공용 스킬인지 확인해주세요.\n" +
+      "공용 스킬 목록은 !공용스킬목록 으로 확인할 수 있습니다.\n\n" +
       "소유자: " + alias + "\n" +
       "스킬명: " + skillName + "\n\n" +
-      "등록된 스킬 확인: !스킬목록"
+      "등록된 개인 스킬 확인: !스킬목록"
     );
   }
 
