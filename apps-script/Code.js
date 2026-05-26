@@ -8836,18 +8836,14 @@ function commonSkillUseCommand(parts, displayName) {
   const targetSpec = String(commonSkill["대상"] || "").trim().toLowerCase();
   let targetWarning = "";
 
-  if (targetSpec === "required" && !targetAlias) {
-    return (
-      "[공용 스킬 오류]\n" +
-      displaySkillName + "\n\n" +
-      "이 공용 스킬은 대상 지정이 필수입니다.\n" +
-      "사용법: !공용스킬 " + displaySkillName + " 대상:대상명"
-    );
-  }
+  // required: 대상 자동 처리에 대상이 필요하다는 의미. 대상 없이도 순수 판정은 허용.
+  // none: 대상 지정이 불가능. 대상값은 무시.
+  // optional: 대상 있으면 대상 처리, 없으면 판정값만.
   if (targetSpec === "none" && targetAlias) {
     targetWarning = "\n※ 이 공용 스킬은 대상 지정이 없는 스킬입니다. 대상값은 무시되었습니다.\n";
   }
   const effectiveTarget = (targetSpec === "none") ? "" : targetAlias;
+  const noTargetMode = !effectiveTarget;
 
   const erosion = Number(character["이면침식"] || 0);
   const erosionStage = getErosionStageText(erosion);
@@ -9057,7 +9053,17 @@ function commonSkillUseCommand(parts, displayName) {
     pendingId
   );
 
-  const summary = "[공용 스킬]\n" + alias + " - " + displaySkillName + "\n\n" + summaryBlock + targetWarning;
+  let noTargetNote = "";
+  if (noTargetMode) {
+    if (type === "치유" || type === "재생") {
+      noTargetNote = "\n처리: 대상 없음 → 자신 회복\n";
+    } else {
+      noTargetNote = "\n처리: 대상 없음 → 판정값만 출력\n" +
+        "※ 대상이 필요한 자동 처리(공격 대기/저항 판정/대상 효과)는 생략되었습니다.\n";
+    }
+  }
+
+  const summary = "[공용 스킬]\n" + alias + " - " + displaySkillName + "\n\n" + summaryBlock + targetWarning + noTargetNote;
 
   const detail =
     (statusResult.text ? statusResult.text + "\n\n" : "") +
