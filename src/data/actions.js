@@ -8,7 +8,7 @@ export const ACTIONS = [
   {
     name: '관통',
     isDamage: true,
-    base: [{ stat: '민첩', coef: 1 }, { stat: '감각', coef: 0.5 }],
+    base: [{ stat: '민첩', coef: 1 }, { stat: '근력', coef: 0.5 }],
     mult: [{ key: '무기술', coef: 0.12 }, { key: '관찰', coef: 0.08 }, { key: '사격술', coef: 0.05 }, { key: '관통숙련', coef: 0.25 }],
   },
   {
