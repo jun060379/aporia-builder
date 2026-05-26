@@ -4174,6 +4174,54 @@ function rollPowerValueForResponse(type, rank, mods) {
   };
 }
 
+// 대응에 쓰인 스킬(개인/공용)의 효과를 적용한다.
+// response: _rollResponseSkillByMode가 돌려준 객체. {kind:"스킬", source, isCommon, name, skill, value}
+// userAlias: 효과 사용자(자신)
+// targetAlias: 효과 대상(방어/회피/저항=자신, 맞대응=공격자)
+// resistanceMode: "none" | "normal" | "forceFail"
+function _applyResponseSkillEffects(response, userAlias, targetAlias, resistanceMode) {
+  if (!response || response.kind !== "스킬" || !response.skill) return "";
+
+  const skillRow = response.skill;
+  const effectText = String(skillRow["효과"] || "").trim();
+  if (!effectText) return "";
+
+  const skillName = response.name || skillRow["스킬명"] || skillRow["이름"] || "";
+
+  // 공용 스킬 행은 "이름" 키를 쓰므로 처리 함수가 기대하는 "스킬명" 형태로 호환 객체를 만든다.
+  const skillForEffects = response.isCommon
+    ? {
+        "스킬명": skillName,
+        "계통": skillRow["계통"] || "",
+        "계열": skillRow["계열"] || "",
+        "랭크": skillRow["랭크"] || "",
+        "계산식": skillRow["계산식"] || "",
+        "효과": effectText,
+        "조건": skillRow["조건"] || "",
+        "대가": "",
+        "설명": skillRow["설명"] || ""
+      }
+    : skillRow;
+
+  try {
+    const out = processSkillEffects(effectText, {
+      userAlias: userAlias,
+      targetAlias: targetAlias,
+      finalValue: response.value,
+      skillName: skillName,
+      skill: skillForEffects,
+      resistanceMode: resistanceMode || "none"
+    });
+    return out || "";
+  } catch (e) {
+    return (
+      "\n\n[대응 스킬 효과 처리 오류]\n" +
+      skillName + "\n" +
+      "오류: " + e.message
+    );
+  }
+}
+
 // 보정/모디파이어 토큰 판별 (+2, -3, 5 같은 형태)
 function _isResponseModifierToken(t) {
   if (t === null || t === undefined) return false;
@@ -4242,8 +4290,7 @@ function _rollResponseSkillByMode(character, mode, skillName, mods, targetAlias)
       Math.floor(rolled.beforeErosionMultiplier * rolled.erosionMultiplier) + "\n" +
     (rolled.typeBonusText ? rolled.typeBonusText + "\n" : "") +
     "보정: " + ((rolled.mods && rolled.mods.length > 0) ? rolled.mods.join(" ") : "없음") + "\n" +
-    "최종값: " + rolled.finalValue + "\n" +
-    "※ 대응용 사용이므로 스킬의 자동 효과 적용/공격 대기 생성은 수행되지 않습니다.";
+    "최종값: " + rolled.finalValue;
 
   return {
     kind: "스킬",
@@ -4295,6 +4342,24 @@ function rollResponseValue(character, defaultActionName, tokens, targetAlias) {
     skillMode = "auto";
     skillName = tokens[0];
     skillMods = tokens.slice(1);
+  } else if (
+    // 맞대응(defaultActionName="")에서도 베어네임으로 스킬 사용 허용.
+    // 단, 액션명("참격" 등)으로 쓰는 기존 동작을 보존하기 위해
+    // 실제로 스킬이 존재할 때만 스킬 모드로 라우팅한다.
+    !defaultActionName &&
+    tokens.length >= 1 &&
+    tokens[0] &&
+    !_isResponseModifierToken(tokens[0]) &&
+    !(tokens.length >= 2 && ["화력", "방호", "치유", "재생", "간섭", "강화"].includes(tokens[0]))
+  ) {
+    const _alias = String(character["별명"]).trim();
+    const _hasPersonal = findApprovedSkill(_alias, tokens[0]);
+    const _hasCommon = _hasPersonal ? null : findCommonSkill(tokens[0]);
+    if (_hasPersonal || _hasCommon) {
+      skillMode = "auto";
+      skillName = tokens[0];
+      skillMods = tokens.slice(1);
+    }
   }
 
   if (skillMode) {
@@ -4384,7 +4449,9 @@ function combatResponse(parts, displayName) {
       "!대응 저항 <스킬명> [보정]            (안내성, 자동 피해 처리 없음)\n" +
       "!대응 맞대응 액션명 [보정]\n" +
       "!대응 맞대응 화력 랭크 [보정]\n" +
-      "!대응 맞대응 스킬 스킬명 [보정]\n" +
+      "!대응 맞대응 <스킬명> [보정]          (개인→공용 순으로 검색)\n" +
+      "!대응 맞대응 스킬 <스킬명> [보정]     (개인→공용)\n" +
+      "!대응 맞대응 공용스킬 <스킬명> [보정] (공용 스킬만)\n" +
       "!대응 무대응\n\n" +
       "공격번호 지정:\n" +
       "!대응 ATK-0001 방어\n" +
@@ -4545,13 +4612,20 @@ function combatResponse(parts, displayName) {
       )
       : processPendingAttackSkillEffects(attack, "normal", attackValue);
 
+    // 방어용 스킬을 사용한 경우, 해당 스킬의 효과는 자신에게 적용한다.
+    const defenseSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, "none");
+    const defenseSkillBlock = defenseSkillEffectText
+      ? "\n\n[방어 스킬 효과]\n" + response.name + "\n" + defenseSkillEffectText
+      : "";
+
     resolvePendingAttack(attack["id"], {
       대응종류: "방어",
       대응값: defenseValue,
       최종피해: damage,
-      메모: defenseSuccess
+      메모: (defenseSuccess
         ? "방어 성공. 공격 스킬 효과 무효"
-        : "방어 실패. 공격 스킬 효과 저항 판정"
+        : "방어 실패. 공격 스킬 효과 저항 판정")
+        + (defenseSkillEffectText ? ". 방어 스킬 효과 적용" : "")
     });
 
     const methodLine = response.kind === "스킬"
@@ -4570,7 +4644,8 @@ function combatResponse(parts, displayName) {
       compactDamageText(damageResult) +
       (attackEffectText
         ? "\n효과: " + (defenseSuccess ? "무효" : "저항 판정 / 상세보기")
-        : "");
+        : "") +
+      (defenseSkillEffectText ? "\n방어 스킬 효과: 적용 / 상세보기" : "");
 
     const detail =
       statusDetailPrefix +
@@ -4583,7 +4658,8 @@ function combatResponse(parts, displayName) {
       "결과: " + (defenseSuccess ? "방어 성공" : "방어 실패") + "\n" +
       "최종피해: " + damage + "\n\n" +
       damageResult.text +
-      attackEffectText;
+      attackEffectText +
+      defenseSkillBlock;
 
     return makeFoldedResponse(summary, detail);
   }
@@ -4613,13 +4689,20 @@ function combatResponse(parts, displayName) {
       )
       : processPendingAttackSkillEffects(attack, "normal", attackValue);
 
+    // 회피용 스킬을 사용한 경우, 해당 스킬의 효과는 자신에게 적용한다.
+    const evadeSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, "none");
+    const evadeSkillBlock = evadeSkillEffectText
+      ? "\n\n[회피 스킬 효과]\n" + response.name + "\n" + evadeSkillEffectText
+      : "";
+
     resolvePendingAttack(attack["id"], {
       대응종류: "회피",
       대응값: evadeValue,
       최종피해: damage,
-      메모: success
+      메모: (success
         ? "회피 성공. 공격 스킬 효과 무효"
-        : "회피 실패. 공격 스킬 효과 저항 판정"
+        : "회피 실패. 공격 스킬 효과 저항 판정")
+        + (evadeSkillEffectText ? ". 회피 스킬 효과 적용" : "")
     });
 
     const methodLine = response.kind === "스킬"
@@ -4639,6 +4722,7 @@ function combatResponse(parts, displayName) {
       (attackEffectText
         ? "\n효과: " + (success ? "무효" : "저항 판정 / 상세보기")
         : "") +
+      (evadeSkillEffectText ? "\n회피 스킬 효과: 적용 / 상세보기" : "") +
       (success ? "\n추가: 다음 판정에 이득 가능" : "");
 
     const detail =
@@ -4653,6 +4737,7 @@ function combatResponse(parts, displayName) {
       "최종피해: " + damage + "\n\n" +
       damageResult.text +
       attackEffectText +
+      evadeSkillBlock +
       (success ? "\n\n다음 판정에 추가 이득을 얻을 수 있습니다." : "");
 
     return makeFoldedResponse(summary, detail);
@@ -4665,7 +4750,9 @@ function combatResponse(parts, displayName) {
         "예시:\n" +
         "!대응 맞대응 참격\n" +
         "!대응 맞대응 화력 A\n" +
-        "!대응 맞대응 스킬 월광참"
+        "!대응 맞대응 월광참            (개인→공용 순으로 검색)\n" +
+        "!대응 맞대응 스킬 월광참       (개인→공용)\n" +
+        "!대응 맞대응 공용스킬 마탄     (공용만)"
       );
     }
 
@@ -4686,25 +4773,13 @@ function combatResponse(parts, displayName) {
       let counterEffectText = "";
 
       if (response.kind === "스킬" && response.skill) {
-        try {
-          counterEffectText = processSkillEffects(response.skill["효과"], {
-            userAlias: selfAlias,
-            targetAlias: attackerAlias,
-            finalValue: counterValue,
-            skillName: response.skill["스킬명"],
-            skill: response.skill,
-            resistanceMode: "forceFail"
-          });
-        } catch (e) {
-          return (
-            "[맞대응 효과 처리 오류]\n" +
-            response.name + "\n\n" +
-            "오류: " + e.message + "\n\n" +
-            "효과:\n```" +
-            (response.skill["효과"] || "") +
-            "```"
-          );
-        }
+        // 개인/공용 양쪽 모두 호환되게 헬퍼 사용 (공용 스킬 행은 "이름" 키 사용)
+        counterEffectText = _applyResponseSkillEffects(
+          response,
+          selfAlias,
+          attackerAlias,
+          "forceFail"
+        );
       }
 
       const attackEffectInvalidText = getSkillFromPendingAttack(attack)
@@ -4864,6 +4939,12 @@ function combatResponse(parts, displayName) {
     const resistValue = response.value;
     const methodLine = "저항 방식: " + (response.source === "공용" ? "공용 스킬" : "개인 스킬") + " - " + response.name + "\n";
 
+    // 저항용 스킬 효과는 자신에게 적용
+    const resistSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, "none");
+    const resistSkillBlock = resistSkillEffectText
+      ? "\n\n[저항 스킬 효과]\n" + response.name + "\n" + resistSkillEffectText
+      : "";
+
     const summary =
       "[저항 대응]\n" +
       statusSummaryLine +
@@ -4871,6 +4952,7 @@ function combatResponse(parts, displayName) {
       methodLine +
       "공격값: " + attackValue + "\n" +
       "저항값: " + resistValue + "\n" +
+      (resistSkillEffectText ? "저항 스킬 효과: 적용 / 상세보기\n" : "") +
       "안내: 저항 대응은 자동 피해 처리/공격 대기 해소를 수행하지 않습니다.\n" +
       "필요 시 방어/회피/무대응으로 후속 처리하세요.";
 
@@ -4884,7 +4966,8 @@ function combatResponse(parts, displayName) {
       response.detailText + "\n\n" +
       "저항값: " + resistValue + "\n" +
       "안내: 저항 대응 명령은 안내성 판정값 출력만 수행합니다.\n" +
-      "공격 대기는 그대로 유지되며, 실제 피해 처리는 별도 대응 명령으로 진행하세요.";
+      "공격 대기는 그대로 유지되며, 실제 피해 처리는 별도 대응 명령으로 진행하세요." +
+      resistSkillBlock;
 
     return makeFoldedResponse(summary, detail);
   }
