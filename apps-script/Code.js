@@ -2417,6 +2417,85 @@ function rollSkillValueForCharacter(character, skillName, mods, targetAlias) {
   };
 }
 
+// 대응용 공용 스킬 판정값 산출 (효과/대상자동처리 없이 finalValue만 계산)
+function rollCommonSkillValueForCharacter(character, skillName, mods, targetAlias) {
+  mods = mods || [];
+  targetAlias = targetAlias || "";
+
+  const alias = String(character["별명"]).trim();
+  const commonSkill = findCommonSkill(skillName);
+
+  if (!commonSkill) {
+    const err = new Error("등록된 공용 스킬을 찾을 수 없습니다.\n스킬명: " + skillName);
+    err.code = "COMMON_NOT_FOUND";
+    throw err;
+  }
+
+  const displayName = String(commonSkill["이름"] || skillName).trim();
+  const status = _commonSkillUnlockStatus(commonSkill, character);
+
+  if (!status.conditionMatched) {
+    throw new Error(
+      "공용 스킬 사용 불가: " + displayName + "\n" +
+      "사유: " + status.conditionReason
+    );
+  }
+  if (!status.levelMatched) {
+    throw new Error(
+      "공용 스킬 잠김: " + displayName + "\n" +
+      "필요 레벨: " + status.unlockLevel + " / 현재: " + status.charLevel
+    );
+  }
+
+  const erosion = Number(character["이면침식"] || 0);
+  if (erosion >= MAX_EROSION) {
+    throw new Error(alias + "은/는 이미 로스트 상태입니다. 공용 스킬을 사용할 수 없습니다.");
+  }
+
+  const rank = String(commonSkill["랭크"]).trim().toUpperCase();
+  const rankValue = rankToValue(rank);
+
+  const variables = buildFormulaVariables(character, rankValue, targetAlias);
+  const calc = safeEvalFormula(commonSkill["계산식"], variables);
+
+  let result = Math.floor(calc.value);
+  const erosionMultiplier = getErosionMultiplier(erosion);
+  const beforeErosionMultiplier = result;
+  result = Math.floor(result * erosionMultiplier);
+
+  let typeBonusText = "";
+  const type = String(commonSkill["계열"]).trim();
+  if (type === "방호") {
+    result += 3;
+    typeBonusText = "방호 보정: +3";
+  }
+
+  let finalValue = applyMods(result, mods);
+  const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type, "대응"]);
+  finalValue = statusMod.value;
+
+  // 개인 스킬 결과와 동일한 형태로 반환 (skillName 키만 공용용 displayName)
+  return {
+    skill: commonSkill,
+    isCommon: true,
+    alias: alias,
+    skillName: displayName,
+    type: type,
+    rank: rank,
+    rankValue: rankValue,
+    diceLogs: calc.diceLogs || [],
+    expression: calc.expression,
+    baseValue: Math.floor(calc.value),
+    beforeErosionMultiplier: beforeErosionMultiplier,
+    erosion: erosion,
+    erosionMultiplier: erosionMultiplier,
+    typeBonusText: typeBonusText,
+    mods: mods,
+    statusMod: statusMod,
+    finalValue: finalValue
+  };
+}
+
 function skillUse(parts, displayName) {
   if (parts.length < 2) {
     return "사용법: !스킬 스킬명 [대상:캐릭터별명] [보정]\n예시: !스킬 월광참 대상:적A +2";
@@ -4095,46 +4174,131 @@ function rollPowerValueForResponse(type, rank, mods) {
   };
 }
 
+// 보정/모디파이어 토큰 판별 (+2, -3, 5 같은 형태)
+function _isResponseModifierToken(t) {
+  if (t === null || t === undefined) return false;
+  const s = String(t).trim();
+  if (!s) return false;
+  return /^[+\-]?\d+(\.\d+)?$/.test(s);
+}
+
+// 대응에 사용할 스킬을 모드에 맞춰 굴림 (effect/pendingAttack 부수효과 없음)
+function _rollResponseSkillByMode(character, mode, skillName, mods, targetAlias) {
+  const alias = String(character["별명"]).trim();
+  let rolled;
+  let source;
+
+  if (mode === "common") {
+    rolled = rollCommonSkillValueForCharacter(character, skillName, mods, targetAlias);
+    source = "공용";
+  } else if (mode === "personal") {
+    const skill = findApprovedSkill(alias, skillName);
+    if (!skill) {
+      throw new Error(
+        "등록된 개인 스킬을 찾을 수 없습니다.\n" +
+        "소유자: " + alias + "\n" +
+        "스킬명: " + skillName
+      );
+    }
+    rolled = rollSkillValueForCharacter(character, skillName, mods, targetAlias);
+    source = "개인";
+  } else {
+    // auto: 개인 스킬 우선, 없으면 공용 스킬
+    const personal = findApprovedSkill(alias, skillName);
+    if (personal) {
+      rolled = rollSkillValueForCharacter(character, skillName, mods, targetAlias);
+      source = "개인";
+    } else if (findCommonSkill(skillName)) {
+      rolled = rollCommonSkillValueForCharacter(character, skillName, mods, targetAlias);
+      source = "공용";
+    } else {
+      throw new Error(
+        "스킬을 찾을 수 없습니다.\n" +
+        "개인/공용 스킬 모두 검색했습니다.\n" +
+        "스킬명: " + skillName + "\n\n" +
+        "공용 스킬만 검색하려면: 공용스킬 " + skillName
+      );
+    }
+  }
+
+  const sourceLabel = source === "공용" ? "공용 스킬" : "개인 스킬";
+  const diceText = formatDiceLogs(rolled.diceLogs);
+
+  const summaryText =
+    sourceLabel + ": " + rolled.skillName + "\n" +
+    "계열: " + rolled.type + "\n" +
+    "최종값: " + rolled.finalValue;
+
+  const detailText =
+    sourceLabel + ": " + rolled.skillName + "\n" +
+    "계열: " + rolled.type + "\n" +
+    "랭크: " + rolled.rank + "(" + rolled.rankValue + ")\n" +
+    "주사위:\n" + diceText + "\n\n" +
+    "대입식:\n```" + rolled.expression + "```\n" +
+    "계산 결과: " + rolled.baseValue + "\n" +
+    "이면침식: " + rolled.erosion + " / " + MAX_EROSION + "\n" +
+    "침식배율: ×" + rolled.erosionMultiplier + "\n" +
+    "배율 적용 결과: " + rolled.beforeErosionMultiplier + " → " +
+      Math.floor(rolled.beforeErosionMultiplier * rolled.erosionMultiplier) + "\n" +
+    (rolled.typeBonusText ? rolled.typeBonusText + "\n" : "") +
+    "보정: " + ((rolled.mods && rolled.mods.length > 0) ? rolled.mods.join(" ") : "없음") + "\n" +
+    "최종값: " + rolled.finalValue + "\n" +
+    "※ 대응용 사용이므로 스킬의 자동 효과 적용/공격 대기 생성은 수행되지 않습니다.";
+
+  return {
+    kind: "스킬",
+    source: source,            // "개인" | "공용"
+    isCommon: !!rolled.isCommon,
+    name: rolled.skillName,
+    skill: rolled.skill,
+    value: rolled.finalValue,
+    summaryText: summaryText,
+    detailText: detailText,
+    text: detailText
+  };
+}
+
 function rollResponseValue(character, defaultActionName, tokens, targetAlias) {
   tokens = tokens || [];
   targetAlias = targetAlias || "";
 
-  if (tokens.length >= 2 && tokens[0] === "스킬") {
-    const skillName = tokens[1];
-    const mods = tokens.slice(2);
-    const rolled = rollSkillValueForCharacter(character, skillName, mods, targetAlias);
+  // ── 스킬 모드 파싱 ───────────────────────────────────────
+  // 1) "공용스킬 <이름>"  → common only
+  // 2) "스킬 <이름>"      → auto (개인 우선, 공용 폴백)
+  // 3) defaultActionName 이 방어/회피/저항 이고 tokens[0] 가 비모디파이어면 → auto
+  let skillMode = null;
+  let skillName = "";
+  let skillMods = [];
 
-    const diceText = formatDiceLogs(rolled.diceLogs);
+  if (tokens.length >= 1 && tokens[0] === "공용스킬") {
+    if (tokens.length < 2) {
+      throw new Error("공용스킬 키워드 뒤에 스킬명이 필요합니다.\n예: 공용스킬 방호각인");
+    }
+    skillMode = "common";
+    skillName = tokens[1];
+    skillMods = tokens.slice(2);
+  } else if (tokens.length >= 1 && tokens[0] === "스킬") {
+    if (tokens.length < 2) {
+      throw new Error("스킬 키워드 뒤에 스킬명이 필요합니다.\n예: 스킬 월광방벽");
+    }
+    skillMode = "auto";
+    skillName = tokens[1];
+    skillMods = tokens.slice(2);
+  } else if (
+    (defaultActionName === "방어" || defaultActionName === "회피" || defaultActionName === "저항") &&
+    tokens.length >= 1 &&
+    tokens[0] &&
+    !_isResponseModifierToken(tokens[0]) &&
+    // 이능(화력/방호/치유/재생/간섭/강화) 키워드는 기존 이능 분기로 흘려보낸다
+    !(tokens.length >= 2 && ["화력", "방호", "치유", "재생", "간섭", "강화"].includes(tokens[0]))
+  ) {
+    skillMode = "auto";
+    skillName = tokens[0];
+    skillMods = tokens.slice(1);
+  }
 
-    const summaryText =
-      "스킬: " + skillName + "\n" +
-      "계열: " + rolled.type + "\n" +
-      "최종값: " + rolled.finalValue;
-
-    const detailText =
-      "스킬: " + skillName + "\n" +
-      "계열: " + rolled.type + "\n" +
-      "랭크: " + rolled.rank + "(" + rolled.rankValue + ")\n" +
-      "주사위:\n" + diceText + "\n\n" +
-      "대입식:\n```" + rolled.expression + "```\n" +
-      "계산 결과: " + rolled.baseValue + "\n" +
-      "이면침식: " + rolled.erosion + " / " + MAX_EROSION + "\n" +
-      "침식배율: ×" + rolled.erosionMultiplier + "\n" +
-      "배율 적용 결과: " + rolled.beforeErosionMultiplier + " → " +
-        Math.floor(rolled.beforeErosionMultiplier * rolled.erosionMultiplier) + "\n" +
-      (rolled.typeBonusText ? rolled.typeBonusText + "\n" : "") +
-      "보정: " + ((rolled.mods && rolled.mods.length > 0) ? rolled.mods.join(" ") : "없음") + "\n" +
-      "최종값: " + rolled.finalValue;
-
-    return {
-      kind: "스킬",
-      name: skillName,
-      skill: rolled.skill,
-      value: rolled.finalValue,
-      summaryText: summaryText,
-      detailText: detailText,
-      text: detailText
-    };
+  if (skillMode) {
+    return _rollResponseSkillByMode(character, skillMode, skillName, skillMods, targetAlias);
   }
 
   if (tokens.length >= 2 && ["화력", "방호", "치유", "재생", "간섭", "강화"].includes(tokens[0])) {
@@ -4213,12 +4377,18 @@ function combatResponse(parts, displayName) {
       "사용법:\n" +
       "!대응 방어 [보정]\n" +
       "!대응 회피 [보정]\n" +
+      "!대응 방어 <스킬명> [보정]            (개인→공용 순으로 검색)\n" +
+      "!대응 방어 스킬 <스킬명> [보정]       (개인→공용 순으로 검색)\n" +
+      "!대응 방어 공용스킬 <스킬명> [보정]   (공용 스킬만)\n" +
+      "!대응 회피 <스킬명> / 회피 스킬 / 회피 공용스킬 도 동일\n" +
+      "!대응 저항 <스킬명> [보정]            (안내성, 자동 피해 처리 없음)\n" +
       "!대응 맞대응 액션명 [보정]\n" +
       "!대응 맞대응 화력 랭크 [보정]\n" +
       "!대응 맞대응 스킬 스킬명 [보정]\n" +
       "!대응 무대응\n\n" +
       "공격번호 지정:\n" +
-      "!대응 ATK-0001 방어"
+      "!대응 ATK-0001 방어\n" +
+      "!대응 ATK-0001 방어 공용스킬 방호각인"
     );
   }
 
@@ -4234,7 +4404,7 @@ function combatResponse(parts, displayName) {
   const rest = parts.slice(index + 1);
 
   if (!mode) {
-    return "대응 종류를 입력하세요: 방어 / 회피 / 맞대응 / 무대응";
+    return "대응 종류를 입력하세요: 방어 / 회피 / 저항 / 맞대응 / 무대응";
   }
 
   const attack = attackId
@@ -4384,10 +4554,15 @@ function combatResponse(parts, displayName) {
         : "방어 실패. 공격 스킬 효과 저항 판정"
     });
 
+    const methodLine = response.kind === "스킬"
+      ? "방어 방식: " + (response.source === "공용" ? "공용 스킬" : "개인 스킬") + " - " + response.name + "\n"
+      : "방어 방식: 액션 방어\n";
+
     const summary =
       "[방어 대응]\n" +
       statusSummaryLine +
       "공격번호: " + attack["id"] + "\n" +
+      methodLine +
       "공격값: " + attackValue + "\n" +
       "방어값: " + defenseValue + "\n" +
       "결과: " + (defenseSuccess ? "방어 성공" : "방어 실패") + "\n" +
@@ -4447,10 +4622,15 @@ function combatResponse(parts, displayName) {
         : "회피 실패. 공격 스킬 효과 저항 판정"
     });
 
+    const methodLine = response.kind === "스킬"
+      ? "회피 방식: " + (response.source === "공용" ? "공용 스킬" : "개인 스킬") + " - " + response.name + "\n"
+      : "회피 방식: 액션 회피\n";
+
     const summary =
       "[회피 대응]\n" +
       statusSummaryLine +
       "공격번호: " + attack["id"] + "\n" +
+      methodLine +
       "공격값: " + attackValue + "\n" +
       "회피값: " + evadeValue + "\n" +
       "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
@@ -4654,7 +4834,62 @@ function combatResponse(parts, displayName) {
     return makeFoldedResponse(summary, detail);
   }
 
-  return "알 수 없는 대응입니다: " + mode + "\n가능한 대응: 방어 / 회피 / 맞대응 / 무대응";
+  if (mode === "저항") {
+    // 저항 대응: 스킬 또는 공용 스킬로 저항값만 산출 (자동 피해/공격 대기 처리는 하지 않음)
+    if (rest.length < 1) {
+      return (
+        "저항에 사용할 스킬을 입력하세요.\n" +
+        "예시:\n" +
+        "!대응 저항 정신방벽\n" +
+        "!대응 저항 스킬 정신방벽\n" +
+        "!대응 저항 공용스킬 정신방벽"
+      );
+    }
+
+    let response;
+    try {
+      response = rollResponseValue(character, "저항", rest, attackerAlias);
+    } catch (e) {
+      return "[저항 대응 오류]\n" + e.message;
+    }
+
+    if (response.kind !== "스킬") {
+      return (
+        "[저항 대응 오류]\n" +
+        "저항 대응은 스킬 또는 공용 스킬로만 처리할 수 있습니다.\n" +
+        "예: !대응 저항 정신방벽"
+      );
+    }
+
+    const resistValue = response.value;
+    const methodLine = "저항 방식: " + (response.source === "공용" ? "공용 스킬" : "개인 스킬") + " - " + response.name + "\n";
+
+    const summary =
+      "[저항 대응]\n" +
+      statusSummaryLine +
+      "공격번호: " + attack["id"] + "\n" +
+      methodLine +
+      "공격값: " + attackValue + "\n" +
+      "저항값: " + resistValue + "\n" +
+      "안내: 저항 대응은 자동 피해 처리/공격 대기 해소를 수행하지 않습니다.\n" +
+      "필요 시 방어/회피/무대응으로 후속 처리하세요.";
+
+    const detail =
+      statusDetailPrefix +
+      "[저항 대응 상세]\n" +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격자: " + attackerAlias + "\n" +
+      "대상: " + targetAlias + "\n" +
+      "공격값: " + attackValue + "\n\n" +
+      response.detailText + "\n\n" +
+      "저항값: " + resistValue + "\n" +
+      "안내: 저항 대응 명령은 안내성 판정값 출력만 수행합니다.\n" +
+      "공격 대기는 그대로 유지되며, 실제 피해 처리는 별도 대응 명령으로 진행하세요.";
+
+    return makeFoldedResponse(summary, detail);
+  }
+
+  return "알 수 없는 대응입니다: " + mode + "\n가능한 대응: 방어 / 회피 / 저항 / 맞대응 / 무대응";
 }
 
 function makeVarSafeName(name) {
