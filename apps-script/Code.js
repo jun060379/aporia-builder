@@ -8020,7 +8020,7 @@ function _portalLooksLikeFailure(text) {
 function registerPortalEnemyTemplate(payload, outputText, application) {
   // 1) output_text가 !에너미템플릿등록으로 시작하면 그대로 재사용 (UI/봇 동작 일치 보장)
   // 2) 아니면 payload로부터 명령어 문자열을 재구성
-  var utterance = outputText && /^!에너미템플릿등록\b/.test(outputText)
+  var utterance = outputText && /^!에너미템플릿등록(?:$|\s)/.test(outputText)
     ? outputText
     : _portalBuildEnemyTemplateUtterance(payload);
 
@@ -8053,7 +8053,7 @@ function registerPortalEnemyTemplate(payload, outputText, application) {
 }
 
 function registerPortalEnemySkill(payload, outputText, application) {
-  var utterance = outputText && /^!에너미스킬등록\b/.test(outputText)
+  var utterance = outputText && /^!에너미스킬등록(?:$|\s)/.test(outputText)
     ? outputText
     : _portalBuildEnemySkillUtterance(payload);
 
@@ -8147,10 +8147,10 @@ function registerPortalCharacterData(payload, outputText, application) {
   }
 
   var charBlock = blocks[0];
-  if (!/^!캐릭터신청\b/.test(charBlock)) {
+  if (!/^!캐릭터신청(?:$|\s)/.test(charBlock)) {
     return { ok: false, error: "첫 블록이 !캐릭터신청으로 시작하지 않습니다." };
   }
-  var skillBlocks = blocks.slice(1).filter(function(b){ return /^!스킬신청\b/.test(b); });
+  var skillBlocks = blocks.slice(1).filter(function(b){ return /^!스킬신청(?:$|\s)/.test(b); });
 
   // 1) 캐릭터 신청 → CH-xxxx
   var charSubmitResp;
