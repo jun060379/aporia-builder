@@ -296,6 +296,8 @@ function handleCommand(utterance, displayName) {
   if (command === "!에너미템플릿등록")   return enemyTemplateRegister(utterance, displayName);
   if (command === "!에너미템플릿삭제")   return enemyTemplateDelete(parts, displayName);
 
+  if (command === "!fin") return finishSession(parts, displayName);
+
   if (command === "!명령어목록" || command === "!도움말" || command === "!help") {
     return commandListCommand();
   }
@@ -406,6 +408,13 @@ function commandListCommand() {
     "  !에너미스킬       <별명> <스킬명>",
     "  !에너미스킬등록   / !에너미스킬삭제",
     "  !에너미템플릿등록 / !에너미템플릿삭제",
+    "",
+    "[ 세션 ]",
+    "  !fin                극/세션 종료 (임시 상태/스택 정리)",
+    "  !fin <메시지>",
+    "  !fin --keep-status  상태 유지, 스택만 정리",
+    "  !fin --keep-stack   스택 유지, 상태만 정리",
+    "  !fin --no-clear     메시지만 출력",
     "",
     "[ 기타 ]",
     "  !명령어목록  (= !도움말 / !help)",
@@ -6811,6 +6820,177 @@ function formatCombatSummaryBlock(title, attack, responseName, responseValue, re
 function responseDetailText(response) {
   if (!response) return "";
   return response.detailText || response.text || "";
+}
+
+// =====================================================================
+// !fin — 극/세션 종료 (임시 상태/스택 정리)
+// =====================================================================
+
+var FIN_KEEP_KEYWORDS = ["영구", "장기", "유지", "세션유지"];
+var FIN_KEEP_CATEGORIES = ["영구", "장기", "유지"];
+
+function _finHasKeepKeyword(text) {
+  var s = String(text == null ? "" : text);
+  if (!s) return false;
+  for (var i = 0; i < FIN_KEEP_KEYWORDS.length; i++) {
+    if (s.indexOf(FIN_KEEP_KEYWORDS[i]) >= 0) return true;
+  }
+  return false;
+}
+
+function _finStatusShouldKeep(status) {
+  var category = String(status["분류"] || "").trim();
+  if (FIN_KEEP_CATEGORIES.indexOf(category) >= 0) return true;
+  if (_finHasKeepKeyword(status["메모"])) return true;
+  if (_finHasKeepKeyword(status["중복방식"])) return true;
+  if (_finHasKeepKeyword(status["출처"])) return true;
+  if (_finHasKeepKeyword(status["상태명"])) return true;
+  return false;
+}
+
+function _finStackShouldKeep(stack) {
+  var category = String(stack["분류"] || "").trim();
+  if (FIN_KEEP_CATEGORIES.indexOf(category) >= 0) return true;
+  if (_finHasKeepKeyword(stack["스택명"])) return true;
+  if (_finHasKeepKeyword(stack["메모"])) return true;
+  if (_finHasKeepKeyword(stack["출처"])) return true;
+  return false;
+}
+
+function _finAppendMemo(oldMemo) {
+  var base = String(oldMemo == null ? "" : oldMemo);
+  var tag = "!fin으로 정리";
+  if (base.indexOf(tag) >= 0) return base;
+  return base ? (base + " | " + tag) : tag;
+}
+
+function clearTemporaryStatuses() {
+  var rows;
+  try {
+    rows = getSheetData(SHEET_STATUS_DB);
+  } catch (e) {
+    return { cleared: 0, kept: 0 };
+  }
+
+  var now = getNowText();
+  var cleared = 0;
+  var kept = 0;
+
+  rows.forEach(function (r) {
+    var state = String(r["상태"] || "").trim();
+    if (state !== "ACTIVE") return;
+
+    if (_finStatusShouldKeep(r)) {
+      kept++;
+      return;
+    }
+
+    updateRowById(SHEET_STATUS_DB, "id", r["id"], {
+      상태: "CLEARED",
+      처리일: now,
+      메모: _finAppendMemo(r["메모"])
+    });
+    cleared++;
+  });
+
+  return { cleared: cleared, kept: kept };
+}
+
+function clearTemporaryStacks() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_STACK_DB);
+  if (!sheet) return { cleared: 0, kept: 0 };
+
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 2) return { cleared: 0, kept: 0 };
+
+  var headers = values[0].map(function (h) { return String(h).trim(); });
+  var idxValue = headers.indexOf("수치");
+  var idxMemo = headers.indexOf("메모");
+  var idxModified = headers.indexOf("수정일");
+  var idxState = headers.indexOf("상태");
+  var idxActive = headers.indexOf("활성");
+
+  if (idxValue < 0) return { cleared: 0, kept: 0 };
+
+  var now = getNowText();
+  var cleared = 0;
+  var kept = 0;
+
+  for (var r = 1; r < values.length; r++) {
+    var rowObj = {};
+    headers.forEach(function (h, i) { rowObj[h] = values[r][i]; });
+
+    var current = Number(rowObj["수치"] || 0);
+    if (isNaN(current) || current <= 0) continue;
+
+    if (_finStackShouldKeep(rowObj)) {
+      kept++;
+      continue;
+    }
+
+    sheet.getRange(r + 1, idxValue + 1).setValue(0);
+    if (idxModified >= 0) sheet.getRange(r + 1, idxModified + 1).setValue(now);
+    if (idxMemo >= 0) {
+      sheet.getRange(r + 1, idxMemo + 1).setValue(_finAppendMemo(rowObj["메모"]));
+    }
+    if (idxState >= 0) sheet.getRange(r + 1, idxState + 1).setValue("CLEARED");
+    if (idxActive >= 0) sheet.getRange(r + 1, idxActive + 1).setValue(false);
+
+    cleared++;
+  }
+
+  return { cleared: cleared, kept: kept };
+}
+
+function finishSession(parts, displayName) {
+  var tokens = (parts || []).slice(1);
+  var keepStatus = false;
+  var keepStack = false;
+  var noClear = false;
+  var msgTokens = [];
+
+  tokens.forEach(function (t) {
+    var s = String(t || "").trim();
+    if (!s) return;
+    if (s === "--keep-status") { keepStatus = true; return; }
+    if (s === "--keep-stack")  { keepStack  = true; return; }
+    if (s === "--no-clear")    { noClear    = true; return; }
+    msgTokens.push(s);
+  });
+
+  if (noClear) {
+    keepStatus = true;
+    keepStack = true;
+  }
+
+  var message = msgTokens.join(" ").trim();
+  if (!message) message = "...다음 시간에 계속.";
+
+  var statusResult = keepStatus ? { cleared: 0, kept: 0 } : clearTemporaryStatuses();
+  var stackResult  = keepStack  ? { cleared: 0, kept: 0 } : clearTemporaryStacks();
+
+  var lines = [];
+  lines.push("[극/세션 종료]");
+  lines.push("");
+  lines.push(message);
+  lines.push("");
+  lines.push("정리 결과:");
+  lines.push("상태 초기화: " + statusResult.cleared + "개");
+  if (!keepStatus) lines.push("상태 유지: " + statusResult.kept + "개");
+  lines.push("스택 초기화: " + stackResult.cleared + "개");
+  if (!keepStack) lines.push("스택 유지: " + stackResult.kept + "개");
+  lines.push("");
+  lines.push("옵션:");
+  lines.push("상태 정리: " + (keepStatus ? "OFF" : "ON"));
+  lines.push("스택 정리: " + (keepStack ? "OFF" : "ON"));
+  lines.push("");
+  lines.push("종료 시각: " + getNowText());
+  if (displayName) lines.push("진행자: " + displayName);
+  lines.push("");
+  lines.push("다음 진행 시 필요한 상태/스택은 다시 부여해주세요.");
+
+  return lines.join("\n");
 }
 
 // =====================================================================
