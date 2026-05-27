@@ -938,6 +938,7 @@ function processPreDamageStatuses(alias, damageAmount) {
       updateRowById(SHEET_STATUS_DB, "id", status["id"], {
         상태: "EXPIRED",
         수치: 0,
+        남은횟수: 0,
         처리일: getNowText(),
         메모: "보호막 소진"
       });
@@ -946,6 +947,7 @@ function processPreDamageStatuses(alias, damageAmount) {
         수치: remainShield,
         메모: "보호막 피해 흡수"
       });
+      consumeStatusCount(status);
     }
 
     logs.push(
@@ -6726,7 +6728,7 @@ function getStatusValueModifier(alias, checkTypes) {
     const trigger = String(status["발동타이밍"] || "").trim();
 
     if (category !== "쇠약강화") return;
-    if (trigger && trigger !== "판정계산전" && trigger !== "판정계산후" && trigger !== "전체") return;
+    if (trigger && trigger !== "판정시작" && trigger !== "판정계산전" && trigger !== "판정계산후" && trigger !== "전체") return;
     if (!statusMatchesAnyCheckType(status, checkTypes)) return;
 
     const rawValue = Math.floor(Number(status["수치"] || 0));
