@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import ConditionEditor from './ConditionEditor.jsx';
 import { SKILL_TRADITIONS, SKILL_SERIES, SKILL_RANKS, makeEffect } from '../data/skillRanks';
 import {
   COMMON_SKILL_TYPES,
@@ -339,10 +340,13 @@ export default function CommonSkillMaker() {
         </select>
       </label>
 
-      <label className="flex flex-col gap-1">
+      <div className="space-y-1">
         <span className="text-[11px] text-slate-500 tracking-wide">조건</span>
-        <input className={inputCls} value={skill.condition} onChange={field('condition')} placeholder="발동 조건" />
-      </label>
+        <ConditionEditor
+          value={skill.condition}
+          onChange={(v) => setSkill((s) => ({ ...s, condition: v }))}
+        />
+      </div>
 
       <label className="flex flex-col gap-1">
         <span className="text-[11px] text-slate-500 tracking-wide">설명</span>

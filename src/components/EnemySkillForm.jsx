@@ -10,6 +10,7 @@ import {
 } from '../lib/enemyText';
 import EnemySkillEffectBuilder from './EnemySkillEffectBuilder.jsx';
 import EnemySkillEffectPreview from './EnemySkillEffectPreview.jsx';
+import ConditionEditor from './ConditionEditor.jsx';
 
 const RANK_VALUES = [
   ['F', 1], ['E', 10], ['D', 20], ['C', 30],
@@ -41,6 +42,7 @@ export default function EnemySkillForm() {
   const [formula, setFormula] = useState('d20 + 랭크');
   const [effect, setEffect] = useState('');
   const [targetMode, setTargetMode] = useState('required');
+  const [condition, setCondition] = useState('');
   const [memo, setMemo] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -59,8 +61,9 @@ export default function EnemySkillForm() {
     formula: formula.trim(),
     effect,
     target_mode: targetMode,
+    condition,
     memo,
-  }), [skillKey, ownerType, ownerKey, name, category, rank, formula, effect, targetMode, memo]);
+  }), [skillKey, ownerType, ownerKey, name, category, rank, formula, effect, targetMode, condition, memo]);
 
   const previewOutput = useMemo(() => {
     try { return buildEnemySkillText(previewPayload); } catch { return ''; }
@@ -76,6 +79,7 @@ export default function EnemySkillForm() {
     setFormula('d20 + 랭크');
     setEffect('');
     setTargetMode('required');
+    setCondition('');
     setMemo('');
   }
 
@@ -211,6 +215,12 @@ export default function EnemySkillForm() {
           <div className="text-[11px] font-medium text-slate-500 mb-1">효과 미리보기</div>
           <EnemySkillEffectPreview value={effect} />
         </div>
+      </section>
+
+      {/* 조건 */}
+      <section className="space-y-2">
+        <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">발동 조건 (선택)</h3>
+        <ConditionEditor value={condition} onChange={setCondition} />
       </section>
 
       {/* 메모 */}

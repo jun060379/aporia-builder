@@ -12,6 +12,7 @@ import { ABILITY_NAMES } from '../data/abilities';
 import { PROFICIENCY_NAMES } from '../data/proficiencies';
 import FormulaBlockModal from './FormulaBlockModal';
 import EffectBlockModal from './EffectBlockModal';
+import ConditionEditor from './ConditionEditor.jsx';
 
 const EFFECT_TYPE_LABEL = {
   template:     '상태 템플릿 부여',
@@ -478,10 +479,13 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
       </div>
 
       {/* 조건 / 대가 / 설명 */}
-      <label className="flex flex-col gap-1">
+      <div className="space-y-1">
         <span className="text-[11px] text-slate-500 tracking-wide">조건</span>
-        <input className={inputCls} value={skill.condition} onChange={field('condition')} placeholder="발동 조건 (예: 대상에게 공격 적중 시)" />
-      </label>
+        <ConditionEditor
+          value={skill.condition}
+          onChange={(v) => setSkill((s) => ({ ...s, condition: v }))}
+        />
+      </div>
 
       <label className="flex flex-col gap-1">
         <span className="text-[11px] text-slate-500 tracking-wide">대가</span>

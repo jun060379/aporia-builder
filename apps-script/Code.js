@@ -17,6 +17,7 @@ const SHEET_ENEMY_TEMPLATES = "ENEMY_TEMPLATES";
 const SHEET_ENEMIES = "ENEMIES";
 const SHEET_ENEMY_SKILLS = "ENEMY_SKILLS";
 const SHEET_COMMON_SKILLS = "COMMON_SKILLS";
+const SHEET_PASSIVE_SKILLS = "PASSIVE_SKILLS";
 const COMMON_UNLOCK_LEVELS = [1, 2, 4, 6, 8, 12];
 const DEFAULT_FACTION = "무소속";
 const ENEMY_ACTION_FIELDS = [
@@ -297,6 +298,7 @@ function handleCommand(utterance, displayName) {
   if (command === "!에너미템플릿삭제")   return enemyTemplateDelete(parts, displayName);
 
   if (command === "!fin") return finishSession(parts, displayName);
+  if (command === "!패시브목록") return passiveListCommand(parts, displayName);
 
   if (command === "!명령어목록" || command === "!도움말" || command === "!help") {
     return commandListCommand();
@@ -408,6 +410,9 @@ function commandListCommand() {
     "  !에너미스킬       <별명> <스킬명>",
     "  !에너미스킬등록   / !에너미스킬삭제",
     "  !에너미템플릿등록 / !에너미템플릿삭제",
+    "",
+    "[ 패시브 ]",
+    "  !패시브목록 [캐릭터별명]",
     "",
     "[ 세션 ]",
     "  !fin                극/세션 종료 (임시 상태/스택 정리)",
@@ -2405,7 +2410,7 @@ function rollSkillValueForCharacter(character, skillName, mods, targetAlias) {
 
   let finalValue = applyMods(result, mods);
 
-  const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type, "대응"]);
+  const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type, "대응"], targetAlias || "");
   finalValue = statusMod.value;
 
   return {
@@ -2482,7 +2487,7 @@ function rollCommonSkillValueForCharacter(character, skillName, mods, targetAlia
   }
 
   let finalValue = applyMods(result, mods);
-  const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type, "대응"]);
+  const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type, "대응"], targetAlias || "");
   finalValue = statusMod.value;
 
   // 개인 스킬 결과와 동일한 형태로 반환 (skillName 키만 공용용 displayName)
@@ -2573,6 +2578,16 @@ function skillUse(parts, displayName) {
     );
   }
 
+  // 조건 자동 판정
+  const condCheck = checkSkillConditions(skill["조건"], {
+    label: "스킬",
+    name: skill["스킬명"],
+    character: character,
+    targetAlias: targetAlias
+  });
+  if (condCheck.blocked) return condCheck.text;
+  const conditionHeaderText = condCheck.headerText || "";
+
   const statusResult = processStatusBeforeCheck(alias, "스킬");
 
   if (statusResult.blocked) {
@@ -2615,7 +2630,7 @@ function skillUse(parts, displayName) {
 
   try {
     finalValue = applyMods(result, mods);
-    const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type]);
+    const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type], targetAlias || "");
     finalValue = statusMod.value;
   } catch (e) {
     return (
@@ -2767,6 +2782,7 @@ function skillUse(parts, displayName) {
     );
 
   const detail =
+    (conditionHeaderText ? conditionHeaderText + "\n\n" : "") +
     (statusResult.text ? statusResult.text + "\n\n" : "") +
     "[스킬 사용 상세]\n" +
     alias + " - " + skill["스킬명"] + "\n\n" +
@@ -6116,6 +6132,17 @@ function processStatusBeforeCheck(alias, checkType) {
     }
   });
 
+  // 패시브 발동: 판정시작
+  try {
+    var charForPassive = findCharacterByAlias(alias);
+    if (charForPassive) {
+      var passiveText = firePassiveTriggerEffects(charForPassive, "판정시작", { resistanceMode: "none" });
+      if (passiveText) logs.push(passiveText);
+    }
+  } catch (e) {
+    // 패시브 시트 없거나 오류 → 무시.
+  }
+
   return {
     blocked: blocked,
     text: logs.length > 0 ? "[상태 처리]\n" + logs.join("\n\n") : ""
@@ -6789,15 +6816,34 @@ function getStatusValueModifier(alias, checkTypes) {
   };
 }
 
-function applyStatusModifierToValue(alias, value, checkTypes) {
+function applyStatusModifierToValue(alias, value, checkTypes, targetAlias) {
   const modifier = getStatusValueModifier(alias, checkTypes);
+
+  // 패시브(분류=판정보정) 보정도 합산.
+  var passiveDelta = 0;
+  var passiveText = "";
+  try {
+    var character = findCharacterByAlias(alias);
+    if (character) {
+      var pm = getPassiveValueModifier(character, checkTypes, String(targetAlias || ""));
+      passiveDelta = pm.delta || 0;
+      passiveText = pm.text || "";
+    }
+  } catch (e) {
+    // 패시브 시트 없거나 오류 → 무시.
+  }
+
   const before = Math.floor(Number(value) || 0);
-  const after = before + modifier.delta;
+  const totalDelta = modifier.delta + passiveDelta;
+  const after = before + totalDelta;
+
+  var combinedText = modifier.text || "";
+  if (passiveText) combinedText = combinedText ? (combinedText + "\n\n" + passiveText) : passiveText;
 
   return {
     value: after,
-    delta: modifier.delta,
-    text: modifier.text,
+    delta: totalDelta,
+    text: combinedText,
     before: before,
     after: after
   };
@@ -6967,6 +7013,20 @@ function finishSession(parts, displayName) {
   var message = msgTokens.join(" ").trim();
   if (!message) message = "...다음 시간에 계속.";
 
+  // 세션종료 패시브 효과 (모든 캐릭터 대상)
+  var passiveLogs = [];
+  try {
+    var allChars = getSheetData(SHEET_BOT_DB);
+    allChars.forEach(function (ch) {
+      var aliasV = String(ch["별명"] || "").trim();
+      if (!aliasV) return;
+      var out = firePassiveTriggerEffects(ch, "세션종료", { resistanceMode: "none" });
+      if (out) passiveLogs.push("[" + aliasV + "]\n" + out);
+    });
+  } catch (e) {
+    // 패시브 시트 없거나 오류 → 무시.
+  }
+
   var statusResult = keepStatus ? { cleared: 0, kept: 0 } : clearTemporaryStatuses();
   var stackResult  = keepStack  ? { cleared: 0, kept: 0 } : clearTemporaryStacks();
 
@@ -6990,7 +7050,435 @@ function finishSession(parts, displayName) {
   lines.push("");
   lines.push("다음 진행 시 필요한 상태/스택은 다시 부여해주세요.");
 
+  if (passiveLogs.length > 0) {
+    lines.push("");
+    lines.push("[세션종료 패시브 효과]");
+    lines.push(passiveLogs.join("\n\n"));
+  }
+
   return lines.join("\n");
+}
+
+// =====================================================================
+// PASSIVE SKILLS + 조건 평가 시스템
+// =====================================================================
+
+var PASSIVE_HEADERS = [
+  "key","이름","소유타입","소유키","해금레벨","분류","효과코드",
+  "수치","최대","발동","판정","조건","효과","설명","메모"
+];
+
+function ensurePassiveSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET_PASSIVE_SKILLS);
+  if (sh) return sh;
+  sh = ss.insertSheet(SHEET_PASSIVE_SKILLS);
+  sh.getRange(1, 1, 1, PASSIVE_HEADERS.length).setValues([PASSIVE_HEADERS]);
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+function getAllPassiveRows() {
+  try {
+    ensurePassiveSheet();
+    return getSheetData(SHEET_PASSIVE_SKILLS);
+  } catch (e) {
+    return [];
+  }
+}
+
+// 소유타입 정규화 — 한국어/영어 동시 지원, 알 수 없는 값은 "unknown".
+function _normalizePassiveOwnerType(raw) {
+  var s = String(raw == null ? "" : raw).trim().toLowerCase();
+  if (!s) return "global";
+  if (s === "global" || s === "공용" || s === "전역") return "global";
+  if (s === "character" || s === "캐릭터" || s === "개인") return "character";
+  if (s === "faction" || s === "소속" || s === "파벌") return "faction";
+  if (s === "species" || s === "종족") return "species";
+  return "unknown";
+}
+
+// 소유타입/소유키/해금레벨로 필터링한 1차 후보(조건 평가 전).
+function getCandidatePassivesForCharacter(character) {
+  if (!character) return [];
+  var rows = getAllPassiveRows();
+  var alias = String(character["별명"] || "").trim();
+  var faction = String(character["소속"] || "").trim();
+  var species = String(character["종족"] || "").trim();
+  var level = Number(character["레벨"] || 0);
+
+  return rows.filter(function (p) {
+    var name = String(p["이름"] || p["key"] || "").trim();
+    if (!name) return false;
+
+    var owner = _normalizePassiveOwnerType(p["소유타입"]);
+    var ownerKey = String(p["소유키"] || "").trim();
+
+    if (owner === "unknown") return false;
+    if (owner === "character" && ownerKey && ownerKey !== alias) return false;
+    if (owner === "faction" && ownerKey && ownerKey !== faction) return false;
+    if (owner === "species" && ownerKey && ownerKey !== species) return false;
+    // global: 모두 통과
+
+    var unlock = Number(p["해금레벨"] || 1);
+    if (isNaN(unlock) || unlock < 1) unlock = 1;
+    if (level < unlock) return false;
+
+    return true;
+  });
+}
+
+// ── 조건 파서 ────────────────────────────────────────────────────────
+
+function parseConditionList(conditionText) {
+  var s = String(conditionText == null ? "" : conditionText).trim();
+  if (!s) return [];
+  return s.split(/[,，\n\r]+/).map(function (t) { return String(t).trim(); }).filter(Boolean);
+}
+
+// 비교 연산자 분리. 반환: {variable, op, value} 또는 null.
+function _parseComparison(cond) {
+  var m = cond.match(/^\s*([^!=<>\s][^!=<>]*?)\s*(>=|<=|==|!=|=|>|<)\s*(.+?)\s*$/);
+  if (!m) return null;
+  var v = m[1].trim();
+  var op = m[2].trim();
+  var rhs = m[3].trim();
+  if (op === "=") op = "==";
+  return { variable: v, op: op, value: rhs };
+}
+
+function _compareNumeric(a, op, b) {
+  var x = Number(a);
+  var y = Number(b);
+  if (isNaN(x) || isNaN(y)) {
+    if (op === "==") return String(a) === String(b);
+    if (op === "!=") return String(a) !== String(b);
+    return false;
+  }
+  switch (op) {
+    case ">=": return x >= y;
+    case "<=": return x <= y;
+    case ">":  return x > y;
+    case "<":  return x < y;
+    case "==": return x === y;
+    case "!=": return x !== y;
+  }
+  return false;
+}
+
+// 조건 평가용 context 빌더.
+// rankValue=0으로 buildFormulaVariables 재사용 → 변수 이름 규칙 일치.
+function buildConditionContext(character, targetAlias) {
+  var ctx = {
+    vars: {},
+    hasTarget: !!targetAlias,
+    self: character || null,
+    targetAlias: targetAlias || ""
+  };
+
+  if (character) {
+    try {
+      ctx.vars = buildFormulaVariables(character, 0, targetAlias || "");
+    } catch (e) {
+      ctx.vars = {};
+    }
+  }
+
+  return ctx;
+}
+
+// 단일 조건 평가.
+function evaluateRecognizedCondition(rawCond, ctx) {
+  var cond = String(rawCond || "").trim();
+  if (!cond) return { recognized: true, ok: true, message: cond };
+
+  ctx = ctx || { vars: {}, hasTarget: false };
+  var vars = ctx.vars || {};
+
+  // 부정 존재 조건: !상태:이름 / !대상상태:이름 / !스택:이름 / !대상스택:이름
+  var negEx = cond.match(/^!\s*(상태|대상상태|스택|대상스택)\s*[:：]\s*(.+)$/);
+  if (negEx) {
+    var negKind = negEx[1];
+    var negName = makeVarSafeName(negEx[2].trim());
+    if (!negName) return { recognized: false, ok: true, message: cond };
+    if (negKind === "상태")      return { recognized: true, ok: Number(vars["상태_" + negName + "_존재"] || 0) <= 0, message: cond };
+    if (negKind === "대상상태")  {
+      if (!ctx.hasTarget) return { recognized: true, ok: false, message: cond + " (대상 없음)" };
+      return { recognized: true, ok: Number(vars["대상상태_" + negName + "_존재"] || 0) <= 0, message: cond };
+    }
+    if (negKind === "스택")      return { recognized: true, ok: Number(vars["스택_" + negName] || 0) <= 0, message: cond };
+    if (negKind === "대상스택")  {
+      if (!ctx.hasTarget) return { recognized: true, ok: false, message: cond + " (대상 없음)" };
+      return { recognized: true, ok: Number(vars["대상스택_" + negName] || 0) <= 0, message: cond };
+    }
+  }
+
+  // 존재 조건: 상태:이름 / 대상상태:이름 / 스택:이름 / 대상스택:이름
+  var ex = cond.match(/^(상태|대상상태|스택|대상스택)\s*[:：]\s*(.+)$/);
+  if (ex) {
+    var kind = ex[1];
+    var nm = makeVarSafeName(ex[2].trim());
+    if (!nm) return { recognized: false, ok: true, message: cond };
+    if (kind === "상태")      return { recognized: true, ok: Number(vars["상태_" + nm + "_존재"] || 0) > 0, message: cond };
+    if (kind === "대상상태")  {
+      if (!ctx.hasTarget) return { recognized: true, ok: false, message: cond + " (대상 없음)" };
+      return { recognized: true, ok: Number(vars["대상상태_" + nm + "_존재"] || 0) > 0, message: cond };
+    }
+    if (kind === "스택")      return { recognized: true, ok: Number(vars["스택_" + nm] || 0) > 0, message: cond };
+    if (kind === "대상스택")  {
+      if (!ctx.hasTarget) return { recognized: true, ok: false, message: cond + " (대상 없음)" };
+      return { recognized: true, ok: Number(vars["대상스택_" + nm] || 0) > 0, message: cond };
+    }
+  }
+
+  // 비교식
+  var cmp = _parseComparison(cond);
+  if (cmp) {
+    var varName = cmp.variable;
+    // 대상 참조 변수가 있고 대상이 없으면 평가 불가 → 실패 처리.
+    if (/^대상/.test(varName) && !ctx.hasTarget) {
+      return { recognized: true, ok: false, message: cond + " (대상 조건을 확인할 수 없습니다)" };
+    }
+    // 변수가 vars에 없으면 0으로 간주 (상태_X_존재처럼 자동 fallback).
+    var lhs = (varName in vars) ? vars[varName] : 0;
+    return { recognized: true, ok: _compareNumeric(lhs, cmp.op, cmp.value), message: cond };
+  }
+
+  return { recognized: false, ok: true, message: cond };
+}
+
+// 조건 목록 전체 평가.
+function evaluateConditionList(conditionText, ctx) {
+  var list = parseConditionList(conditionText);
+  var passed = [];
+  var failed = [];
+  var plainText = [];
+
+  list.forEach(function (cond) {
+    var r = evaluateRecognizedCondition(cond, ctx);
+    if (!r.recognized) {
+      plainText.push(r.message);
+      return;
+    }
+    if (r.ok) passed.push(r.message);
+    else failed.push(r.message);
+  });
+
+  return {
+    ok: failed.length === 0,
+    failed: failed,
+    passed: passed,
+    plainText: plainText
+  };
+}
+
+// ── 액티브 스킬 조건 검사 ────────────────────────────────────────────
+
+// 반환:
+//   { blocked: true, text: "..." }            — 사용 막아야 할 때
+//   { blocked: false, headerText: "..." }    — 통과(헤더 텍스트 비어있을 수 있음)
+function checkSkillConditions(rawCondText, options) {
+  options = options || {};
+  var label = options.label || "스킬";
+  var name = options.name || "";
+  var character = options.character || null;
+  var targetAlias = options.targetAlias || "";
+
+  var text = String(rawCondText || "").trim();
+  if (!text) return { blocked: false, headerText: "" };
+
+  var ctx = buildConditionContext(character, targetAlias);
+  var result = evaluateConditionList(text, ctx);
+
+  if (!result.ok) {
+    var blockLines = [];
+    blockLines.push("[" + label + " 사용 불가]");
+    if (name) blockLines.push("스킬: " + name);
+    blockLines.push("조건을 만족하지 못했습니다.");
+    blockLines.push("");
+    blockLines.push("실패:");
+    result.failed.forEach(function (c) { blockLines.push("- " + c); });
+    if (result.plainText.length > 0) {
+      blockLines.push("");
+      blockLines.push("수동 확인:");
+      result.plainText.forEach(function (c) { blockLines.push("- " + c); });
+    }
+    return { blocked: true, text: blockLines.join("\n") };
+  }
+
+  var lines = [];
+  if (result.passed.length > 0 || result.plainText.length > 0) {
+    lines.push("[조건 확인]");
+    if (result.passed.length > 0) {
+      lines.push("통과:");
+      result.passed.forEach(function (c) { lines.push("- " + c); });
+    }
+    if (result.plainText.length > 0) {
+      if (result.passed.length > 0) lines.push("");
+      lines.push("수동 확인:");
+      result.plainText.forEach(function (c) { lines.push("- " + c); });
+    }
+  }
+  return { blocked: false, headerText: lines.join("\n") };
+}
+
+// ── 패시브 보정/효과 ─────────────────────────────────────────────────
+
+function _passiveJudgmentMatches(passive, checkTypes) {
+  var raw = String(passive["판정"] || "").trim();
+  if (!raw || raw === "전체") return true;
+  var list = raw.split(/[,，、]/).map(function (s) { return s.trim(); }).filter(Boolean);
+  var ct = (checkTypes || []).map(function (t) { return String(t || "").trim(); }).filter(Boolean);
+  return ct.some(function (t) { return list.indexOf(t) >= 0; });
+}
+
+// 판정계산전/항상 분류=판정보정 패시브 합산.
+function getPassiveValueModifier(character, checkTypes, targetAlias) {
+  if (!character) return { delta: 0, text: "" };
+  var passives = getCandidatePassivesForCharacter(character);
+  var ctx = buildConditionContext(character, targetAlias);
+  var delta = 0;
+  var lines = [];
+
+  passives.forEach(function (p) {
+    var category = String(p["분류"] || "").trim();
+    if (category !== "판정보정") return;
+
+    var trigger = String(p["발동"] || "").trim();
+    if (trigger && trigger !== "판정계산전" && trigger !== "항상" && trigger !== "전체") return;
+
+    if (!_passiveJudgmentMatches(p, checkTypes)) return;
+
+    var cond = evaluateConditionList(p["조건"], ctx);
+    if (!cond.ok) return;
+
+    var v = Math.floor(Number(p["수치"] || 0));
+    if (!v) return;
+    delta += v;
+    lines.push("[패시브: " + (p["이름"] || p["key"]) + "]\n보정: " + formatSigned(v));
+  });
+
+  return { delta: delta, text: lines.join("\n\n") };
+}
+
+// 트리거 기반 패시브 효과 실행. 1차 구현: 효과 필드가 있으면 processSkillEffects로 처리.
+// 사용처: 판정시작 / 판정후 / 피해직전 / 피해후 / 세션종료 등.
+function firePassiveTriggerEffects(character, trigger, ctxOpts) {
+  if (!character) return "";
+  ctxOpts = ctxOpts || {};
+  var targetAlias = ctxOpts.targetAlias || "";
+  var passives = getCandidatePassivesForCharacter(character);
+  var ctx = buildConditionContext(character, targetAlias);
+  var alias = String(character["별명"] || "").trim();
+  var logs = [];
+
+  passives.forEach(function (p) {
+    var pTrigger = String(p["발동"] || "").trim();
+    if (pTrigger !== trigger) return;
+
+    var effectText = String(p["효과"] || "").trim();
+    if (!effectText) return;
+
+    var cond = evaluateConditionList(p["조건"], ctx);
+    if (!cond.ok) return;
+
+    try {
+      var processed = processSkillEffects(effectText, {
+        userAlias: alias,
+        targetAlias: targetAlias,
+        finalValue: Number(ctxOpts.finalValue || 0),
+        skillName: "패시브: " + (p["이름"] || p["key"]),
+        skill: { 스킬명: p["이름"] || p["key"], 효과: effectText },
+        resistanceMode: ctxOpts.resistanceMode || "none"
+      });
+      if (processed) logs.push("[패시브 효과: " + (p["이름"] || p["key"]) + "]\n" + processed);
+    } catch (e) {
+      logs.push("[패시브 효과 오류: " + (p["이름"] || p["key"]) + "] " + e.message);
+    }
+  });
+
+  return logs.join("\n\n");
+}
+
+// ── !패시브목록 명령어 ──────────────────────────────────────────────
+
+function passiveListCommand(parts, displayName) {
+  var targetAlias = (parts && parts.length >= 2) ? String(parts[1]).trim() : "";
+  var character = targetAlias ? findCharacterByAlias(targetAlias) : findCharacter(displayName);
+
+  if (!character) {
+    return "캐릭터를 찾을 수 없습니다.\n" + (targetAlias || "디스코드 별명: " + displayName);
+  }
+
+  var alias = String(character["별명"] || "").trim();
+  var level = Number(character["레벨"] || 0);
+  var faction = String(character["소속"] || "").trim();
+  var species = String(character["종족"] || "").trim();
+  var allRows = getAllPassiveRows();
+
+  var applied = [];
+  var manual = [];
+  var locked = [];
+  var failed = [];
+
+  var ctx = buildConditionContext(character, "");
+
+  allRows.forEach(function (p) {
+    var name = String(p["이름"] || p["key"] || "").trim();
+    if (!name) return;
+
+    var owner = _normalizePassiveOwnerType(p["소유타입"]);
+    var ownerKey = String(p["소유키"] || "").trim();
+
+    var ownerMatch =
+      (owner === "global") ||
+      (owner === "character" && (!ownerKey || ownerKey === alias)) ||
+      (owner === "faction"   && (!ownerKey || ownerKey === faction)) ||
+      (owner === "species"   && (!ownerKey || ownerKey === species));
+    if (!ownerMatch) return;
+
+    var unlock = Number(p["해금레벨"] || 1);
+    if (isNaN(unlock) || unlock < 1) unlock = 1;
+
+    var summary = "Lv." + unlock + " " + name +
+      (p["분류"] ? " / " + p["분류"] : "") +
+      (Number(p["수치"]) ? " " + formatSigned(Number(p["수치"])) : "") +
+      (p["판정"] ? " / 판정: " + p["판정"] : "");
+
+    if (level < unlock) { locked.push(summary); return; }
+
+    var cond = evaluateConditionList(p["조건"], ctx);
+    if (!cond.ok) {
+      failed.push(summary + "\n  실패: " + cond.failed.join(", "));
+      return;
+    }
+    if (cond.plainText.length > 0) {
+      manual.push(summary + "\n  조건: " + cond.plainText.join(", "));
+      return;
+    }
+    applied.push(summary);
+  });
+
+  var lines = [];
+  lines.push("[패시브 목록]");
+  lines.push("캐릭터: " + alias);
+  if (faction) lines.push("소속: " + faction);
+  if (species) lines.push("종족: " + species);
+  lines.push("레벨: " + level);
+  lines.push("");
+
+  function section(title, arr) {
+    lines.push(title + ":");
+    if (arr.length === 0) lines.push("- (없음)");
+    else arr.forEach(function (s) { lines.push("- " + s); });
+    lines.push("");
+  }
+  section("적용 중", applied);
+  section("수동 확인", manual);
+  section("잠김", locked);
+  section("조건 미충족", failed);
+
+  return lines.join("\n").replace(/\n+$/, "");
 }
 
 // =====================================================================
@@ -8164,6 +8652,16 @@ function enemySkillUse(parts, displayName) {
     targetEnemyObj = enemyObj;
   }
 
+  // 조건 자동 판정 (에너미는 캐릭터 컨텍스트 없음 → 자유텍스트 위주)
+  var enemyCondCheck = checkSkillConditions(skill["condition"] || skill["조건"], {
+    label: "에너미 스킬",
+    name: String(skill["name"] || skill["skill_key"] || "").trim(),
+    character: null,
+    targetAlias: targetRef
+  });
+  if (enemyCondCheck.blocked) return enemyCondCheck.text;
+  var enemyConditionHeader = enemyCondCheck.headerText || "";
+
   // ── Roll ──────────────────────────────────────────────────────────
   var rollResult;
   try { rollResult = rollEnemySkill(enemy, skill, bonus); } catch(e) {
@@ -8234,6 +8732,7 @@ function enemySkillUse(parts, displayName) {
 
   // ── Build output ──────────────────────────────────────────────────
   return (
+    (enemyConditionHeader ? enemyConditionHeader + "\n\n" : "") +
     "【" + skillName + "】\n" +
     "사용자: " + enemyLabel + "\n" +
     targetLine +
@@ -8549,7 +9048,7 @@ function upsertRowByKey(sheetName, keyCol, keyVal, obj) {
 // ── Command: !에너미스킬등록 ─────────────────────────────────────────
 
 var ENEMY_SKILL_REG_KEYS = [
-  "key", "소유", "소유키", "이름", "계열", "랭크", "계산식", "효과", "대상", "메모"
+  "key", "소유", "소유키", "이름", "계열", "랭크", "계산식", "효과", "대상", "조건", "메모"
 ];
 var VALID_SKILL_CATEGORIES = ["화력","방호","치유","재생","간섭","강화","특수"];
 var VALID_SKILL_RANKS      = ["F","E","D","C","B","A","S","U","EX"];
@@ -8602,6 +9101,7 @@ function enemySkillRegister(utterance, displayName) {
   if (!VALID_TARGET_MODES_ES.includes(targetMode)) targetMode = "optional";
 
   const effectText = String(args["효과"] || "").trim();
+  const condition  = String(args["조건"] || "").trim();
   const memo       = String(args["메모"] || "").trim();
 
   if (effectText) {
@@ -8626,6 +9126,7 @@ function enemySkillRegister(utterance, displayName) {
     formula:     formula,
     effect:      effectText,
     target_mode: targetMode,
+    condition:   condition,
     memo:        memo
   };
 
@@ -8958,6 +9459,7 @@ function _portalBuildEnemySkillUtterance(p) {
   parts.push("계산식:" + String(p.formula || ""));
   if (p.effect)      parts.push("효과:" + String(p.effect));
   if (p.target_mode) parts.push("대상:" + String(p.target_mode));
+  if (p.condition)   parts.push("조건:" + String(p.condition));
   if (p.memo)        parts.push("메모:" + String(p.memo));
   return parts.join(" ");
 }
@@ -9370,6 +9872,16 @@ function commonSkillUseCommand(parts, displayName) {
     );
   }
 
+  // 조건 자동 판정
+  const commonCondCheck = checkSkillConditions(commonSkill["조건"], {
+    label: "공용 스킬",
+    name: displaySkillName,
+    character: character,
+    targetAlias: effectiveTarget
+  });
+  if (commonCondCheck.blocked) return commonCondCheck.text;
+  const conditionHeaderText = commonCondCheck.headerText || "";
+
   const statusResult = processStatusBeforeCheck(alias, "스킬");
   if (statusResult.blocked) {
     return statusResult.text;
@@ -9406,7 +9918,7 @@ function commonSkillUseCommand(parts, displayName) {
   let finalValue;
   try {
     finalValue = applyMods(result, mods);
-    const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type]);
+    const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type], effectiveTarget || "");
     finalValue = statusMod.value;
   } catch (e) {
     return (
@@ -9566,6 +10078,7 @@ function commonSkillUseCommand(parts, displayName) {
   const summary = "[공용 스킬]\n" + alias + " - " + displaySkillName + "\n\n" + summaryBlock + targetWarning + noTargetNote;
 
   const detail =
+    (conditionHeaderText ? conditionHeaderText + "\n\n" : "") +
     (statusResult.text ? statusResult.text + "\n\n" : "") +
     "[공용 스킬 사용 상세]\n" +
     alias + " - " + displaySkillName + "\n\n" +

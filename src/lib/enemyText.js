@@ -49,6 +49,7 @@ export function buildEnemySkillText(p) {
     `계산식:${p.formula ?? ''}`,
     `효과:${p.effect ?? ''}`,
     `대상:${p.target_mode ?? ''}`,
+    `조건:${p.condition ?? ''}`,
     `메모:${p.memo ?? ''}`,
   ];
   return `!에너미스킬등록 ${parts.join(' ')}`;
