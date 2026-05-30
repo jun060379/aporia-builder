@@ -18,7 +18,10 @@ const SHEET_ENEMIES = "ENEMIES";
 const SHEET_ENEMY_SKILLS = "ENEMY_SKILLS";
 const SHEET_COMMON_SKILLS = "COMMON_SKILLS";
 const SHEET_PASSIVE_SKILLS = "PASSIVE_SKILLS";
-const SHEET_NICKNAME_DB = "NICKNAME_DB";
+const SHEET_NICKNAME_DB    = "NICKNAME_DB";
+const SHEET_ITEM_DB        = "ITEM_DB";
+const SHEET_INVENTORY_DB   = "INVENTORY_DB";
+const SHEET_EQUIPMENT_DB   = "EQUIPMENT_DB";
 const COMMON_UNLOCK_LEVELS = [1, 2, 4, 6, 8, 12];
 const DEFAULT_FACTION = "무소속";
 const ENEMY_ACTION_FIELDS = [
@@ -421,6 +424,14 @@ function handleCommand(utterance, displayName) {
   if (command === "!닉네임추가")  return nicknameAdd(parts);
   if (command === "!닉네임삭제")  return nicknameRemove(parts);
 
+  if (command === "!인벤토리")   return inventoryCommand(parts, displayName);
+  if (command === "!장비")       return equipmentShowCommand(parts, displayName);
+  if (command === "!아이템지급") return itemGrantCommand(parts, displayName);
+  if (command === "!아이템삭제") return itemDeleteCommand(parts, displayName);
+  if (command === "!장비착용")   return equipCommand(parts, displayName);
+  if (command === "!장비해제")   return unequipCommand(parts, displayName);
+  if (command === "!아이템사용") return itemUseCommand(parts, displayName);
+
   if (command === "!명령어목록" || command === "!도움말" || command === "!help") {
     return commandListCommand();
   }
@@ -539,6 +550,15 @@ function commandListCommand() {
     "  !닉네임목록 [별명]        등록된 닉네임 확인",
     "  !닉네임추가 별명 닉네임1 닉네임2 ...",
     "  !닉네임삭제 별명 닉네임",
+    "",
+    "[ 인벤토리 · 장비 ]",
+    "  !인벤토리 [별명]",
+    "  !장비 [별명]",
+    "  !아이템지급 <별명> <아이템명> [수량]   (관리자 전용)",
+    "  !아이템삭제 <인벤토리id>             (관리자 전용)",
+    "  !장비착용 [별명] <아이템명>",
+    "  !장비해제 [별명] <슬롯|아이템명>",
+    "  !아이템사용 <아이템명> [대상:별명]",
     "",
     "[ 세션 ]",
     "  !fin                극/세션 종료 (임시 상태/스택 정리)",
@@ -1413,7 +1433,11 @@ function processPreDamageStatuses(alias, damageAmount) {
   const shieldResult  = _applyShieldEffects(rows, damage);
   damage              = shieldResult.damage;
 
-  const logs = [...vulnResult.logs, ...passiveDmgResult.logs, ...shieldResult.logs];
+  // 4. 장비 피해감소
+  const equipDmgResult = _applyEquipmentDamageModifier(alias, damage);
+  damage               = equipDmgResult.damage;
+
+  const logs = [...vulnResult.logs, ...passiveDmgResult.logs, ...shieldResult.logs, ...equipDmgResult.logs];
   const debugLogs = passiveDmgResult.debugLogs || [];
   return { damage, text: logs.join("\n\n"), debugText: debugLogs.join("\n") };
 }
@@ -1702,6 +1726,8 @@ function statCheck(parts, displayName) {
    finalValue = applyMods(base, mods);
    statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_STAT, statName]);
    finalValue = statusMod.value;
+   var _statEquipMod = getEquipmentModifier(alias, [KIND_STAT, statName]);
+   finalValue += _statEquipMod.delta;
   } catch (e) {
     return (
       "[스탯 판정 오류]\n" +
@@ -1737,6 +1763,7 @@ function statCheck(parts, displayName) {
     "보정: " + (mods.join(" ") || "없음") + "\n\n" +
     (statusMod.text ? "\n상태보정: " + formatSigned(statusMod.delta) + "\n" : "") +
     (statusMod.text ? "\n\n" + statusMod.text + "\n" : "") +
+    (_statEquipMod && _statEquipMod.text ? "\n\n" + _statEquipMod.text + "\n" : "") +
     "최종값: " + finalValue + "\n" +
     "난이도: " + difficulty + "\n" +
     "차이: " + formatSigned(judged.diff) + "\n" +
@@ -1931,6 +1958,8 @@ function actionCheck(parts, displayName) {
 
   const statusMod = applyStatusModifierToValue(alias, sum, [KIND_ACTION, actionName]);
   sum = statusMod.value;
+  const _actEquipMod = getEquipmentModifier(alias, [KIND_ACTION, actionName]);
+  sum += _actEquipMod.delta;
 
   let combatText = "";
 
@@ -1987,6 +2016,7 @@ function actionCheck(parts, displayName) {
     "주사위: " + diceCount + "d" + ACTION_DICE_SIDES + "\n" +
     "결과: " + rolls.join(", ") + "\n" +
     "합계: " + sum +
+    (_actEquipMod && _actEquipMod.text ? "\n\n" + _actEquipMod.text : "") +
     judgeSummary +
     combatText;
 
@@ -2050,6 +2080,8 @@ function powerCheck(parts, type, displayName) {
    finalValue = applyMods(base, mods);
    statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_POWER, type]);
    finalValue = statusMod.value;
+   var _powEquipMod = getEquipmentModifier(alias, [KIND_POWER, type]);
+   finalValue += _powEquipMod.delta;
   } catch (e) {
     return (
       "[" + type + " 판정 오류]\n" +
@@ -2108,6 +2140,7 @@ function powerCheck(parts, type, displayName) {
     "랭크: " + rank + "(" + rankValue + ")\n" +
     typeBonusText +
     (statusMod.text ? "\n\n" + statusMod.text + "\n" : "") +
+    (_powEquipMod && _powEquipMod.text ? "\n\n" + _powEquipMod.text + "\n" : "") +
     "기본값: " + base + "\n" +
     "보정: " + (mods.join(" ") || "없음") + "\n\n" +
     "최종값: " + finalValue + "\n" +
@@ -10447,3 +10480,309 @@ function commonSkillUseCommand(parts, displayName) {
   return makeFoldedResponse(summary, detail);
 }
 
+
+// =====================================================================
+// 인벤토리 · 장비 시스템 (1차 구현)
+// =====================================================================
+
+function ensureItemSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  function ensure(name, headers) {
+    var sh = ss.getSheetByName(name);
+    if (sh) return sh;
+    sh = ss.insertSheet(name);
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+  ensure(SHEET_ITEM_DB,      ["id","이름","분류","슬롯","효과코드","수치","횟수","설명","메모"]);
+  ensure(SHEET_INVENTORY_DB, ["id","소유자","아이템명","수량","상태","획득일"]);
+  ensure(SHEET_EQUIPMENT_DB, ["id","소유자","슬롯","아이템명","장착일"]);
+}
+
+function _makeInvId() {
+  ensureItemSheets();
+  var rows = getSheetData(SHEET_INVENTORY_DB);
+  return "INV-" + String(rows.length + 1).padStart(4, "0");
+}
+function _makeEqId() {
+  ensureItemSheets();
+  var rows = getSheetData(SHEET_EQUIPMENT_DB);
+  return "EQ-" + String(rows.length + 1).padStart(4, "0");
+}
+
+function getItemByName(name) {
+  try {
+    ensureItemSheets();
+    var rows = getSheetData(SHEET_ITEM_DB);
+    var n = String(name || "").trim().toLowerCase();
+    return rows.find(function(r) {
+      return String(r["이름"] || "").trim().toLowerCase() === n;
+    }) || null;
+  } catch(_e) { return null; }
+}
+
+function getInventoryRows(alias) {
+  try {
+    ensureItemSheets();
+    return getSheetData(SHEET_INVENTORY_DB).filter(function(r) {
+      return String(r["소유자"] || "").trim() === alias &&
+             String(r["상태"]   || "").trim() === "ACTIVE" &&
+             Number(r["수량"]   || 0) > 0;
+    });
+  } catch(_e) { return []; }
+}
+
+function getEquipmentRows(alias) {
+  try {
+    ensureItemSheets();
+    return getSheetData(SHEET_EQUIPMENT_DB).filter(function(r) {
+      return String(r["소유자"] || "").trim() === alias;
+    });
+  } catch(_e) { return []; }
+}
+
+function getEquipmentModifier(alias, checkTypes) {
+  var delta = 0;
+  var logs  = [];
+  try {
+    var eqRows = getEquipmentRows(alias);
+    eqRows.forEach(function(eq) {
+      var item = getItemByName(eq["아이템명"]);
+      if (!item) return;
+      var effectCode = String(item["효과코드"] || "").trim();
+      var value = Number(item["수치"] || 0);
+      if (!effectCode || !value) return;
+      var m = effectCode.match(/^(스탯|액션|이능)보정:(.+)$/);
+      if (!m) return;
+      var targetName = m[2].trim();
+      var types = (checkTypes || []).map(function(t){ return String(t||"").trim(); });
+      if (types.indexOf(targetName) < 0 && types.indexOf("전체") < 0) return;
+      delta += value;
+      logs.push("[장비: " + String(eq["아이템명"]) + "]\n보정: " + formatSigned(value));
+    });
+  } catch(_e) {}
+  return { delta: delta, text: logs.join("\n\n") };
+}
+
+function _applyEquipmentDamageModifier(alias, damage) {
+  var logs = [];
+  try {
+    var eqRows = getEquipmentRows(alias);
+    var delta = 0;
+    eqRows.forEach(function(eq) {
+      var item = getItemByName(eq["아이템명"]);
+      if (!item) return;
+      if (String(item["효과코드"] || "").trim() !== "피해감소") return;
+      var v = Math.abs(Number(item["수치"] || 0));
+      if (!v) return;
+      delta -= v;
+      logs.push("[장비: " + String(eq["아이템명"]) + "]\n피해 감소: " + formatSigned(-v));
+    });
+    damage = Math.max(0, damage + delta);
+  } catch(_e) {}
+  return { damage: damage, logs: logs };
+}
+
+function inventoryCommand(parts, displayName) {
+  var alias;
+  if (parts && parts.length >= 2) {
+    alias = _resolveAliasFromTokens(parts, 1, 0).alias;
+  } else {
+    var self = findCharacter(displayName);
+    if (!self) return "캐릭터를 찾을 수 없습니다. 디스코드 별명: " + displayName;
+    alias = String(self["별명"]).trim();
+  }
+  if (!findCharacterByAlias(alias)) return "캐릭터를 찾을 수 없습니다: " + alias;
+  var rows = getInventoryRows(alias);
+  if (rows.length === 0) return "[인벤토리: " + alias + "]\n보유 아이템 없음";
+  var lines = ["[인벤토리: " + alias + "]"];
+  rows.forEach(function(r) {
+    lines.push("• " + String(r["id"]) + "  " + String(r["아이템명"]) + "  ×" + String(r["수량"]));
+  });
+  return lines.join("\n");
+}
+
+function equipmentShowCommand(parts, displayName) {
+  var alias;
+  if (parts && parts.length >= 2) {
+    alias = _resolveAliasFromTokens(parts, 1, 0).alias;
+  } else {
+    var self = findCharacter(displayName);
+    if (!self) return "캐릭터를 찾을 수 없습니다. 디스코드 별명: " + displayName;
+    alias = String(self["별명"]).trim();
+  }
+  if (!findCharacterByAlias(alias)) return "캐릭터를 찾을 수 없습니다: " + alias;
+  var rows = getEquipmentRows(alias);
+  if (rows.length === 0) return "[장착 장비: " + alias + "]\n장착 중인 장비 없음";
+  var lines = ["[장착 장비: " + alias + "]"];
+  rows.forEach(function(r) {
+    var item = getItemByName(String(r["아이템명"]));
+    var effectInfo = item ? ("  " + String(item["효과코드"] || "") + " " + (item["수치"] ? formatSigned(Number(item["수치"])) : "")) : "";
+    lines.push("[" + String(r["슬롯"]) + "] " + String(r["아이템명"]) + effectInfo);
+  });
+  return lines.join("\n");
+}
+
+function itemGrantCommand(parts, displayName) {
+  if (!parts || parts.length < 3) {
+    return "사용법: !아이템지급 <캐릭터별명> <아이템명> [수량]\n(관리자 전용)";
+  }
+  var resolved = _resolveAliasFromTokens(parts, 1, 1);
+  var alias = resolved.alias;
+  if (!findCharacterByAlias(alias)) return "캐릭터를 찾을 수 없습니다: " + alias;
+  var rest = resolved.rest.slice();
+  var qty = 1;
+  if (rest.length > 0 && !isNaN(Number(rest[rest.length - 1]))) {
+    qty = Math.max(1, Number(rest.pop()));
+  }
+  var itemName = rest.join(" ").trim();
+  if (!itemName) return "아이템명을 입력하세요.";
+  if (!getItemByName(itemName)) return "ITEM_DB에 없는 아이템입니다: " + itemName;
+  ensureItemSheets();
+  appendRowByHeaders(SHEET_INVENTORY_DB, {
+    id: _makeInvId(), 소유자: alias, 아이템명: itemName,
+    수량: qty, 상태: "ACTIVE", 획득일: getNowText()
+  });
+  return "[아이템 지급]\n대상: " + alias + "\n아이템: " + itemName + " × " + qty;
+}
+
+function itemDeleteCommand(parts, displayName) {
+  if (!parts || parts.length < 2) {
+    return "사용법: !아이템삭제 <인벤토리id>\n예시: !아이템삭제 INV-0001\n(관리자 전용)";
+  }
+  var id = String(parts[1]).trim();
+  ensureItemSheets();
+  var rows = getSheetData(SHEET_INVENTORY_DB);
+  var row = rows.find(function(r){ return String(r["id"]).trim() === id; });
+  if (!row) return "인벤토리 항목을 찾을 수 없습니다: " + id;
+  updateRowById(SHEET_INVENTORY_DB, "id", id, { 상태: "REMOVED", 수량: 0 });
+  return "[아이템 삭제]\nid: " + id + "\n아이템: " + String(row["아이템명"]) + "\n소유자: " + String(row["소유자"]);
+}
+
+function equipCommand(parts, displayName) {
+  if (!parts || parts.length < 2) return "사용법: !장비착용 [캐릭터별명] <아이템명>";
+  var alias, itemName;
+  var selfChar = findCharacter(displayName);
+  if (selfChar && parts.length === 2) {
+    alias = String(selfChar["별명"]).trim();
+    itemName = String(parts[1]).trim();
+  } else {
+    var resolved = _resolveAliasFromTokens(parts, 1, 1);
+    alias = resolved.alias;
+    itemName = resolved.rest.join(" ").trim();
+  }
+  if (!findCharacterByAlias(alias)) return "캐릭터를 찾을 수 없습니다: " + alias;
+  if (!itemName) return "아이템명을 입력하세요.";
+  var item = getItemByName(itemName);
+  if (!item) return "ITEM_DB에 없는 아이템입니다: " + itemName;
+  if (String(item["분류"] || "").trim() !== "장비") return "장비 아이템이 아닙니다: " + itemName;
+  var invRows = getInventoryRows(alias);
+  var inInv = invRows.find(function(r){ return String(r["아이템명"]).trim() === itemName; });
+  if (!inInv) return "인벤토리에 없는 아이템입니다: " + itemName;
+  var slot = String(item["슬롯"] || "").trim();
+  if (!slot) return "슬롯 정보가 없는 아이템입니다.";
+  ensureItemSheets();
+  var existing = getEquipmentRows(alias).find(function(r){ return String(r["슬롯"]).trim() === slot; });
+  if (existing) {
+    updateRowById(SHEET_EQUIPMENT_DB, "id", String(existing["id"]), { 아이템명: itemName, 장착일: getNowText() });
+    return "[장비 교체]\n캐릭터: " + alias + "\n슬롯: " + slot + "\n" + String(existing["아이템명"]) + " → " + itemName;
+  }
+  appendRowByHeaders(SHEET_EQUIPMENT_DB, {
+    id: _makeEqId(), 소유자: alias, 슬롯: slot, 아이템명: itemName, 장착일: getNowText()
+  });
+  return "[장비 착용]\n캐릭터: " + alias + "\n슬롯: " + slot + "\n아이템: " + itemName;
+}
+
+function unequipCommand(parts, displayName) {
+  if (!parts || parts.length < 2) return "사용법: !장비해제 [캐릭터별명] <슬롯|아이템명>";
+  var alias, target;
+  var selfChar = findCharacter(displayName);
+  if (selfChar && parts.length === 2) {
+    alias  = String(selfChar["별명"]).trim();
+    target = String(parts[1]).trim();
+  } else {
+    var resolved = _resolveAliasFromTokens(parts, 1, 1);
+    alias  = resolved.alias;
+    target = resolved.rest.join(" ").trim();
+  }
+  if (!findCharacterByAlias(alias)) return "캐릭터를 찾을 수 없습니다: " + alias;
+  if (!target) return "슬롯 또는 아이템명을 입력하세요.";
+  var eqRows = getEquipmentRows(alias);
+  var row = eqRows.find(function(r){
+    return String(r["슬롯"]).trim() === target || String(r["아이템명"]).trim() === target;
+  });
+  if (!row) return "장착 중인 장비를 찾을 수 없습니다: " + target;
+  ensureItemSheets();
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_EQUIPMENT_DB);
+  var data = sh.getDataRange().getValues();
+  var headers = data[0].map(function(h){ return String(h).trim(); });
+  var idCol = headers.indexOf("id");
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idCol]).trim() === String(row["id"]).trim()) { sh.deleteRow(i + 1); break; }
+  }
+  return "[장비 해제]\n캐릭터: " + alias + "\n슬롯: " + String(row["슬롯"]) + "\n아이템: " + String(row["아이템명"]);
+}
+
+function itemUseCommand(parts, displayName) {
+  if (!parts || parts.length < 2) return "사용법: !아이템사용 <아이템명> [대상:별명]";
+  var selfChar = findCharacter(displayName);
+  if (!selfChar) return "캐릭터를 찾을 수 없습니다. 디스코드 별명: " + displayName;
+  var alias = String(selfChar["별명"]).trim();
+
+  var parsed      = parseTargetAndMods(parts.slice(1));
+  var itemName    = parsed.mods.join(" ").trim();
+  var targetAlias = parsed.target || alias;
+  if (targetAlias === "자신") targetAlias = alias;
+  if (!itemName) return "아이템명을 입력하세요.";
+
+  var item = getItemByName(itemName);
+  if (!item) return "ITEM_DB에 없는 아이템입니다: " + itemName;
+  if (String(item["분류"] || "").trim() !== "소모품") return "소모품 아이템이 아닙니다: " + itemName;
+
+  var invRows = getInventoryRows(alias);
+  var invRow  = invRows.find(function(r){ return String(r["아이템명"]).trim() === itemName; });
+  if (!invRow) return "인벤토리에 없는 아이템입니다: " + itemName;
+
+  var effectCode = String(item["효과코드"] || "").trim();
+  var value      = Number(item["수치"]     || 0);
+  var itemCount  = Number(item["횟수"]     || 1);
+  var result     = "";
+
+  if (effectCode === "회복") {
+    var healResult = applyHealingToCharacter(targetAlias, value);
+    result = healResult.text || "[회복] " + formatSigned(value);
+  } else {
+    var m = effectCode.match(/^(스탯|액션|이능)보정:(.+)$/);
+    var statusCat  = "강화";
+    var statusCode = "enhance";
+    var checkType  = "전체";
+    if (m) {
+      var kindMap = { "스탯": KIND_STAT, "액션": KIND_ACTION, "이능": KIND_POWER };
+      checkType = (kindMap[m[1]] || "전체") + "," + m[2].trim();
+    } else if (effectCode === "피해감소") {
+      statusCat  = "쇠약강화";
+      statusCode = "debuff";
+    }
+    ensureItemSheets();
+    appendRowByHeaders(SHEET_STATUS_DB, {
+      id: makeStatusId(), 상태: "ACTIVE", 대상: targetAlias,
+      상태명: itemName, 분류: statusCat, 효과코드: statusCode,
+      수치: value, 확률: 100, 누적확률: 0, 증가확률: 0, 최대확률: 100,
+      발동타이밍: "판정시작", 대상판정: checkType,
+      남은횟수: itemCount, 중복방식: "덮어쓰기",
+      출처: "아이템:" + itemName, 메모: "", 생성일: getNowText(), 처리일: ""
+    });
+    result = "[효과 적용]\n상태: " + itemName + "\n효과: " + effectCode +
+             " " + formatSigned(value) + "\n대상: " + targetAlias + "\n지속: " + itemCount + "회";
+  }
+
+  var newQty = Number(invRow["수량"]) - 1;
+  if (newQty <= 0) {
+    updateRowById(SHEET_INVENTORY_DB, "id", String(invRow["id"]), { 수량: 0, 상태: "REMOVED" });
+  } else {
+    updateRowById(SHEET_INVENTORY_DB, "id", String(invRow["id"]), { 수량: newQty });
+  }
+  var qtyNote = newQty <= 0 ? "\n(소진됨)" : "\n남은 수량: " + newQty;
+  return "[아이템 사용]\n" + alias + " → " + itemName + qtyNote + "\n\n" + result;
+}
