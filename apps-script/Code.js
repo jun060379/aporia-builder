@@ -166,6 +166,11 @@ var EFFECT_CODE_BLIND      = "blind";
 
 function doGet(e) {
   try {
+    // 인벤토리 JSON API 엔드포인트 (Discord 봇 UI 전용)
+    if (e.parameter.api === "inventory") {
+      return returnJson(handleInventoryApi(e));
+    }
+
     // 게임 데이터 조회 엔드포인트
     if (e.parameter.action === "gamedata") {
       var expected = "";
@@ -10785,4 +10790,192 @@ function itemUseCommand(parts, displayName) {
   }
   var qtyNote = newQty <= 0 ? "\n(소진됨)" : "\n남은 수량: " + newQty;
   return "[아이템 사용]\n" + alias + " → " + itemName + qtyNote + "\n\n" + result;
+}
+
+// =====================================================================
+// 인벤토리 JSON API (Discord 봇 UI 전용)
+// doGet에서 ?api=inventory 로 진입. formatDiscordReply를 거치지 않고 JSON 반환.
+// =====================================================================
+
+function handleInventoryApi(e) {
+  try {
+    var action = String((e && e.parameter && e.parameter.action) || "").trim();
+    var alias  = String((e && e.parameter && e.parameter.alias)  || "").trim();
+    var invId  = String((e && e.parameter && e.parameter.invId)  || "").trim();
+    var slot   = String((e && e.parameter && e.parameter.slot)   || "").trim();
+    var target = String((e && e.parameter && e.parameter.target) || "").trim();
+
+    if (!alias) return { ok: false, message: "alias가 필요합니다." };
+
+    // 닉네임 → 정식 별명
+    var charRow = findCharacterByAlias(alias);
+    if (!charRow) return { ok: false, message: "캐릭터를 찾을 수 없습니다: " + alias };
+    alias = String(charRow["별명"] || alias).trim();
+
+    if (action === "view")    return _invApiView(alias);
+    if (action === "equip")   return _invApiEquip(alias, invId);
+    if (action === "unequip") return _invApiUnequip(alias, slot || invId);
+    if (action === "use")     return _invApiUse(alias, invId, target);
+
+    return { ok: false, message: "알 수 없는 action: " + action };
+  } catch (err) {
+    return { ok: false, message: "[인벤토리 API 오류] " + (err && err.message ? err.message : String(err)) };
+  }
+}
+
+// 현재 인벤토리/장비 상태를 봇 UI 형식으로 반환.
+function _invApiView(alias) {
+  var invRows = getInventoryRows(alias);
+  var items = invRows.map(function (r) {
+    var item = getItemByName(r["아이템명"]) || {};
+    return {
+      invId:       String(r["id"] || ""),
+      name:        String(r["아이템명"] || ""),
+      category:    String(item["분류"]   || ""),
+      slot:        String(item["슬롯"]   || ""),
+      effect:      String(item["효과코드"] || ""),
+      value:       (item["수치"] === undefined || item["수치"] === "") ? "" : Number(item["수치"]),
+      quantity:    Number(r["수량"] || 0),
+      description: String(item["설명"] || "")
+    };
+  });
+
+  var eqRows = getEquipmentRows(alias);
+  var equipment = eqRows.map(function (r) {
+    var item = getItemByName(r["아이템명"]) || {};
+    return {
+      slot:   String(r["슬롯"]    || ""),
+      name:   String(r["아이템명"] || ""),
+      effect: String(item["효과코드"] || ""),
+      value:  (item["수치"] === undefined || item["수치"] === "") ? "" : Number(item["수치"])
+    };
+  });
+
+  return { ok: true, alias: alias, items: items, equipment: equipment };
+}
+
+// invId로 인벤토리 행을 찾는다 (ACTIVE, 수량>0).
+function _invFindRowById(alias, invId) {
+  var rows = getInventoryRows(alias);
+  return rows.find(function (r) { return String(r["id"] || "").trim() === invId; }) || null;
+}
+
+// 장비 착용 (invId 기반). 같은 슬롯 자동 교체.
+function _invApiEquip(alias, invId) {
+  if (!invId) return { ok: false, message: "invId가 필요합니다." };
+  var invRow = _invFindRowById(alias, invId);
+  if (!invRow) return { ok: false, message: "인벤토리 항목을 찾을 수 없습니다: " + invId };
+
+  var itemName = String(invRow["아이템명"] || "").trim();
+  var item = getItemByName(itemName);
+  if (!item) return { ok: false, message: "ITEM_DB에 없는 아이템입니다: " + itemName };
+  if (String(item["분류"] || "").trim() !== "장비") return { ok: false, message: "장비 아이템이 아닙니다: " + itemName };
+
+  var slot = String(item["슬롯"] || "").trim();
+  if (!slot) return { ok: false, message: "슬롯 정보가 없는 아이템입니다." };
+
+  ensureItemSheets();
+  var existing = getEquipmentRows(alias).find(function (r) { return String(r["슬롯"]).trim() === slot; });
+  if (existing) {
+    updateRowById(SHEET_EQUIPMENT_DB, "id", String(existing["id"]), { 아이템명: itemName, 장착일: getNowText() });
+    return Object.assign(_invApiView(alias), {
+      ok: true,
+      message: "[장비 교체] " + slot + ": " + String(existing["아이템명"]) + " → " + itemName
+    });
+  }
+
+  appendRowByHeaders(SHEET_EQUIPMENT_DB, {
+    id: _makeEqId(), 소유자: alias, 슬롯: slot, 아이템명: itemName, 장착일: getNowText()
+  });
+  return Object.assign(_invApiView(alias), { ok: true, message: "[장비 착용] " + slot + ": " + itemName });
+}
+
+// 장비 해제 (슬롯명 또는 invId 허용).
+function _invApiUnequip(alias, slotOrInvId) {
+  if (!slotOrInvId) return { ok: false, message: "슬롯 또는 invId가 필요합니다." };
+
+  // invId면 아이템명으로 변환
+  var target = slotOrInvId;
+  var invRow = _invFindRowById(alias, slotOrInvId);
+  if (invRow) target = String(invRow["아이템명"] || "").trim();
+
+  var eqRows = getEquipmentRows(alias);
+  var row = eqRows.find(function (r) {
+    return String(r["슬롯"]).trim() === target || String(r["아이템명"]).trim() === target;
+  });
+  if (!row) return { ok: false, message: "장착 중인 장비를 찾을 수 없습니다: " + target };
+
+  ensureItemSheets();
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_EQUIPMENT_DB);
+  var data = sh.getDataRange().getValues();
+  var headers = data[0].map(function (h) { return String(h).trim(); });
+  var idCol = headers.indexOf("id");
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idCol]).trim() === String(row["id"]).trim()) { sh.deleteRow(i + 1); break; }
+  }
+
+  return Object.assign(_invApiView(alias), {
+    ok: true,
+    message: "[장비 해제] " + String(row["슬롯"]) + ": " + String(row["아이템명"])
+  });
+}
+
+// 소모품 사용 (invId 기반). 효과 적용 + 수량 차감.
+function _invApiUse(alias, invId, target) {
+  if (!invId) return { ok: false, message: "invId가 필요합니다." };
+  var invRow = _invFindRowById(alias, invId);
+  if (!invRow) return { ok: false, message: "인벤토리 항목을 찾을 수 없습니다: " + invId };
+
+  var itemName = String(invRow["아이템명"] || "").trim();
+  var item = getItemByName(itemName);
+  if (!item) return { ok: false, message: "ITEM_DB에 없는 아이템입니다: " + itemName };
+  if (String(item["분류"] || "").trim() !== "소모품") return { ok: false, message: "소모품 아이템이 아닙니다: " + itemName };
+
+  var targetAlias = String(target || "").trim() || alias;
+  if (targetAlias === "자신") targetAlias = alias;
+  // 대상 닉네임 정규화
+  var tChar = findCharacterByAlias(targetAlias);
+  if (tChar) targetAlias = String(tChar["별명"] || targetAlias).trim();
+
+  var effectCode = String(item["효과코드"] || "").trim();
+  var value      = Number(item["수치"] || 0);
+  var itemCount  = Number(item["횟수"] || 1);
+  var result     = "";
+
+  if (effectCode === "회복") {
+    var healResult = applyHealingToCharacter(targetAlias, value);
+    result = healResult.text || "[회복] " + formatSigned(value);
+  } else {
+    var m = effectCode.match(/^(스탯|액션|이능)보정:(.+)$/);
+    var statusCat  = "강화";
+    var statusCode = "enhance";
+    var checkType  = "전체";
+    if (m) {
+      var kindMap = { "스탯": KIND_STAT, "액션": KIND_ACTION, "이능": KIND_POWER };
+      checkType = (kindMap[m[1]] || "전체") + "," + m[2].trim();
+    } else if (effectCode === "피해감소") {
+      statusCat  = "쇠약강화";
+      statusCode = "debuff";
+    }
+    ensureItemSheets();
+    appendRowByHeaders(SHEET_STATUS_DB, {
+      id: makeStatusId(), 상태: "ACTIVE", 대상: targetAlias,
+      상태명: itemName, 분류: statusCat, 효과코드: statusCode,
+      수치: value, 확률: 100, 누적확률: 0, 증가확률: 0, 최대확률: 100,
+      발동타이밍: "판정시작", 대상판정: checkType,
+      남은횟수: itemCount, 중복방식: "덮어쓰기",
+      출처: "아이템:" + itemName, 메모: "", 생성일: getNowText(), 처리일: ""
+    });
+    result = "[효과 적용] " + itemName + " (" + effectCode + " " + formatSigned(value) + ", " + itemCount + "회) → " + targetAlias;
+  }
+
+  var newQty = Number(invRow["수량"]) - 1;
+  if (newQty <= 0) {
+    updateRowById(SHEET_INVENTORY_DB, "id", String(invRow["id"]), { 수량: 0, 상태: "REMOVED" });
+  } else {
+    updateRowById(SHEET_INVENTORY_DB, "id", String(invRow["id"]), { 수량: newQty });
+  }
+  var qtyNote = newQty <= 0 ? " (소진됨)" : " (남은 수량: " + newQty + ")";
+
+  return Object.assign(_invApiView(alias), { ok: true, message: result + qtyNote });
 }
