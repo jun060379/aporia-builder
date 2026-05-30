@@ -18,6 +18,7 @@ const SHEET_ENEMIES = "ENEMIES";
 const SHEET_ENEMY_SKILLS = "ENEMY_SKILLS";
 const SHEET_COMMON_SKILLS = "COMMON_SKILLS";
 const SHEET_PASSIVE_SKILLS = "PASSIVE_SKILLS";
+const SHEET_NICKNAME_DB = "NICKNAME_DB";
 const COMMON_UNLOCK_LEVELS = [1, 2, 4, 6, 8, 12];
 const DEFAULT_FACTION = "무소속";
 const ENEMY_ACTION_FIELDS = [
@@ -416,6 +417,10 @@ function handleCommand(utterance, displayName) {
   if (command === "!fin") return finishSession(parts, displayName);
   if (command === "!패시브목록") return passiveListCommand(parts, displayName);
 
+  if (command === "!닉네임목록")  return nicknameList(parts);
+  if (command === "!닉네임추가")  return nicknameAdd(parts);
+  if (command === "!닉네임삭제")  return nicknameRemove(parts);
+
   if (command === "!명령어목록" || command === "!도움말" || command === "!help") {
     return commandListCommand();
   }
@@ -530,6 +535,11 @@ function commandListCommand() {
     "[ 패시브 ]",
     "  !패시브목록 [캐릭터별명]",
     "",
+    "[ 닉네임 ]",
+    "  !닉네임목록 [별명]        등록된 닉네임 확인",
+    "  !닉네임추가 별명 닉네임1 닉네임2 ...",
+    "  !닉네임삭제 별명 닉네임",
+    "",
     "[ 세션 ]",
     "  !fin                극/세션 종료 (임시 상태/스택 정리)",
     "  !fin <메시지>",
@@ -585,11 +595,151 @@ function findCharacter(displayName) {
 }
 
 function findCharacterByAlias(alias) {
+  var s = String(alias || "").trim();
+  if (!s) return null;
   const rows = getSheetData(SHEET_BOT_DB);
 
-  return rows.find(r => {
-    return String(r["별명"]).trim() === String(alias).trim();
-  }) || null;
+  // 1. 정확한 별명 매칭
+  var exact = rows.find(r => String(r["별명"] || "").trim() === s);
+  if (exact) return exact;
+
+  // 2. 닉네임 테이블에서 역조회
+  var resolved = _resolveNickname(s);
+  if (resolved !== s) {
+    return rows.find(r => String(r["별명"] || "").trim() === resolved) || null;
+  }
+  return null;
+}
+
+// ── 닉네임 시스템 ────────────────────────────────────────────
+// NICKNAME_DB 시트: 별명 | 닉네임 (쉼표 구분, 공백 포함 가능)
+
+function ensureNicknameSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET_NICKNAME_DB);
+  if (sh) return sh;
+  sh = ss.insertSheet(SHEET_NICKNAME_DB);
+  sh.getRange(1, 1, 1, 2).setValues([["별명", "닉네임"]]);
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+// 입력값 → 정식 별명 변환. 못 찾으면 입력값 그대로 반환.
+function _resolveNickname(input) {
+  var s = String(input || "").trim();
+  if (!s) return s;
+  try {
+    ensureNicknameSheet();
+    var rows = getSheetData(SHEET_NICKNAME_DB);
+    var sLow = s.toLowerCase();
+    for (var i = 0; i < rows.length; i++) {
+      var canonical = String(rows[i]["별명"] || "").trim();
+      if (!canonical) continue;
+      var nickRaw = String(rows[i]["닉네임"] || "").trim();
+      if (!nickRaw) continue;
+      var nicks = nickRaw.split(/[,，\n\r]+/).map(function(n) { return n.trim().toLowerCase(); }).filter(Boolean);
+      if (nicks.indexOf(sLow) >= 0) return canonical;
+    }
+  } catch(_e) { /* 시트 없거나 오류면 무시 */ }
+  return s;
+}
+
+// 닉네임 행 찾기 (별명 기준)
+function _findNicknameRow(alias) {
+  try {
+    ensureNicknameSheet();
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName(SHEET_NICKNAME_DB);
+    var values = sh.getDataRange().getValues();
+    var headers = values[0].map(function(h){ return String(h).trim(); });
+    var aliasCol = headers.indexOf("별명");
+    if (aliasCol < 0) return null;
+    for (var i = 1; i < values.length; i++) {
+      if (String(values[i][aliasCol] || "").trim() === alias) {
+        return { sheet: sh, rowIndex: i + 1, headers: headers, values: values[i] };
+      }
+    }
+  } catch(_e) {}
+  return null;
+}
+
+// !닉네임목록 [별명]
+function nicknameList(parts) {
+  ensureNicknameSheet();
+  var rows = getSheetData(SHEET_NICKNAME_DB);
+  if (rows.length === 0) return "등록된 닉네임이 없습니다.";
+
+  var filterAlias = (parts && parts.length >= 2) ? String(parts[1]).trim() : "";
+  var filtered = filterAlias
+    ? rows.filter(function(r){ return String(r["별명"] || "").trim() === filterAlias; })
+    : rows;
+
+  if (filtered.length === 0) return "닉네임이 없습니다: " + filterAlias;
+
+  var lines = ["[닉네임 목록]"];
+  filtered.forEach(function(r) {
+    var canonical = String(r["별명"] || "").trim();
+    var nicks = String(r["닉네임"] || "").trim();
+    if (canonical) lines.push(canonical + " → " + (nicks || "(없음)"));
+  });
+  return lines.join("\n");
+}
+
+// !닉네임추가 별명 닉네임1 닉네임2 ...
+function nicknameAdd(parts) {
+  if (!parts || parts.length < 3) {
+    return "사용법: !닉네임추가 별명 닉네임1 닉네임2 ...\n예시: !닉네임추가 월하륜 월하 월짱";
+  }
+  var alias = String(parts[1]).trim();
+  if (!findCharacterByAlias(alias)) return "BOT_DB에 없는 별명입니다: " + alias;
+
+  var newNicks = parts.slice(2).map(function(n){ return n.trim(); }).filter(Boolean);
+  if (newNicks.length === 0) return "추가할 닉네임을 입력하세요.";
+
+  ensureNicknameSheet();
+  var existing = _findNicknameRow(alias);
+
+  if (existing) {
+    // 기존 행 업데이트
+    var nickCol = existing.headers.indexOf("닉네임");
+    if (nickCol < 0) return "닉네임 열을 찾을 수 없습니다.";
+    var curRaw = String(existing.values[nickCol] || "").trim();
+    var curList = curRaw ? curRaw.split(/[,，]+/).map(function(n){ return n.trim(); }).filter(Boolean) : [];
+    newNicks.forEach(function(n) {
+      if (curList.indexOf(n) < 0) curList.push(n);
+    });
+    existing.sheet.getRange(existing.rowIndex, nickCol + 1).setValue(curList.join(", "));
+    return "[닉네임 추가]\n별명: " + alias + "\n현재 닉네임: " + curList.join(", ");
+  } else {
+    // 새 행 추가
+    appendRowByHeaders(SHEET_NICKNAME_DB, { 별명: alias, 닉네임: newNicks.join(", ") });
+    return "[닉네임 추가]\n별명: " + alias + "\n닉네임: " + newNicks.join(", ");
+  }
+}
+
+// !닉네임삭제 별명 닉네임
+function nicknameRemove(parts) {
+  if (!parts || parts.length < 3) {
+    return "사용법: !닉네임삭제 별명 닉네임\n예시: !닉네임삭제 월하륜 월짱";
+  }
+  var alias  = String(parts[1]).trim();
+  var target = String(parts[2]).trim().toLowerCase();
+
+  ensureNicknameSheet();
+  var existing = _findNicknameRow(alias);
+  if (!existing) return "닉네임 등록 정보가 없습니다: " + alias;
+
+  var nickCol = existing.headers.indexOf("닉네임");
+  if (nickCol < 0) return "닉네임 열을 찾을 수 없습니다.";
+
+  var curRaw = String(existing.values[nickCol] || "").trim();
+  var curList = curRaw ? curRaw.split(/[,，]+/).map(function(n){ return n.trim(); }).filter(Boolean) : [];
+  var next = curList.filter(function(n){ return n.toLowerCase() !== target; });
+
+  if (next.length === curList.length) return "해당 닉네임이 없습니다: " + target;
+
+  existing.sheet.getRange(existing.rowIndex, nickCol + 1).setValue(next.join(", "));
+  return "[닉네임 삭제]\n별명: " + alias + "\n삭제됨: " + target + "\n남은 닉네임: " + (next.join(", ") || "(없음)");
 }
 
 function findCharacterRowByAlias(alias) {
