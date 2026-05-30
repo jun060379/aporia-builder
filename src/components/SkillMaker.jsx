@@ -66,24 +66,106 @@ const PASSIVE_OWNER_TYPES = [
   { value: 'faction',   label: '소속 (파벌/조직)' },
   { value: 'species',   label: '종족' },
 ];
-const PASSIVE_CATEGORIES = ['판정보정', '피해보정', '회복보정', '저항', '트리거효과', '기타'];
 const PASSIVE_TRIGGERS = [
   '항상', '판정계산전', '판정시작', '판정후',
-  '피해직전', '피해후', '세션종료', '수동'
+  '피해직전', '피해후', '회복시', '세션종료', '수동'
 ];
+const PASSIVE_CHECK_TYPES = ['전체', '스탯', '액션', '이능', '스킬', '대응', '저항'];
+
+// 카테고리별 설명 + 자동 기본값 설정
+const PASSIVE_CATEGORY_INFO = [
+  {
+    value: '판정보정',
+    label: '판정 보정',
+    color: 'violet',
+    desc: '판정(주사위) 결과에 수치를 더하거나 뺍니다.',
+    example: '근력 판정에 +3',
+    defaults: { 발동: '판정계산전', 효과코드: '판정보정' },
+    showValue: true, showTrigger: false, showCheck: true, showEffect: false,
+  },
+  {
+    value: '피해보정',
+    label: '피해 경감',
+    color: 'blue',
+    desc: '받는 피해를 줄이거나 늘립니다. 음수 = 경감.',
+    example: 'HP 50% 이상일 때 피해 -5',
+    defaults: { 발동: '피해직전', 효과코드: '피해보정' },
+    showValue: true, showTrigger: false, showCheck: false, showEffect: false,
+  },
+  {
+    value: '회복보정',
+    label: '회복 보정',
+    color: 'emerald',
+    desc: '체력 회복량을 늘리거나 줄입니다.',
+    example: '특정 조건에서 회복 +10',
+    defaults: { 발동: '회복시', 효과코드: '회복보정' },
+    showValue: true, showTrigger: false, showCheck: false, showEffect: false,
+  },
+  {
+    value: '저항',
+    label: '저항 보정',
+    color: 'amber',
+    desc: '상태이상 저항 판정에 수치를 더합니다.',
+    example: '저항 판정에 +3',
+    defaults: { 발동: '판정계산전', 효과코드: '저항확률', 판정: '저항' },
+    showValue: true, showTrigger: false, showCheck: true, showEffect: false,
+  },
+  {
+    value: '트리거효과',
+    label: '트리거 효과',
+    color: 'rose',
+    desc: '특정 시점에 상태/스택 효과를 자동 발동합니다.',
+    example: '판정 시작 시 집중 상태 부여',
+    defaults: { 발동: '판정시작', 효과코드: '상태부여' },
+    showValue: false, showTrigger: true, showCheck: true, showEffect: true,
+  },
+  {
+    value: '기타',
+    label: '직접 설정',
+    color: 'slate',
+    desc: '모든 필드를 직접 입력합니다.',
+    example: '',
+    defaults: { 발동: '수동', 효과코드: '기타' },
+    showValue: true, showTrigger: true, showCheck: true, showEffect: true,
+  },
+];
+
 const PASSIVE_EFFECT_CODES = [
   '판정보정', '피해보정', '회복보정', '저항확률',
   '상태부여', '상태해제', '스택증가', '스택감소',
   '체력회복', '체력손상', '메시지', '기타'
 ];
-const PASSIVE_CHECK_TYPES = ['전체', '스탯', '액션', '이능', '스킬', '대응'];
 
 const EMPTY_PASSIVE = {
   key: '', 이름: '', 소유타입: 'global', 소유키: '*',
   해금레벨: '1', 분류: '판정보정', 효과코드: '판정보정',
-  수치: '', 최대: '', 발동: '판정계산전', 판정: '',
+  수치: '', 최대: '', 발동: '판정계산전', 판정: '전체',
   조건: '', 효과: '', 설명: '', 메모: ''
 };
+
+const COLOR_MAP = {
+  violet: { card: 'border-violet-200 bg-violet-50', active: 'border-violet-400 bg-violet-100 ring-2 ring-violet-300', badge: 'bg-violet-100 text-violet-700' },
+  blue:   { card: 'border-blue-200 bg-blue-50',     active: 'border-blue-400 bg-blue-100 ring-2 ring-blue-300',     badge: 'bg-blue-100 text-blue-700'   },
+  emerald:{ card: 'border-emerald-200 bg-emerald-50',active:'border-emerald-400 bg-emerald-100 ring-2 ring-emerald-300',badge:'bg-emerald-100 text-emerald-700'},
+  amber:  { card: 'border-amber-200 bg-amber-50',   active: 'border-amber-400 bg-amber-100 ring-2 ring-amber-300',   badge: 'bg-amber-100 text-amber-700' },
+  rose:   { card: 'border-rose-200 bg-rose-50',     active: 'border-rose-400 bg-rose-100 ring-2 ring-rose-300',     badge: 'bg-rose-100 text-rose-700'   },
+  slate:  { card: 'border-slate-200 bg-slate-50',   active: 'border-slate-400 bg-slate-100 ring-2 ring-slate-300',   badge: 'bg-slate-100 text-slate-700' },
+};
+
+function buildPassivePreview(row, catInfo) {
+  const name  = row.이름 || '(이름 없음)';
+  const cond  = row.조건 ? '조건 충족 시 ' : '';
+  const v     = Number(row.수치);
+  const sign  = v > 0 ? '+' : '';
+  switch (catInfo?.value) {
+    case '판정보정':  return \`"\${name}": \${cond}\${row.판정 || '모든'} 판정에 \${sign}\${v || '?'} 보정\`;
+    case '피해보정':  return \`"\${name}": \${cond}받는 피해 \${sign}\${v || '?'}\`;
+    case '회복보정':  return \`"\${name}": \${cond}체력 회복량 \${sign}\${v || '?'}\`;
+    case '저항':      return \`"\${name}": \${cond}저항 판정에 \${sign}\${v || '?'}\`;
+    case '트리거효과':return \`"\${name}": \${row.발동 || '?'} 시점에 효과 자동 발동\`;
+    default:          return \`"\${name}"\`;
+  }
+}
 
 // ── 공통 서브 컴포넌트 ──────────────────────────────────────────────────
 
@@ -203,24 +285,28 @@ function PassiveForm() {
   const [row, setRow] = useState(EMPTY_PASSIVE);
   const [copyMsg, setCopyMsg] = useState('');
 
+  const catInfo = PASSIVE_CATEGORY_INFO.find(c => c.value === row.분류) || PASSIVE_CATEGORY_INFO[0];
+
+  function setCategory(cat) {
+    setRow(r => ({ ...r, 분류: cat.value, ...cat.defaults }));
+  }
+
   const field = (k) => (e) => setRow(r => ({ ...r, [k]: e.target.value }));
 
-  // 효과 텍스트를 effects 블럭으로 편집 (SkillMaker와 동일한 방식)
-  // 여기서는 간단히 텍스트 영역으로 처리 (processSkillEffects 호환 DSL)
   const tsv = useMemo(() => {
-    return PASSIVE_HEADERS
+    const headers = ['key','이름','소유타입','소유키','해금레벨','분류','효과코드',
+                     '수치','최대','발동','판정','조건','효과','설명','메모'];
+    return headers
       .map(h => String(row[h] ?? '').replace(/\t/g, ' ').replace(/\r?\n/g, ' ').trim())
       .join('\t');
   }, [row]);
 
   const errors = useMemo(() => {
     const errs = [];
-    if (!row.key.trim())   errs.push('key는 필수입니다 (영소문자 + 밑줄 권장).');
-    if (/\s/.test(row.key.trim())) errs.push('key에 공백을 사용할 수 없습니다.');
-    if (!row.이름.trim())  errs.push('이름은 필수입니다.');
-    if (row.소유타입 !== 'global' && !row.소유키.trim()) errs.push('global 이외에는 소유키가 필요합니다.');
-    if (!row.분류)         errs.push('분류는 필수입니다.');
-    if (!row.발동)         errs.push('발동 시점은 필수입니다.');
+    if (!row.key.trim())  errs.push('key는 필수입니다 (영소문자+밑줄 권장).');
+    if (/\s/.test(row.key.trim())) errs.push('key에 공백 불가.');
+    if (!row.이름.trim()) errs.push('이름은 필수입니다.');
+    if (row.소유타입 !== 'global' && !row.소유키.trim()) errs.push('소유키를 입력하세요.');
     return errs;
   }, [row]);
 
@@ -230,17 +316,47 @@ function PassiveForm() {
     setTimeout(() => setCopyMsg(''), 1500);
   }
 
+  const preview = buildPassivePreview(row, catInfo);
+  const colors  = COLOR_MAP[catInfo.color] || COLOR_MAP.slate;
+
   return (
     <div className="space-y-4">
-      {/* 안내 */}
+
+      {/* ── 안내 ── */}
       <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 text-[11px] text-indigo-900 leading-relaxed">
-        <p className="font-semibold text-indigo-700 mb-1">패시브 제작기</p>
-        <p>아래 양식을 작성하면 하단에 <strong>TSV 한 줄</strong>이 생성됩니다.</p>
-        <p>Google Sheets <code className="bg-white px-1 rounded">PASSIVE_SKILLS</code> 시트 마지막 행에 붙여넣으세요.</p>
-        <p className="mt-1 text-indigo-600 font-semibold">
-          발동 트리거: 항상 / 판정계산전 / 판정시작 / 판정후 / 피해직전 / 피해후 / 세션종료<br />
-          조건은 아래 조건 편집기를 사용하세요 (필수/세부 모두 지원).
-        </p>
+        <p className="font-semibold text-indigo-700 mb-0.5">패시브 제작기</p>
+        <p>작성 완료 후 하단 <strong>TSV 복사</strong> → Google Sheets <code className="bg-white px-1 rounded">PASSIVE_SKILLS</code> 마지막 행에 붙여넣기.</p>
+      </div>
+
+      {/* ── 분류 카드 선택 ── */}
+      <div className="space-y-2">
+        <span className="text-[11px] font-semibold text-slate-600">어떤 패시브인가요?</span>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {PASSIVE_CATEGORY_INFO.map(cat => {
+            const c = COLOR_MAP[cat.color] || COLOR_MAP.slate;
+            const active = row.분류 === cat.value;
+            return (
+              <button
+                key={cat.value}
+                type="button"
+                onClick={() => setCategory(cat)}
+                className={`text-left p-2.5 rounded-xl border transition-all ${active ? c.active : c.card + ' hover:opacity-80'}`}
+              >
+                <p className="text-xs font-bold text-slate-800">{cat.label}</p>
+                <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">{cat.desc}</p>
+                {cat.example && (
+                  <p className={`text-[10px] mt-1 px-1.5 py-0.5 rounded font-mono inline-block ${c.badge}`}>예: {cat.example}</p>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── 미리보기 ── */}
+      <div className={`rounded-xl border p-3 ${colors.card}`}>
+        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1">미리보기</p>
+        <p className="text-sm text-slate-800">{preview}</p>
       </div>
 
       {/* ── 기본 정보 ── */}
@@ -250,149 +366,175 @@ function PassiveForm() {
         <div className="grid grid-cols-2 gap-2">
           <label className="flex flex-col gap-1">
             <span className="text-[11px] text-slate-500">key <span className="text-rose-400">*</span></span>
-            <input className={inputCls} value={row.key} onChange={field('key')} placeholder="예: dodge_master" />
+            <input className={inputCls} value={row.key} onChange={field('key')} placeholder="예: dmg_reduce_hp" />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-[11px] text-slate-500">이름 <span className="text-rose-400">*</span></span>
-            <input className={inputCls} value={row.이름} onChange={field('이름')} placeholder="예: 회피의 달인" />
+            <input className={inputCls} value={row.이름} onChange={field('이름')} placeholder="예: 피해 감면" />
           </label>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-slate-500">소유 타입</span>
-            <select className={selectCls} value={row.소유타입} onChange={field('소유타입')}>
-              {PASSIVE_OWNER_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            <span className="text-[11px] text-slate-500">적용 대상</span>
+            <select className={selectCls} value={row.소유타입}
+              onChange={e => setRow(r => ({ ...r, 소유타입: e.target.value, 소유키: e.target.value === 'global' ? '*' : '' }))}>
+              {[
+                { value: 'global',    label: '공용 (모든 캐릭터)' },
+                { value: 'character', label: '특정 캐릭터 (별명)' },
+                { value: 'faction',   label: '소속/파벌' },
+                { value: 'species',   label: '종족' },
+              ].map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-slate-500">소유 키</span>
+            <span className="text-[11px] text-slate-500">
+              {row.소유타입 === 'global' ? '소유 키 (자동)' : row.소유타입 === 'character' ? '캐릭터 별명' : row.소유타입 === 'faction' ? '소속명' : '종족명'}
+            </span>
             <input
               className={inputCls}
               value={row.소유키}
               onChange={field('소유키')}
-              placeholder={row.소유타입 === 'global' ? '* (공용)' : '별명/소속/종족명'}
+              placeholder={row.소유타입 === 'global' ? '* (전체)' : '대상 값 입력'}
               disabled={row.소유타입 === 'global'}
             />
           </label>
         </div>
 
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-slate-500">해금 레벨</span>
-          <input className={inputCls} value={row.해금레벨} onChange={field('해금레벨')} placeholder="1" type="number" min="1" />
+          <span className="text-[11px] text-slate-500">해금 레벨 (몇 레벨부터 적용되나요?)</span>
+          <input className={inputCls} value={row.해금레벨} onChange={field('해금레벨')} type="number" min="1" placeholder="1" />
         </label>
       </div>
 
-      {/* ── 분류 / 발동 ── */}
+      {/* ── 효과 설정 ── */}
       <div className="space-y-3 bg-slate-50 rounded-xl border border-slate-200 p-4">
-        <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">분류 / 발동</span>
+        <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">효과 설정</span>
 
-        <div className="grid grid-cols-2 gap-2">
+        {/* 수치 보정값 */}
+        {catInfo.showValue && (
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-slate-500">
+                {row.분류 === '피해보정' ? '피해 보정 (음수=경감, 예: -5)' :
+                 row.분류 === '회복보정' ? '회복 보정 (양수=증가, 예: +10)' :
+                 row.분류 === '저항'     ? '저항 판정 보정 (예: +3)' :
+                                           '보정 수치'}
+              </span>
+              <input className={inputCls} value={row.수치} onChange={field('수치')} type="number"
+                placeholder={row.분류 === '피해보정' ? '-5' : row.분류 === '회복보정' ? '+10' : '+3'} />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-slate-500">최대값 (선택)</span>
+              <input className={inputCls} value={row.최대} onChange={field('최대')} type="number" placeholder="없음" />
+            </label>
+          </div>
+        )}
+
+        {/* 발동 시점 (트리거효과/기타만 표시) */}
+        {catInfo.showTrigger && (
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-slate-500">분류 <span className="text-rose-400">*</span></span>
-            <select className={selectCls} value={row.분류} onChange={field('분류')}>
-              {PASSIVE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            <span className="text-[11px] text-slate-500">발동 시점</span>
+            <select className={selectCls} value={row.발동} onChange={field('발동')}>
+              {PASSIVE_TRIGGERS.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </label>
+        )}
+
+        {/* 판정 유형 */}
+        {catInfo.showCheck && (
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-500">
+              {row.분류 === '판정보정' ? '적용할 판정 유형 (전체=모든 판정에 적용)' :
+               row.분류 === '저항'     ? '판정 유형 (저항 고정 권장)' :
+                                         '판정 유형 필터'}
+            </span>
+            <select className={selectCls} value={row.판정} onChange={field('판정')}>
+              {PASSIVE_CHECK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </label>
+        )}
+
+        {/* 효과코드 — 기타일 때만 직접 편집 */}
+        {row.분류 === '기타' && (
           <label className="flex flex-col gap-1">
             <span className="text-[11px] text-slate-500">효과 코드</span>
             <select className={selectCls} value={row.효과코드} onChange={field('효과코드')}>
               {PASSIVE_EFFECT_CODES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </label>
-        </div>
+        )}
 
-        <div className="grid grid-cols-2 gap-2">
+        {/* 효과 DSL (트리거효과/기타) */}
+        {catInfo.showEffect && (
           <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-slate-500">발동 시점 <span className="text-rose-400">*</span></span>
-            <select className={selectCls} value={row.발동} onChange={field('발동')}>
-              {PASSIVE_TRIGGERS.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <span className="text-[11px] text-slate-500">효과 DSL</span>
+            <p className="text-[10px] text-slate-400">processSkillEffects 형식. 예: 상태부여 자신 집중 버프 enhance 수치:3 횟수:1</p>
+            <textarea
+              className={`${inputCls} h-20 resize-none font-mono`}
+              value={row.효과}
+              onChange={field('효과')}
+              placeholder={'상태부여 자신 집중 버프 enhance 수치:3 횟수:1
+스택증가 자신 혈인 1 최대:5'}
+            />
           </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-slate-500">대상 판정 유형</span>
-            <select className={selectCls} value={row.판정} onChange={field('판정')}>
-              {PASSIVE_CHECK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </label>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-slate-500">수치</span>
-            <input className={inputCls} value={row.수치} onChange={field('수치')} placeholder="예: 3 (판정보정 +3)" type="number" />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-slate-500">최대</span>
-            <input className={inputCls} value={row.최대} onChange={field('최대')} placeholder="수치 최대값" type="number" />
-          </label>
-        </div>
+        )}
       </div>
 
       {/* ── 조건 ── */}
       <div className="space-y-2">
-        <span className="text-[11px] text-slate-500 tracking-wide">조건</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-semibold text-slate-600">발동 조건</span>
+          <span className="text-[10px] text-slate-400">비워두면 항상 적용됩니다</span>
+        </div>
         <ConditionEditor
           value={row.조건}
           onChange={v => setRow(r => ({ ...r, 조건: v }))}
-          placeholder="발동 조건 (없으면 비워두세요)"
+          placeholder="예: 현재체력비율 >= 50&#10;세부: 현재체력비율 >= 80 +5"
         />
       </div>
 
-      {/* ── 효과 (트리거효과 분류 시 사용) ── */}
-      <label className="flex flex-col gap-1">
-        <span className="text-[11px] text-slate-500">효과 DSL</span>
-        <p className="text-[10px] text-slate-400">분류=트리거효과일 때 processSkillEffects DSL 입력. 예: 상태부여 자신 집중 버프 enhance 수치:3 횟수:1</p>
-        <textarea
-          className={`${inputCls} h-20 resize-none font-mono`}
-          value={row.효과}
-          onChange={field('효과')}
-          placeholder={'상태부여 자신 집중 버프 enhance 수치:3 횟수:1\n스택증가 자신 혈인 1 최대:5'}
-        />
-      </label>
-
-      {/* 설명 / 메모 */}
+      {/* ── 설명 / 메모 ── */}
       <div className="grid grid-cols-1 gap-2">
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-slate-500">설명</span>
-          <textarea className={`${inputCls} h-14 resize-none`} value={row.설명} onChange={field('설명')} placeholder="패시브 설명" />
+          <span className="text-[11px] text-slate-500">설명 (플레이어에게 표시)</span>
+          <textarea className={`${inputCls} h-14 resize-none`} value={row.설명} onChange={field('설명')} placeholder="패시브 효과 설명" />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-slate-500">메모 (내부용)</span>
-          <input className={inputCls} value={row.메모} onChange={field('메모')} placeholder="관리 메모" />
+          <span className="text-[11px] text-slate-500">메모 (운영 내부용)</span>
+          <input className={inputCls} value={row.메모} onChange={field('메모')} placeholder="테스트중, 검수 필요 등" />
         </label>
       </div>
 
-      {/* 오류 */}
+      {/* ── 오류 ── */}
       {errors.length > 0 && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 space-y-0.5">
           {errors.map((e, i) => <p key={i} className="text-xs text-rose-700">⚠ {e}</p>)}
         </div>
       )}
 
-      {/* TSV 출력 */}
+      {/* ── TSV 출력 ── */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-slate-500 tracking-wide">생성된 TSV (시트 붙여넣기용)</span>
+          <div>
+            <span className="text-[11px] text-slate-500 tracking-wide">TSV (PASSIVE_SKILLS 시트 붙여넣기용)</span>
+            <p className="text-[10px] text-slate-400">헤더: key | 이름 | 소유타입 | 소유키 | 해금레벨 | 분류 | 효과코드 | 수치 | 최대 | 발동 | 판정 | 조건 | 효과 | 설명 | 메모</p>
+          </div>
           <button
             onClick={copy}
             disabled={errors.length > 0}
-            className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-xs font-medium transition-colors"
+            className="shrink-0 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-xs font-medium transition-colors"
           >
-            {copyMsg || '복사'}
+            {copyMsg || 'TSV 복사'}
           </button>
         </div>
         <pre className="bg-slate-800 text-slate-100 rounded-xl p-3 text-[11px] font-mono break-all whitespace-pre-wrap overflow-x-auto leading-relaxed">
-          {errors.length > 0 ? '(필수 항목을 채워주세요)' : tsv}
+          {errors.length > 0 ? '(필수 항목을 모두 채워주세요)' : tsv}
         </pre>
-        <p className="text-[10px] text-slate-400">
-          PASSIVE_SKILLS 시트 헤더 순서: {PASSIVE_HEADERS.join(' | ')}
-        </p>
       </div>
     </div>
   );
 }
-
 // ── SkillForm — 기존 스킬 작성 폼 ──────────────────────────────────────
 function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCancel }) {
   const [skill, setSkill] = useState(() => {

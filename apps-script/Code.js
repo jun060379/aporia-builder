@@ -903,12 +903,20 @@ function applyHealingToCharacter(alias, healAmount) {
     };
   }
 
-  const heal = Math.max(0, Math.floor(Number(healAmount) || 0));
+  const baseHeal = Math.max(0, Math.floor(Number(healAmount) || 0));
+
+  // 회복보정 패시브 적용
+  const passiveHealResult = _applyPassiveHealingModifier(alias, baseHeal);
+  const heal = passiveHealResult.amount;
 
   const before = hp.currentHp;
-  const after = clampHp(before + heal, hp.maxHp);
+  const after  = clampHp(before + heal, hp.maxHp);
 
   setCellByHeader(fresh, "현재체력", after);
+
+  const passiveBlock = passiveHealResult.logs.length > 0
+    ? "\n\n" + passiveHealResult.logs.join("\n\n")
+    : "";
 
   return {
     ok: true,
@@ -919,8 +927,9 @@ function applyHealingToCharacter(alias, healAmount) {
     text:
       "[체력 회복]\n" +
       "대상: " + alias + "\n" +
-      "회복량: " + heal + "\n" +
-      "현재체력: " + before + " → " + after + " / " + hp.maxHp
+      "회복량: " + heal + (heal !== baseHeal ? " (기본: " + baseHeal + ")" : "") + "\n" +
+      "현재체력: " + before + " → " + after + " / " + hp.maxHp +
+      passiveBlock
   };
 }
 
@@ -1003,17 +1012,95 @@ function _applyShieldEffects(rows, damage) {
   return { damage, logs };
 }
 
+// 피해보정 패시브 (분류=피해보정 또는 효과코드=피해보정) 적용.
+// 취약(damage 증가) 이후, 보호막(damage 흡수) 이전에 호출한다.
+function _applyPassiveDamageModifier(alias, damage) {
+  const logs = [];
+  try {
+    const character = findCharacterByAlias(alias);
+    if (!character) return { damage, logs };
+
+    const passives = getCandidatePassivesForCharacter(character);
+    const ctx      = buildConditionContext(character, "");
+    let delta = 0;
+
+    passives.forEach(function (p) {
+      const category   = String(p["분류"]    || "").trim();
+      const effectCode = String(p["효과코드"] || "").trim();
+      if (category !== "피해보정" && effectCode !== "피해보정") return;
+
+      const trigger = String(p["발동"] || "").trim();
+      if (trigger && trigger !== "피해직전" && trigger !== "항상" && trigger !== "전체") return;
+
+      const result = evaluateConditionList(p["조건"], ctx);
+      if (!result.ok) return;
+
+      const v = Math.floor(Number(p["수치"] || 0)) + (result.detailBonus || 0);
+      if (!v) return;
+
+      delta += v;
+      const bonusNote = result.detailBonus ? " (세부 +" + result.detailBonus + " 포함)" : "";
+      logs.push("[패시브: " + (p["이름"] || p["key"]) + "]\n피해 보정: " + formatSigned(v) + bonusNote);
+    });
+
+    damage = Math.max(0, damage + delta);
+  } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
+
+  return { damage, logs };
+}
+
+// 회복보정 패시브 (분류=회복보정 또는 효과코드=회복보정) 적용.
+function _applyPassiveHealingModifier(alias, amount) {
+  const logs = [];
+  try {
+    const character = findCharacterByAlias(alias);
+    if (!character) return { amount, logs };
+
+    const passives = getCandidatePassivesForCharacter(character);
+    const ctx      = buildConditionContext(character, "");
+    let delta = 0;
+
+    passives.forEach(function (p) {
+      const category   = String(p["분류"]    || "").trim();
+      const effectCode = String(p["효과코드"] || "").trim();
+      if (category !== "회복보정" && effectCode !== "회복보정") return;
+
+      const trigger = String(p["발동"] || "").trim();
+      if (trigger && trigger !== "회복시" && trigger !== "항상" && trigger !== "전체") return;
+
+      const result = evaluateConditionList(p["조건"], ctx);
+      if (!result.ok) return;
+
+      const v = Math.floor(Number(p["수치"] || 0)) + (result.detailBonus || 0);
+      if (!v) return;
+
+      delta += v;
+      logs.push("[패시브: " + (p["이름"] || p["key"]) + "]\n회복 보정: " + formatSigned(v));
+    });
+
+    amount = Math.max(0, amount + delta);
+  } catch (_e) { /* 무시 */ }
+
+  return { amount, logs };
+}
+
 function processPreDamageStatuses(alias, damageAmount) {
   const rows   = getActiveStatusRows(alias);
   let damage   = Math.max(0, Math.floor(Number(damageAmount) || 0));
 
-  const vulnResult   = _applyVulnerableEffects(rows, damage);
-  damage             = vulnResult.damage;
+  // 1. 취약 (피해 증가)
+  const vulnResult    = _applyVulnerableEffects(rows, damage);
+  damage              = vulnResult.damage;
 
-  const shieldResult = _applyShieldEffects(rows, damage);
-  damage             = shieldResult.damage;
+  // 2. 피해보정 패시브 (취약 반영 후, 보호막 전)
+  const passiveDmgResult = _applyPassiveDamageModifier(alias, damage);
+  damage                 = passiveDmgResult.damage;
 
-  const logs = [...vulnResult.logs, ...shieldResult.logs];
+  // 3. 보호막 (피해 흡수)
+  const shieldResult  = _applyShieldEffects(rows, damage);
+  damage              = shieldResult.damage;
+
+  const logs = [...vulnResult.logs, ...passiveDmgResult.logs, ...shieldResult.logs];
   return { damage, text: logs.join("\n\n") };
 }
 
@@ -7345,16 +7432,21 @@ function _passiveJudgmentMatches(passive, checkTypes) {
 }
 
 // 판정계산전/항상 분류=판정보정 패시브 합산.
+// 판정값 보정 패시브 합산.
+// 분류=판정보정 또는 효과코드=판정보정 인 패시브를 처리.
+// 세부 조건 보너스도 반영.
 function getPassiveValueModifier(character, checkTypes, targetAlias) {
   if (!character) return { delta: 0, text: "" };
   var passives = getCandidatePassivesForCharacter(character);
-  var ctx = buildConditionContext(character, targetAlias);
+  var ctx = buildConditionContext(character, String(targetAlias || ""));
   var delta = 0;
   var lines = [];
 
   passives.forEach(function (p) {
-    var category = String(p["분류"] || "").trim();
-    if (category !== "판정보정") return;
+    var category   = String(p["분류"]    || "").trim();
+    var effectCode = String(p["효과코드"] || "").trim();
+    // 판정보정 패시브만 처리 (분류 또는 효과코드 중 하나가 "판정보정"이면 OK)
+    if (category !== "판정보정" && effectCode !== "판정보정") return;
 
     var trigger = String(p["발동"] || "").trim();
     if (trigger && trigger !== "판정계산전" && trigger !== "항상" && trigger !== "전체") return;
@@ -7364,7 +7456,7 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
     var cond = evaluateConditionList(p["조건"], ctx);
     if (!cond.ok) return;
 
-    var v = Math.floor(Number(p["수치"] || 0));
+    var v = Math.floor(Number(p["수치"] || 0)) + (cond.detailBonus || 0);
     if (!v) return;
     delta += v;
     lines.push("[패시브: " + (p["이름"] || p["key"]) + "]\n보정: " + formatSigned(v));
