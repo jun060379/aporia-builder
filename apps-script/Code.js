@@ -1012,31 +1012,48 @@ function _applyShieldEffects(rows, damage) {
   return { damage, logs };
 }
 
+// 패시브 수치 필드를 평가한다. 순수 숫자면 빠르게 반환, 아니면 수식으로 평가.
+function _evalPassiveValue(raw, vars) {
+  var s = String(raw == null ? "" : raw).trim();
+  if (!s) return 0;
+  var n = Number(s);
+  if (!isNaN(n)) return Math.floor(n);
+  var result = safeEvalFormula(s, vars || {});
+  if (result !== null && result !== undefined && !isNaN(Number(result))) {
+    return Math.floor(Number(result));
+  }
+  return 0;
+}
+
 // 피해보정 패시브 (분류=피해보정 또는 효과코드=피해보정) 적용.
 // 취약(damage 증가) 이후, 보호막(damage 흡수) 이전에 호출한다.
 function _applyPassiveDamageModifier(alias, damage) {
   const logs = [];
+  const debugLogs = [];
   try {
     const character = findCharacterByAlias(alias);
-    if (!character) return { damage, logs };
+    if (!character) { debugLogs.push("캐릭터 없음: " + alias); return { damage, logs, debugLogs }; }
 
     const passives = getCandidatePassivesForCharacter(character);
+    debugLogs.push("후보수=" + passives.length + " 캐릭터=" + alias);
     const ctx      = buildConditionContext(character, "");
+    debugLogs.push("현재체력비율=" + (ctx.vars["현재체력비율"] || 0));
     let delta = 0;
 
     passives.forEach(function (p) {
       const category   = String(p["분류"]    || "").trim();
       const effectCode = String(p["효과코드"] || "").trim();
-      if (category !== "피해보정" && effectCode !== "피해보정") return;
+      if (category !== "피해보정" && effectCode !== "피해보정") { debugLogs.push("분류불일치: 분류=" + category + " 효과코드=" + effectCode); return; }
 
       const trigger = String(p["발동"] || "").trim();
-      if (trigger && trigger !== "피해직전" && trigger !== "항상" && trigger !== "전체") return;
+      if (trigger && trigger !== "피해직전" && trigger !== "항상" && trigger !== "전체") { debugLogs.push("발동불일치: " + trigger); return; }
 
       const result = evaluateConditionList(p["조건"], ctx);
+      debugLogs.push("조건결과 ok=" + result.ok + " failed=" + JSON.stringify(result.failed));
       if (!result.ok) return;
 
-      const v = Math.floor(Number(p["수치"] || 0)) + (result.detailBonus || 0);
-      if (!v) return;
+      const v = _evalPassiveValue(p["수치"], ctx.vars) + (result.detailBonus || 0);
+      if (!v) { debugLogs.push("수치=0 스킵"); return; }
 
       delta += v;
       const bonusNote = result.detailBonus ? " (세부 +" + result.detailBonus + " 포함)" : "";
@@ -1044,9 +1061,9 @@ function _applyPassiveDamageModifier(alias, damage) {
     });
 
     damage = Math.max(0, damage + delta);
-  } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
+  } catch (_e) { debugLogs.push("오류: " + _e.message); }
 
-  return { damage, logs };
+  return { damage, logs, debugLogs };
 }
 
 // 회복보정 패시브 (분류=회복보정 또는 효과코드=회복보정) 적용.
@@ -1071,7 +1088,7 @@ function _applyPassiveHealingModifier(alias, amount) {
       const result = evaluateConditionList(p["조건"], ctx);
       if (!result.ok) return;
 
-      const v = Math.floor(Number(p["수치"] || 0)) + (result.detailBonus || 0);
+      const v = _evalPassiveValue(p["수치"], ctx.vars) + (result.detailBonus || 0);
       if (!v) return;
 
       delta += v;
@@ -1101,7 +1118,8 @@ function processPreDamageStatuses(alias, damageAmount) {
   damage              = shieldResult.damage;
 
   const logs = [...vulnResult.logs, ...passiveDmgResult.logs, ...shieldResult.logs];
-  return { damage, text: logs.join("\n\n") };
+  const debugLogs = passiveDmgResult.debugLogs || [];
+  return { damage, text: logs.join("\n\n"), debugText: debugLogs.join("\n") };
 }
 
 function applyDamageToCharacter(alias, damageAmount) {
@@ -1174,6 +1192,21 @@ function applyDamageToCharacter(alias, damageAmount) {
   const passivePreBlock  = passivePreText  ? "\n\n" + passivePreText  : "";
   const passivePostBlock = passivePostText ? "\n\n" + passivePostText : "";
 
+  const mainText =
+    "[피해 적용]\n" +
+    "대상: " + alias + "\n" +
+    "기본피해: " + originalDamage + "\n" +
+    "최종피해: " + damage + "\n" +
+    "현재체력: " + before + " → " + after + " / " + hp.maxHp +
+    modifierText +
+    passivePreBlock +
+    downText +
+    passivePostBlock;
+
+  const detailText = preDamage.debugText
+    ? mainText + "\n\n[패시브 디버그]\n" + preDamage.debugText
+    : "";
+
   return {
     ok: true,
     before: before,
@@ -1182,16 +1215,8 @@ function applyDamageToCharacter(alias, damageAmount) {
     originalDamage: originalDamage,
     damage: damage,
     modifierText: preDamage.text,
-    text:
-      "[피해 적용]\n" +
-      "대상: " + alias + "\n" +
-      "기본피해: " + originalDamage + "\n" +
-      "최종피해: " + damage + "\n" +
-      "현재체력: " + before + " → " + after + " / " + hp.maxHp +
-      modifierText +
-      passivePreBlock +
-      downText +
-      passivePostBlock
+    text: mainText,
+    detailText: detailText,
   };
 }
 
@@ -1206,7 +1231,10 @@ function damageApply(parts, displayName) {
   const alias = parts[1];
   const amount = parts[2];
 
-  return applyDamageToCharacter(alias, amount).text;
+  const result = applyDamageToCharacter(alias, amount);
+  if (!result.ok) return result.text;
+  if (result.detailText) return makeFoldedResponse(result.text, result.detailText);
+  return result.text;
 }
 
 function rollDie(sides) {
@@ -5440,10 +5468,18 @@ function readEffectNumber(value, context, fallback) {
   value = String(value || "").trim();
 
   if (!value) return fallback || 0;
-  if (value === "최종값") return context.finalValue;
+  if (value === "최종값") return (context && context.finalValue != null) ? context.finalValue : (fallback || 0);
 
   const n = Number(value);
-  return isNaN(n) ? (fallback || 0) : n;
+  if (!isNaN(n)) return n;
+
+  // 수식 평가 (스탯·스택·DB 변수 참조 가능)
+  var vars = (context && context.vars) ? context.vars : {};
+  if (context && context.finalValue != null) vars = Object.assign({}, vars, { 최종값: context.finalValue });
+  var result = safeEvalFormula(value, vars);
+  if (result !== null && result !== undefined && !isNaN(Number(result))) return Number(result);
+
+  return fallback || 0;
 }
 
 function parseResistanceMods(value) {
@@ -7115,7 +7151,8 @@ function getCandidatePassivesForCharacter(character) {
   var alias = String(character["별명"] || "").trim();
   var faction = String(character["소속"] || "").trim();
   var species = String(character["종족"] || "").trim();
-  var level = Number(character["레벨"] || 0);
+  var level;
+  try { level = readCharacterLevel(character); } catch (_e) { level = 99; }
 
   return rows.filter(function (p) {
     var name = String(p["이름"] || p["key"] || "").trim();
@@ -7130,8 +7167,8 @@ function getCandidatePassivesForCharacter(character) {
     if (owner === "species" && ownerKey && ownerKey !== species) return false;
     // global: 모두 통과
 
-    var unlock = Number(p["해금레벨"] || 1);
-    if (isNaN(unlock) || unlock < 1) unlock = 1;
+    var unlock = Number(p["해금레벨"]);
+    if (isNaN(unlock) || unlock < 0) unlock = 0;
     if (level < unlock) return false;
 
     return true;
@@ -7166,6 +7203,11 @@ function _parseDetailLine(raw) {
 function parseConditionList(conditionText) {
   var s = String(conditionText == null ? "" : conditionText).trim();
   if (!s) return { required: [], detail: [] };
+
+  // " / " is the PassiveMaker TSV newline substitute — treat as line break.
+  s = s.replace(/\s*\/\s*/g, "\n");
+  // "세부:" appearing mid-line (space-separated) — split before it.
+  s = s.replace(/\s+(?=세부\s*[:：])/gi, "\n");
 
   var required = [];
   var detail   = [];
@@ -7456,7 +7498,7 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
     var cond = evaluateConditionList(p["조건"], ctx);
     if (!cond.ok) return;
 
-    var v = Math.floor(Number(p["수치"] || 0)) + (cond.detailBonus || 0);
+    var v = _evalPassiveValue(p["수치"], ctx.vars) + (cond.detailBonus || 0);
     if (!v) return;
     delta += v;
     lines.push("[패시브: " + (p["이름"] || p["key"]) + "]\n보정: " + formatSigned(v));
@@ -7516,7 +7558,7 @@ function passiveListCommand(parts, displayName) {
   }
 
   var alias = String(character["별명"] || "").trim();
-  var level = Number(character["레벨"] || 0);
+  var level; try { level = readCharacterLevel(character); } catch (_e) { level = 99; }
   var faction = String(character["소속"] || "").trim();
   var species = String(character["종족"] || "").trim();
   var allRows = getAllPassiveRows();
@@ -7542,8 +7584,8 @@ function passiveListCommand(parts, displayName) {
       (owner === "species"   && (!ownerKey || ownerKey === species));
     if (!ownerMatch) return;
 
-    var unlock = Number(p["해금레벨"] || 1);
-    if (isNaN(unlock) || unlock < 1) unlock = 1;
+    var unlock = Number(p["해금레벨"]);
+    if (isNaN(unlock) || unlock < 0) unlock = 0;
 
     var summary = "Lv." + unlock + " " + name +
       (p["분류"] ? " / " + p["분류"] : "") +
@@ -9547,22 +9589,64 @@ function registerPortalCharacterData(payload, outputText, application) {
     skillResults.push(sName);
   }
 
+  // 4) 패시브 등록 (PASSIVE_SKILLS 직접 쓰기)
+  var passives = (payload && Array.isArray(payload.passives)) ? payload.passives : [];
+  var passiveResults = [];
+  var passiveWarnings = [];
+  if (passives.length > 0) {
+    try { ensurePassiveSheet(); } catch (_e) { /* noop */ }
+    for (var j = 0; j < passives.length; j++) {
+      var p = passives[j];
+      var pName = String(p["이름"] || p["key"] || ("(패시브 " + (j + 1) + ")"));
+      try {
+        appendRowByHeaders(SHEET_PASSIVE_SKILLS, {
+          key:      String(p["key"]      || ""),
+          이름:     String(p["이름"]     || ""),
+          소유타입: String(p["소유타입"] || "global"),
+          소유키:   String(p["소유키"]   || "*"),
+          해금레벨: String(p["해금레벨"] || "1"),
+          분류:     String(p["분류"]     || ""),
+          효과코드: String(p["효과코드"] || ""),
+          수치:     String(p["수치"]     || ""),
+          최대:     String(p["최대"]     || ""),
+          발동:     String(p["발동"]     || ""),
+          판정:     String(p["판정"]     || ""),
+          조건:     String(p["조건"]     || ""),
+          효과:     String(p["효과"]     || ""),
+          설명:     String(p["설명"]     || ""),
+          메모:     String(p["메모"]     || ""),
+        });
+        passiveResults.push(pName);
+      } catch (err) {
+        passiveWarnings.push("[" + pName + "] " + (err && err.message ? err.message : String(err)));
+      }
+    }
+  }
+
   try {
     Logger.log("[portal webhook] character_data registered alias=" + charName +
                " charId=" + charId +
                " skillsOk=" + skillResults.length +
-               " skillsWarn=" + skillWarnings.length);
+               " skillsWarn=" + skillWarnings.length +
+               " passivesOk=" + passiveResults.length);
   } catch (_) { /* noop */ }
 
   var msg = "[캐릭터 자동 등록 완료]\n" +
             "별명: " + charName + "\n" +
             "신청번호: " + charId + "\n" +
-            "등록된 스킬: " + skillResults.length + " / " + skillBlocks.length;
+            "등록된 스킬: " + skillResults.length + " / " + skillBlocks.length + "\n" +
+            "등록된 패시브: " + passiveResults.length + " / " + passives.length;
   if (skillResults.length > 0) {
-    msg += "\n- " + skillResults.join("\n- ");
+    msg += "\n\n[스킬]\n- " + skillResults.join("\n- ");
   }
   if (skillWarnings.length > 0) {
     msg += "\n\n[스킬 경고]\n- " + skillWarnings.join("\n- ");
+  }
+  if (passiveResults.length > 0) {
+    msg += "\n\n[패시브]\n- " + passiveResults.join("\n- ");
+  }
+  if (passiveWarnings.length > 0) {
+    msg += "\n\n[패시브 경고]\n- " + passiveWarnings.join("\n- ");
   }
 
   return {
@@ -9572,7 +9656,10 @@ function registerPortalCharacterData(payload, outputText, application) {
     registeredKey: charName,
     skillRegistered: skillResults.length,
     skillTotal: skillBlocks.length,
-    skillWarnings: skillWarnings
+    skillWarnings: skillWarnings,
+    passiveRegistered: passiveResults.length,
+    passiveTotal: passives.length,
+    passiveWarnings: passiveWarnings,
   };
 }
 

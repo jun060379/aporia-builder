@@ -34,11 +34,11 @@ function loadFromStorage() {
   }
 }
 
-function buildSaveData(char, stats, abilities, proficiencies, skills) {
+function buildSaveData(char, stats, abilities, proficiencies, skills, passives) {
   return {
     version: 1,
     savedAt: new Date().toISOString(),
-    char, stats, abilities, proficiencies, skills,
+    char, stats, abilities, proficiencies, skills, passives,
   };
 }
 
@@ -115,6 +115,7 @@ export default function App() {
   const [abilities, setAbilities] = useState(saved?.abilities     ?? defaultAbilities());
   const [proficiencies, setProficiencies] = useState(saved?.proficiencies ?? defaultProficiencies());
   const [skills, setSkills]       = useState(saved?.skills        ?? []);
+  const [passives, setPassives]   = useState(saved?.passives      ?? []);
   const [editingSkill, setEditingSkill] = useState(null);
   const [lastSaved, setLastSaved] = useState(saved?.savedAt       ?? null);
 
@@ -131,14 +132,14 @@ export default function App() {
 
   // ── auto-save ──
   useEffect(() => {
-    const data = buildSaveData(char, stats, abilities, proficiencies, skills);
+    const data = buildSaveData(char, stats, abilities, proficiencies, skills, passives);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     setLastSaved(data.savedAt);
-  }, [char, stats, abilities, proficiencies, skills]);
+  }, [char, stats, abilities, proficiencies, skills, passives]);
 
   // ── export ──
   const handleExport = useCallback(() => {
-    const data = buildSaveData(char, stats, abilities, proficiencies, skills);
+    const data = buildSaveData(char, stats, abilities, proficiencies, skills, passives);
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -146,7 +147,7 @@ export default function App() {
     a.download = char.name ? `aporia-${char.name}.json` : 'aporia-character.json';
     a.click();
     URL.revokeObjectURL(url);
-  }, [char, stats, abilities, proficiencies, skills]);
+  }, [char, stats, abilities, proficiencies, skills, passives]);
 
   // ── import ──
   const handleImport = useCallback((data) => {
@@ -155,7 +156,8 @@ export default function App() {
     if (data.stats)         setStats({ ...defaultStats(), ...data.stats });
     if (data.abilities)     setAbilities({ ...defaultAbilities(), ...data.abilities });
     if (data.proficiencies) setProficiencies({ ...defaultProficiencies(), ...data.proficiencies });
-    if (Array.isArray(data.skills)) setSkills(data.skills);
+    if (Array.isArray(data.skills))   setSkills(data.skills);
+    if (Array.isArray(data.passives)) setPassives(data.passives);
     setEditingSkill(null);
   }, []);
 
@@ -166,6 +168,7 @@ export default function App() {
     setAbilities(defaultAbilities());
     setProficiencies(defaultProficiencies());
     setSkills([]);
+    setPassives([]);
     setEditingSkill(null);
     localStorage.removeItem(STORAGE_KEY);
   }, []);
@@ -191,6 +194,14 @@ export default function App() {
 
   const handleCancelEdit = () => {
     setEditingSkill(null);
+  };
+
+  const handleSavePassive = (passive) => {
+    setPassives(prev => [...prev, { ...passive, id: Date.now() }]);
+  };
+
+  const handleRemovePassive = (id) => {
+    setPassives(prev => prev.filter(p => p.id !== id));
   };
 
   const handleApplyPreset = useCallback((presetStats, presetAbilities, presetProfs) => {
@@ -259,7 +270,7 @@ export default function App() {
           {leftTab === '스킬' && (
             <div className="space-y-3">
               <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} editingSkill={editingSkill} />
-              <SkillMaker editingSkill={editingSkill} stats={stats} abilities={abilities} proficiencies={proficiencies} onSave={handleSaveSkill} onCancel={handleCancelEdit} />
+              <SkillMaker editingSkill={editingSkill} stats={stats} abilities={abilities} proficiencies={proficiencies} onSave={handleSaveSkill} onCancel={handleCancelEdit} passives={passives} onSavePassive={handleSavePassive} onRemovePassive={handleRemovePassive} />
               <SkillList skills={skills} onEdit={handleEditSkill} onRemove={handleRemoveSkill} />
             </div>
           )}
@@ -284,7 +295,7 @@ export default function App() {
           {rightTab === '신청텍스트' && (
             <div className="space-y-3">
               <Checklist remaining={remaining} skills={skills} />
-              <SubmitApplicationPanel char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
+              <SubmitApplicationPanel char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} passives={passives} />
               <ApplicationText char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
             </div>
           )}

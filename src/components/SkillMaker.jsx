@@ -136,6 +136,13 @@ const PASSIVE_EFFECT_CODES = [
   '체력회복', '체력손상', '메시지', '기타'
 ];
 
+const PASSIVE_VALUE_TOKENS = [
+  { label: '근력', token: '근력' }, { label: '민첩', token: '민첩' },
+  { label: '내구', token: '내구' }, { label: '감각', token: '감각' }, { label: '지능', token: '지능' },
+  { label: 'HP%', token: '현재체력비율' }, { label: '침식', token: '이면침식' },
+  { label: '현재HP', token: '현재체력' }, { label: '최대HP', token: '최대체력' },
+];
+
 const EMPTY_PASSIVE = {
   key: '', 이름: '', 소유타입: 'global', 소유키: '*',
   해금레벨: '1', 분류: '판정보정', 효과코드: '판정보정',
@@ -281,7 +288,7 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
 }
 
 // ── PassiveForm — 패시브 작성 폼 ─────────────────────────────────────────
-function PassiveForm() {
+function PassiveForm({ passives, onSavePassive, onRemovePassive }) {
   const [row, setRow] = useState(EMPTY_PASSIVE);
   const [copyMsg, setCopyMsg] = useState('');
 
@@ -413,21 +420,44 @@ function PassiveForm() {
 
         {/* 수치 보정값 */}
         {catInfo.showValue && (
-          <div className="grid grid-cols-2 gap-2">
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-slate-500">
-                {row.분류 === '피해보정' ? '피해 보정 (음수=경감, 예: -5)' :
-                 row.분류 === '회복보정' ? '회복 보정 (양수=증가, 예: +10)' :
-                 row.분류 === '저항'     ? '저항 판정 보정 (예: +3)' :
-                                           '보정 수치'}
-              </span>
-              <input className={inputCls} value={row.수치} onChange={field('수치')} type="number"
-                placeholder={row.분류 === '피해보정' ? '-5' : row.분류 === '회복보정' ? '+10' : '+3'} />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-[11px] text-slate-500">최대값 (선택)</span>
-              <input className={inputCls} value={row.최대} onChange={field('최대')} type="number" placeholder="없음" />
-            </label>
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-500">
+                  {row.분류 === '피해보정' ? '피해 보정 (음수=경감)' :
+                   row.분류 === '회복보정' ? '회복 보정 (양수=증가)' :
+                   row.분류 === '저항'     ? '저항 판정 보정' :
+                                             '보정 수치'}
+                </span>
+                <input className={`${inputCls} font-mono`} value={row.수치} onChange={field('수치')}
+                  placeholder={row.분류 === '피해보정' ? '-5 또는 -근력/2' : row.분류 === '회복보정' ? '10 또는 내구+2' : '3 또는 감각'} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-500">최대값 (선택)</span>
+                <input className={`${inputCls} font-mono`} value={row.최대} onChange={field('최대')} placeholder="없음" />
+              </label>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[10px] text-slate-400">변수 삽입 (수치/최대 입력란에 커서 두고 클릭)</p>
+              <div className="flex flex-wrap gap-1">
+                {PASSIVE_VALUE_TOKENS.map(({ label, token }) => (
+                  <button key={token} type="button"
+                    onClick={() => setRow(r => ({ ...r, 수치: (r.수치 + (r.수치 && !r.수치.endsWith(' ') ? ' ' : '') + token).trimStart() }))}
+                    className="text-[10px] px-1.5 py-0.5 bg-slate-100 hover:bg-violet-100 text-slate-500 hover:text-violet-700 border border-slate-200 hover:border-violet-300 rounded transition-colors font-mono"
+                  >
+                    {label}
+                  </button>
+                ))}
+                {['+', '-', '*', '/'].map(op => (
+                  <button key={op} type="button"
+                    onClick={() => setRow(r => ({ ...r, 수치: r.수치 + ` ${op} ` }))}
+                    className="text-[10px] px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-400 border border-slate-200 rounded font-mono transition-colors"
+                  >
+                    {op}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
@@ -513,25 +543,55 @@ function PassiveForm() {
         </div>
       )}
 
-      {/* ── TSV 출력 ── */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <span className="text-[11px] text-slate-500 tracking-wide">TSV (PASSIVE_SKILLS 시트 붙여넣기용)</span>
-            <p className="text-[10px] text-slate-400">헤더: key | 이름 | 소유타입 | 소유키 | 해금레벨 | 분류 | 효과코드 | 수치 | 최대 | 발동 | 판정 | 조건 | 효과 | 설명 | 메모</p>
-          </div>
-          <button
-            onClick={copy}
-            disabled={errors.length > 0}
-            className="shrink-0 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-xs font-medium transition-colors"
-          >
-            {copyMsg || 'TSV 복사'}
-          </button>
-        </div>
-        <pre className="bg-slate-800 text-slate-100 rounded-xl p-3 text-[11px] font-mono break-all whitespace-pre-wrap overflow-x-auto leading-relaxed">
-          {errors.length > 0 ? '(필수 항목을 모두 채워주세요)' : tsv}
-        </pre>
+      {/* ── 추가 버튼 ── */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => { onSavePassive({ ...row }); setRow(EMPTY_PASSIVE); }}
+          disabled={errors.length > 0}
+          className="flex-1 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white font-bold rounded-xl text-sm transition-colors shadow-sm shadow-violet-200"
+        >
+          패시브 추가
+        </button>
+        <button
+          onClick={() => setRow(EMPTY_PASSIVE)}
+          className="px-4 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 rounded-xl text-sm transition-colors"
+        >
+          초기화
+        </button>
+        <button
+          onClick={copy}
+          disabled={errors.length > 0}
+          title="시트에 직접 붙여넣기용 TSV 복사"
+          className="px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-400 hover:text-slate-600 rounded-xl text-xs transition-colors"
+        >
+          {copyMsg || 'TSV'}
+        </button>
       </div>
+
+      {/* ── 추가된 패시브 목록 ── */}
+      {passives && passives.length > 0 && (
+        <div className="space-y-2 border-t border-slate-100 pt-4">
+          <p className="text-[11px] font-semibold text-slate-600">추가된 패시브 <span className="text-slate-400 font-normal">{passives.length}개</span></p>
+          {passives.map((p) => (
+            <div key={p.id} className="flex items-center justify-between gap-2 bg-slate-50 rounded-xl border border-slate-100 px-3 py-2">
+              <div className="min-w-0">
+                <span className="text-sm font-semibold text-slate-800">{p.이름 || '(이름 없음)'}</span>
+                <div className="flex flex-wrap gap-1 mt-0.5">
+                  <span className="text-[10px] text-violet-600 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{p.분류}</span>
+                  <span className="text-[10px] text-slate-500 font-mono">{p.key}</span>
+                  {p.수치 && <span className="text-[10px] text-slate-500">수치: {p.수치}</span>}
+                </div>
+              </div>
+              <button
+                onClick={() => onRemovePassive(p.id)}
+                className="shrink-0 text-xs px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 rounded-lg transition-colors"
+              >
+                삭제
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -813,7 +873,7 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
 }
 
 // ── 메인 export — 모드 탭 포함 ─────────────────────────────────────────
-export default function SkillMaker({ editingSkill, stats, abilities, proficiencies, onSave, onCancel }) {
+export default function SkillMaker({ editingSkill, stats, abilities, proficiencies, onSave, onCancel, passives, onSavePassive, onRemovePassive }) {
   // 편집 중일 때는 스킬 모드 고정
   const [mode, setMode] = useState('skill');
 
@@ -871,7 +931,7 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
           onCancel={onCancel}
         />
       ) : (
-        <PassiveForm />
+        <PassiveForm passives={passives} onSavePassive={onSavePassive} onRemovePassive={onRemovePassive} />
       )}
     </div>
   );

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5000",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy:script": "cd apps-script && clasp push && clasp deploy -i AKfycbx1IdggVhDAwKriaoO3Ac33M81QiPsvo4tLvyiH2YV8ApKaN6zorz2Y5iyU-e7Q242P"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.1",

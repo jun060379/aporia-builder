@@ -40,8 +40,30 @@ export function buildSkillText(sk) {
   ].join('\n');
 }
 
-export function buildFullApplicationText({ char, stats, abilities, proficiencies, skills }) {
+export function buildPassiveText(p) {
+  return [
+    '!패시브등록',
+    `key: ${p.key}`,
+    `이름: ${p.이름}`,
+    `소유타입: ${p.소유타입}`,
+    `소유키: ${p.소유키}`,
+    `해금레벨: ${p.해금레벨}`,
+    `분류: ${p.분류}`,
+    `효과코드: ${p.효과코드}`,
+    `수치: ${p.수치}`,
+    `최대: ${p.최대}`,
+    `발동: ${p.발동}`,
+    `판정: ${p.판정}`,
+    `조건: ${p.조건}`,
+    `효과: ${p.효과}`,
+    `설명: ${p.설명}`,
+    `메모: ${p.메모}`,
+  ].join('\n');
+}
+
+export function buildFullApplicationText({ char, stats, abilities, proficiencies, skills, passives }) {
   const parts = [buildCharacterText({ char, stats, abilities, proficiencies })];
   (skills || []).forEach((sk) => parts.push(buildSkillText(sk)));
+  (passives || []).forEach((p) => parts.push(buildPassiveText(p)));
   return parts.join('\n\n');
 }

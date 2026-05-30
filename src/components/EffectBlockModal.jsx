@@ -201,13 +201,14 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
                 )}
               </div>
               <div className="grid grid-cols-3 gap-2">
-                {[['수치','value'], ['횟수','count'], ['최대','max']].map(([lbl, key]) => (
+                {[['수치','value','0'], ['횟수','count','1'], ['최대','max','']].map(([lbl, key, ph]) => (
                   <label key={key} className="flex flex-col gap-1">
                     <span className="text-[11px] text-slate-500">{lbl}</span>
-                    <input className={inputCls} type="number" value={params[key] || ''} onChange={e => setParam(key, e.target.value)} placeholder="0" />
+                    <input className={`${inputCls} font-mono`} value={params[key] || ''} onChange={e => setParam(key, e.target.value)} placeholder={ph} />
                   </label>
                 ))}
               </div>
+              <p className="text-[10px] text-slate-400">수치·최대에 수식 가능: 근력, 스택_혈인, 이면침식 등</p>
               <ResistSection params={params} setParam={setParam} />
             </div>
           )}
@@ -289,15 +290,16 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
               <div className="grid grid-cols-2 gap-2">
                 <label className="flex flex-col gap-1">
                   <span className="text-[11px] text-slate-500">값</span>
-                  <input className={inputCls} type="number" value={params.value || ''} onChange={e => setParam('value', e.target.value)} placeholder="0" />
+                  <input className={`${inputCls} font-mono`} value={params.value || ''} onChange={e => setParam('value', e.target.value)} placeholder="1 또는 스택_혈인" />
                 </label>
                 {params.changeType !== '감소' && (
                   <label className="flex flex-col gap-1">
                     <span className="text-[11px] text-slate-500">최대</span>
-                    <input className={inputCls} type="number" value={params.max || ''} onChange={e => setParam('max', e.target.value)} placeholder="0" />
+                    <input className={`${inputCls} font-mono`} value={params.max || ''} onChange={e => setParam('max', e.target.value)} placeholder="5 또는 근력" />
                   </label>
                 )}
               </div>
+              <p className="text-[10px] text-slate-400">수식 가능: 근력, 스택_혈인, 이면침식, 최종값 등</p>
             </div>
           )}
 

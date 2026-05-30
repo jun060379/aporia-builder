@@ -4,7 +4,7 @@ import { useAuth } from '../auth/AuthContext.jsx';
 import { createApplication } from '../lib/applications';
 import { buildFullApplicationText } from '../utils/applicationText';
 
-export default function SubmitApplicationPanel({ char, stats, abilities, proficiencies, skills }) {
+export default function SubmitApplicationPanel({ char, stats, abilities, proficiencies, skills, passives }) {
   const { user } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -16,13 +16,14 @@ export default function SubmitApplicationPanel({ char, stats, abilities, profici
     setSubmitting(true);
     try {
       const title = (char?.name && String(char.name).trim()) || '이름 없는 캐릭터 데이터';
-      const outputText = buildFullApplicationText({ char, stats, abilities, proficiencies, skills });
+      const outputText = buildFullApplicationText({ char, stats, abilities, proficiencies, skills, passives });
       const payload = {
         char,
         stats,
         abilities,
         proficiencies,
         skills,
+        passives: passives || [],
         level: char?.level,
         species: char?.race,
         faction: char?.faction || '무소속',
