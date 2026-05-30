@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { SKILL_TRADITIONS, SKILL_SERIES, SKILL_RANKS, defaultSkill, makeEffect } from '../data/skillRanks';
 import {
   validateFormula,
@@ -14,6 +14,11 @@ import FormulaBlockModal from './FormulaBlockModal';
 import EffectBlockModal from './EffectBlockModal';
 import ConditionEditor from './ConditionEditor.jsx';
 
+// ── 스타일 상수 ─────────────────────────────────────────────────────────
+const inputCls  = "w-full min-w-0 bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
+const selectCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 outline-none transition-colors";
+
+// ── 효과 블럭 레이블 ────────────────────────────────────────────────────
 const EFFECT_TYPE_LABEL = {
   template:     '상태 템플릿 부여',
   custom:       '커스텀 상태 부여',
@@ -22,6 +27,7 @@ const EFFECT_TYPE_LABEL = {
   free:         '자유 입력',
 };
 
+// ── 계산식 입력 지원 데이터 ─────────────────────────────────────────────
 const OPERATORS = [
   { op: '+', label: '+', tip: '더하기' },
   { op: '-', label: '-', tip: '빼기' },
@@ -41,16 +47,45 @@ const QUICK_COMBOS = [
 ];
 
 const FORMULA_CATEGORIES = [
-  { id: '기본',     tokens: ['d6', 'd20', '2d6', 'd100', '랭크'] },
-  { id: '스탯',     tokens: STAT_NAMES },
-  { id: '기능',     tokens: ABILITY_NAMES },
-  { id: '숙련',     tokens: PROFICIENCY_NAMES },
+  { id: '기본',      tokens: ['d6', 'd20', '2d6', 'd100', '랭크'] },
+  { id: '스탯',      tokens: STAT_NAMES },
+  { id: '기능',      tokens: ABILITY_NAMES },
+  { id: '숙련',      tokens: PROFICIENCY_NAMES },
   { id: '상태/스택', tokens: ['상태_출혈_수치', '대상상태_출혈_수치', '스택_혈인', '대상스택_표식'] },
-  { id: '고급',     tokens: ['현재체력', '최대체력', '이면침식', '일상점'] },
+  { id: '고급',      tokens: ['현재체력', '최대체력', '현재체력비율', '이면침식', '일상점'] },
 ];
 
-const inputCls = "w-full min-w-0 bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
-const selectCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 outline-none transition-colors";
+// ── 패시브 전용 상수 (Code.js PASSIVE_SKILLS 시트 컬럼 기준) ───────────
+const PASSIVE_HEADERS = [
+  'key','이름','소유타입','소유키','해금레벨','분류','효과코드',
+  '수치','최대','발동','판정','조건','효과','설명','메모'
+];
+const PASSIVE_OWNER_TYPES = [
+  { value: 'global',    label: '공용 (모든 캐릭터)' },
+  { value: 'character', label: '캐릭터 (특정 별명)' },
+  { value: 'faction',   label: '소속 (파벌/조직)' },
+  { value: 'species',   label: '종족' },
+];
+const PASSIVE_CATEGORIES = ['판정보정', '피해보정', '회복보정', '저항', '트리거효과', '기타'];
+const PASSIVE_TRIGGERS = [
+  '항상', '판정계산전', '판정시작', '판정후',
+  '피해직전', '피해후', '세션종료', '수동'
+];
+const PASSIVE_EFFECT_CODES = [
+  '판정보정', '피해보정', '회복보정', '저항확률',
+  '상태부여', '상태해제', '스택증가', '스택감소',
+  '체력회복', '체력손상', '메시지', '기타'
+];
+const PASSIVE_CHECK_TYPES = ['전체', '스탯', '액션', '이능', '스킬', '대응'];
+
+const EMPTY_PASSIVE = {
+  key: '', 이름: '', 소유타입: 'global', 소유키: '*',
+  해금레벨: '1', 분류: '판정보정', 효과코드: '판정보정',
+  수치: '', 최대: '', 발동: '판정계산전', 판정: '',
+  조건: '', 효과: '', 설명: '', 메모: ''
+};
+
+// ── 공통 서브 컴포넌트 ──────────────────────────────────────────────────
 
 function FormulaPreview({ formula, stats, rank, abilities, proficiencies }) {
   if (!formula.trim()) return null;
@@ -96,16 +131,9 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
   const warnings = getEffectWarnings(effect);
   const hasText = !!effect.generatedText;
 
-  const handleInsert = (type, params, text) => {
-    onUpdate({ ...effect, type, params, generatedText: text });
-    setModalOpen(false);
-  };
-
   return (
     <div className={`rounded-xl border p-3 space-y-2 transition-colors ${
-      effect.confirmed
-        ? 'bg-emerald-50 border-emerald-200'
-        : 'bg-slate-50 border-slate-200'
+      effect.confirmed ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'
     }`}>
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className="text-[10px] text-slate-400 font-mono shrink-0">효과 {index + 1}</span>
@@ -126,56 +154,43 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
             className="w-6 h-6 flex items-center justify-center rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-500 text-xs border border-rose-200 transition-colors">✕</button>
         </div>
       </div>
-
       {hasText && (
         <div className={`rounded-lg p-2 text-xs font-mono break-all whitespace-pre-wrap ${
           effect.confirmed
             ? 'bg-white text-emerald-700 border border-emerald-200'
             : 'bg-white text-indigo-700 border border-indigo-100'
-        }`}>
-          {effect.generatedText}
-        </div>
+        }`}>{effect.generatedText}</div>
       )}
-
       {warnings.length > 0 && (
         <div className="space-y-0.5">
-          {warnings.map((w, i) => (
-            <p key={i} className="text-xs text-amber-600">⚠ {w}</p>
-          ))}
+          {warnings.map((w, i) => <p key={i} className="text-xs text-amber-600">⚠ {w}</p>)}
         </div>
       )}
-
       {!effect.confirmed ? (
         <div className="flex flex-wrap gap-1.5">
           <button onClick={() => setModalOpen(true)}
-            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-lg text-xs font-medium transition-colors">
-            블럭 선택
-          </button>
+            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-lg text-xs font-medium transition-colors">블럭 선택</button>
           {hasText && (
             <button onClick={() => onUpdate({ ...effect, confirmed: true })}
-              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-medium transition-colors">
-              확정
-            </button>
+              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-medium transition-colors">확정</button>
           )}
         </div>
       ) : (
         <div className="flex flex-wrap gap-1.5">
           <button onClick={() => setModalOpen(true)}
-            className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 rounded-lg text-xs font-medium transition-colors">
-            편집
-          </button>
+            className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-600 rounded-lg text-xs font-medium transition-colors">편집</button>
           <button onClick={() => onUpdate({ ...effect, confirmed: false })}
-            className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-500 rounded-lg text-xs font-medium transition-colors">
-            확정 해제
-          </button>
+            className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-500 rounded-lg text-xs font-medium transition-colors">확정 해제</button>
         </div>
       )}
-
       {modalOpen && (
         <EffectBlockModal
           initialType={effect.type || 'template'}
           initialParams={effect.params || {}}
-          onInsert={handleInsert}
+          onInsert={(type, params, text) => {
+            onUpdate({ ...effect, type, params, generatedText: text });
+            setModalOpen(false);
+          }}
           onClose={() => setModalOpen(false)}
         />
       )}
@@ -183,15 +198,203 @@ function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMove
   );
 }
 
-const HELP_ITEMS = [
-  { title: '기본 형식', desc: 'd20 + 랭크 + 스탯 (예: d20 + 랭크 + 근력)이 기본 판정식입니다.' },
-  { title: '효과 줄 단위 처리', desc: '효과는 블럭 단위로 등록되며, 각 블럭이 독립적인 효과로 신청됩니다.' },
-  { title: '자유 입력 검수', desc: '자유 입력(free) 효과는 운영진 수동 검수 대상입니다. 가능하면 템플릿을 사용하세요.' },
-  { title: '대상 참조 변수', desc: '대상상태_ 또는 대상스택_ 변수를 쓰는 경우, 조건 칸에 "대상 지정 필요"를 명시해야 합니다.' },
-  { title: '이면침식 변수', desc: '이면침식 변수를 포함하면 침식 0/6/9 기대값이 미리보기에 자동 표시됩니다.' },
-];
+// ── PassiveForm — 패시브 작성 폼 ─────────────────────────────────────────
+function PassiveForm() {
+  const [row, setRow] = useState(EMPTY_PASSIVE);
+  const [copyMsg, setCopyMsg] = useState('');
 
-export default function SkillMaker({ editingSkill, stats, abilities, proficiencies, onSave, onCancel }) {
+  const field = (k) => (e) => setRow(r => ({ ...r, [k]: e.target.value }));
+
+  // 효과 텍스트를 effects 블럭으로 편집 (SkillMaker와 동일한 방식)
+  // 여기서는 간단히 텍스트 영역으로 처리 (processSkillEffects 호환 DSL)
+  const tsv = useMemo(() => {
+    return PASSIVE_HEADERS
+      .map(h => String(row[h] ?? '').replace(/\t/g, ' ').replace(/\r?\n/g, ' ').trim())
+      .join('\t');
+  }, [row]);
+
+  const errors = useMemo(() => {
+    const errs = [];
+    if (!row.key.trim())   errs.push('key는 필수입니다 (영소문자 + 밑줄 권장).');
+    if (/\s/.test(row.key.trim())) errs.push('key에 공백을 사용할 수 없습니다.');
+    if (!row.이름.trim())  errs.push('이름은 필수입니다.');
+    if (row.소유타입 !== 'global' && !row.소유키.trim()) errs.push('global 이외에는 소유키가 필요합니다.');
+    if (!row.분류)         errs.push('분류는 필수입니다.');
+    if (!row.발동)         errs.push('발동 시점은 필수입니다.');
+    return errs;
+  }, [row]);
+
+  async function copy() {
+    try { await navigator.clipboard.writeText(tsv); setCopyMsg('복사됨!'); }
+    catch { setCopyMsg('복사 실패'); }
+    setTimeout(() => setCopyMsg(''), 1500);
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* 안내 */}
+      <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 text-[11px] text-indigo-900 leading-relaxed">
+        <p className="font-semibold text-indigo-700 mb-1">패시브 제작기</p>
+        <p>아래 양식을 작성하면 하단에 <strong>TSV 한 줄</strong>이 생성됩니다.</p>
+        <p>Google Sheets <code className="bg-white px-1 rounded">PASSIVE_SKILLS</code> 시트 마지막 행에 붙여넣으세요.</p>
+        <p className="mt-1 text-indigo-600 font-semibold">
+          발동 트리거: 항상 / 판정계산전 / 판정시작 / 판정후 / 피해직전 / 피해후 / 세션종료<br />
+          조건은 아래 조건 편집기를 사용하세요 (필수/세부 모두 지원).
+        </p>
+      </div>
+
+      {/* ── 기본 정보 ── */}
+      <div className="space-y-3 bg-slate-50 rounded-xl border border-slate-200 p-4">
+        <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">기본 정보</span>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-500">key <span className="text-rose-400">*</span></span>
+            <input className={inputCls} value={row.key} onChange={field('key')} placeholder="예: dodge_master" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-500">이름 <span className="text-rose-400">*</span></span>
+            <input className={inputCls} value={row.이름} onChange={field('이름')} placeholder="예: 회피의 달인" />
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-500">소유 타입</span>
+            <select className={selectCls} value={row.소유타입} onChange={field('소유타입')}>
+              {PASSIVE_OWNER_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-500">소유 키</span>
+            <input
+              className={inputCls}
+              value={row.소유키}
+              onChange={field('소유키')}
+              placeholder={row.소유타입 === 'global' ? '* (공용)' : '별명/소속/종족명'}
+              disabled={row.소유타입 === 'global'}
+            />
+          </label>
+        </div>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-slate-500">해금 레벨</span>
+          <input className={inputCls} value={row.해금레벨} onChange={field('해금레벨')} placeholder="1" type="number" min="1" />
+        </label>
+      </div>
+
+      {/* ── 분류 / 발동 ── */}
+      <div className="space-y-3 bg-slate-50 rounded-xl border border-slate-200 p-4">
+        <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">분류 / 발동</span>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-500">분류 <span className="text-rose-400">*</span></span>
+            <select className={selectCls} value={row.분류} onChange={field('분류')}>
+              {PASSIVE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-500">효과 코드</span>
+            <select className={selectCls} value={row.효과코드} onChange={field('효과코드')}>
+              {PASSIVE_EFFECT_CODES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-500">발동 시점 <span className="text-rose-400">*</span></span>
+            <select className={selectCls} value={row.발동} onChange={field('발동')}>
+              {PASSIVE_TRIGGERS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-500">대상 판정 유형</span>
+            <select className={selectCls} value={row.판정} onChange={field('판정')}>
+              {PASSIVE_CHECK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-500">수치</span>
+            <input className={inputCls} value={row.수치} onChange={field('수치')} placeholder="예: 3 (판정보정 +3)" type="number" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-500">최대</span>
+            <input className={inputCls} value={row.최대} onChange={field('최대')} placeholder="수치 최대값" type="number" />
+          </label>
+        </div>
+      </div>
+
+      {/* ── 조건 ── */}
+      <div className="space-y-2">
+        <span className="text-[11px] text-slate-500 tracking-wide">조건</span>
+        <ConditionEditor
+          value={row.조건}
+          onChange={v => setRow(r => ({ ...r, 조건: v }))}
+          placeholder="발동 조건 (없으면 비워두세요)"
+        />
+      </div>
+
+      {/* ── 효과 (트리거효과 분류 시 사용) ── */}
+      <label className="flex flex-col gap-1">
+        <span className="text-[11px] text-slate-500">효과 DSL</span>
+        <p className="text-[10px] text-slate-400">분류=트리거효과일 때 processSkillEffects DSL 입력. 예: 상태부여 자신 집중 버프 enhance 수치:3 횟수:1</p>
+        <textarea
+          className={`${inputCls} h-20 resize-none font-mono`}
+          value={row.효과}
+          onChange={field('효과')}
+          placeholder={'상태부여 자신 집중 버프 enhance 수치:3 횟수:1\n스택증가 자신 혈인 1 최대:5'}
+        />
+      </label>
+
+      {/* 설명 / 메모 */}
+      <div className="grid grid-cols-1 gap-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-slate-500">설명</span>
+          <textarea className={`${inputCls} h-14 resize-none`} value={row.설명} onChange={field('설명')} placeholder="패시브 설명" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-slate-500">메모 (내부용)</span>
+          <input className={inputCls} value={row.메모} onChange={field('메모')} placeholder="관리 메모" />
+        </label>
+      </div>
+
+      {/* 오류 */}
+      {errors.length > 0 && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 space-y-0.5">
+          {errors.map((e, i) => <p key={i} className="text-xs text-rose-700">⚠ {e}</p>)}
+        </div>
+      )}
+
+      {/* TSV 출력 */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-slate-500 tracking-wide">생성된 TSV (시트 붙여넣기용)</span>
+          <button
+            onClick={copy}
+            disabled={errors.length > 0}
+            className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-xs font-medium transition-colors"
+          >
+            {copyMsg || '복사'}
+          </button>
+        </div>
+        <pre className="bg-slate-800 text-slate-100 rounded-xl p-3 text-[11px] font-mono break-all whitespace-pre-wrap overflow-x-auto leading-relaxed">
+          {errors.length > 0 ? '(필수 항목을 채워주세요)' : tsv}
+        </pre>
+        <p className="text-[10px] text-slate-400">
+          PASSIVE_SKILLS 시트 헤더 순서: {PASSIVE_HEADERS.join(' | ')}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── SkillForm — 기존 스킬 작성 폼 ──────────────────────────────────────
+function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCancel }) {
   const [skill, setSkill] = useState(() => {
     const s = editingSkill || defaultSkill();
     return { ...s, effects: s.effects ?? [] };
@@ -220,21 +423,13 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
     setSkill(s => ({ ...s, formula: s.formula + ` ${op} ` }));
   };
 
-  const applyQuickCombo = (formula) => {
-    setSkill(s => ({ ...s, formula }));
-  };
+  const addEffect = () => setSkill(s => ({ ...s, effects: [...s.effects, makeEffect()] }));
 
-  const addEffect = () => {
-    setSkill(s => ({ ...s, effects: [...s.effects, makeEffect()] }));
-  };
-
-  const updateEffect = (id, updated) => {
+  const updateEffect = (id, updated) =>
     setSkill(s => ({ ...s, effects: s.effects.map(e => e.id === id ? updated : e) }));
-  };
 
-  const deleteEffect = (id) => {
+  const deleteEffect = (id) =>
     setSkill(s => ({ ...s, effects: s.effects.filter(e => e.id !== id) }));
-  };
 
   const moveEffect = (idx, dir) => {
     setSkill(s => {
@@ -246,57 +441,13 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
     });
   };
 
-  const tokenErrors     = validateFormula(skill.formula);
-  const structureWarns  = validateFormulaStructure(skill.formula);
-  const needsTarget     = hasTargetReference(skill.formula);
+  const tokenErrors    = validateFormula(skill.formula);
+  const structureWarns = validateFormulaStructure(skill.formula);
+  const needsTarget    = hasTargetReference(skill.formula);
   const allFormulaIssues = [...tokenErrors, ...structureWarns];
 
   return (
-    <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-slate-200/70 shadow-lg shadow-violet-100/20 p-5 space-y-4">
-
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2 flex-wrap">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] text-violet-300 font-mono tracking-widest">05</span>
-            <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">
-              {editingSkill ? '스킬 편집' : '스킬 메이커'}
-            </h2>
-            {editingSkill && (
-              <span className="text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">편집 중</span>
-            )}
-          </div>
-          <p className="text-[11px] text-slate-400 leading-relaxed">스킬의 판정식과 효과를 신청 양식에 맞춰 제작합니다.</p>
-        </div>
-        <button
-          onClick={() => setHelpOpen(v => !v)}
-          className={`shrink-0 text-[11px] px-2.5 py-1 rounded-lg border font-medium transition-colors ${
-            helpOpen
-              ? 'bg-amber-50 border-amber-200 text-amber-700'
-              : 'bg-slate-50 border-slate-200 text-slate-500 hover:border-amber-300 hover:text-amber-600'
-          }`}
-        >
-          {helpOpen ? '도움말 닫기' : '? 도움말'}
-        </button>
-      </div>
-
-      {/* 도움말 박스 */}
-      {helpOpen && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
-          <p className="text-[10px] text-amber-600 font-semibold uppercase tracking-widest">스킬 메이커 도움말</p>
-          <ul className="space-y-2">
-            {HELP_ITEMS.map(({ title, desc }) => (
-              <li key={title} className="flex gap-2 text-xs">
-                <span className="text-amber-500 shrink-0 mt-0.5">•</span>
-                <span>
-                  <span className="font-semibold text-amber-800">{title}:</span>{' '}
-                  <span className="text-amber-700 leading-relaxed">{desc}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+    <div className="space-y-4">
 
       {/* 스킬명 */}
       <label className="flex flex-col gap-1">
@@ -340,7 +491,7 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
         </div>
       </div>
 
-      {/* ── 계산식 섹션 ── */}
+      {/* ── 계산식 ── */}
       <div className="space-y-3 bg-slate-50 rounded-xl border border-slate-200 p-4">
         <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">계산식</span>
 
@@ -353,16 +504,13 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
 
         {allFormulaIssues.length > 0 && (
           <div className="space-y-0.5">
-            {allFormulaIssues.map((e, i) => (
-              <p key={i} className="text-xs text-amber-600">⚠ {e}</p>
-            ))}
+            {allFormulaIssues.map((e, i) => <p key={i} className="text-xs text-amber-600">⚠ {e}</p>)}
           </div>
         )}
         {needsTarget && (
           <p className="text-xs text-amber-600">⚠ 이 계산식은 대상 지정이 필요합니다. 사용 예: !스킬 스킬명 대상:대상별명</p>
         )}
 
-        {/* 빠른 삽입 (카테고리별) */}
         <div className="space-y-2">
           <p className="text-[10px] text-slate-400 tracking-widest uppercase">빠른 삽입</p>
           <div className="flex flex-wrap gap-1">
@@ -372,7 +520,7 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
                 onClick={() => setFormulaCat(cat.id)}
                 className={`px-2 py-0.5 rounded-lg text-[11px] font-medium border transition-colors ${
                   formulaCat === cat.id
-                    ? 'bg-violet-600 text-white border-violet-600 shadow-sm shadow-violet-200/50'
+                    ? 'bg-violet-600 text-white border-violet-600'
                     : 'bg-white text-slate-500 border-slate-200 hover:border-violet-300 hover:text-violet-700'
                 }`}
               >
@@ -391,9 +539,6 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
               </button>
             ))}
           </div>
-          {formulaCat === '상태/스택' && (
-            <p className="text-[10px] text-amber-600">⚠ 예시 토큰입니다. 직접 편집하거나 아래 고급 블럭 선택기로 커스텀하세요.</p>
-          )}
           {formulaCat === '고급' && (
             <p className="text-[10px] text-amber-600">⚠ 고급 변수는 캐릭터 DB를 참조합니다. 운영진 검수 대상입니다.</p>
           )}
@@ -405,7 +550,6 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
           </button>
         </div>
 
-        {/* 연산자 */}
         <div className="space-y-1.5">
           <p className="text-[10px] text-slate-400 tracking-widest uppercase">연산자</p>
           <div className="flex flex-wrap gap-1.5">
@@ -423,14 +567,13 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
           </div>
         </div>
 
-        {/* 빠른 조합 */}
         <div className="space-y-1.5">
           <p className="text-[10px] text-slate-400 tracking-widest uppercase">빠른 조합</p>
           <div className="flex flex-wrap gap-1">
             {QUICK_COMBOS.map(({ label, formula }) => (
               <button
                 key={label}
-                onClick={() => applyQuickCombo(formula)}
+                onClick={() => setSkill(s => ({ ...s, formula }))}
                 title={formula}
                 className="px-2 py-1 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 text-slate-500 hover:text-indigo-700 rounded-lg text-xs transition-colors"
               >
@@ -450,11 +593,9 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
           <span className="text-[11px] text-slate-500 tracking-wide">효과 목록</span>
           <span className="text-[11px] text-slate-400 font-mono">{skill.effects.length}개</span>
         </div>
-
         {skill.effects.length === 0 && (
           <p className="text-xs text-slate-400 italic py-1">효과가 없습니다. 아래 버튼으로 추가하세요.</p>
         )}
-
         <div className="space-y-2">
           {skill.effects.map((ef, idx) => (
             <EffectCard
@@ -469,7 +610,6 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
             />
           ))}
         </div>
-
         <button
           onClick={addEffect}
           className="w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-xl border border-dashed border-slate-300 hover:border-indigo-300 text-sm transition-colors"
@@ -478,7 +618,7 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
         </button>
       </div>
 
-      {/* 조건 / 대가 / 설명 */}
+      {/* 조건 */}
       <div className="space-y-1">
         <span className="text-[11px] text-slate-500 tracking-wide">조건</span>
         <ConditionEditor
@@ -525,6 +665,71 @@ export default function SkillMaker({ editingSkill, stats, abilities, proficienci
           onInsert={insertFormula}
           onClose={() => setFormulaModalOpen(false)}
         />
+      )}
+    </div>
+  );
+}
+
+// ── 메인 export — 모드 탭 포함 ─────────────────────────────────────────
+export default function SkillMaker({ editingSkill, stats, abilities, proficiencies, onSave, onCancel }) {
+  // 편집 중일 때는 스킬 모드 고정
+  const [mode, setMode] = useState('skill');
+
+  const MODES = [
+    { id: 'skill',   label: '스킬 제작' },
+    { id: 'passive', label: '패시브 제작' },
+  ];
+
+  return (
+    <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-slate-200/70 shadow-lg shadow-violet-100/20 p-5 space-y-4">
+
+      {/* 헤더 */}
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] text-violet-300 font-mono tracking-widest">05</span>
+            <h2 className="text-sm font-semibold text-slate-700 tracking-wide uppercase">
+              스킬 / 패시브 메이커
+            </h2>
+            {editingSkill && (
+              <span className="text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">편집 중</span>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-400 leading-relaxed">스킬과 패시브를 제작합니다.</p>
+        </div>
+      </div>
+
+      {/* 모드 탭 — 편집 중에는 숨김 */}
+      {!editingSkill && (
+        <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
+          {MODES.map(m => (
+            <button
+              key={m.id}
+              onClick={() => setMode(m.id)}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                mode === m.id
+                  ? 'bg-white text-violet-700 shadow-sm border border-slate-200/60'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 폼 본문 */}
+      {(mode === 'skill' || editingSkill) ? (
+        <SkillForm
+          editingSkill={editingSkill}
+          stats={stats}
+          abilities={abilities}
+          proficiencies={proficiencies}
+          onSave={onSave}
+          onCancel={onCancel}
+        />
+      ) : (
+        <PassiveForm />
       )}
     </div>
   );

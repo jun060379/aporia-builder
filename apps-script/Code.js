@@ -121,6 +121,45 @@ const FALLBACK_SKILL_COST = {
   F: 1
 };
 
+// ── 공격/판정 유형 상수 ────────────────────────────────────────────────
+// processStatusBeforeCheck, applyStatusModifierToValue, COMBAT_PENDING 공격종류 필드에 공통 사용.
+var KIND_STAT         = "스탯";
+var KIND_ACTION       = "액션";
+var KIND_POWER        = "이능";
+var KIND_SKILL        = "스킬";
+var KIND_RESPONSE     = "대응";
+var KIND_ENEMY_ACTION = "에너미액션";
+var KIND_ENEMY_SKILL  = "에너미스킬";
+
+// ── 저항 모드 상수 ────────────────────────────────────────────────────
+// processSkillEffects, applyStatusWithResistance, processPendingAttackSkillEffects 등에 공통 사용.
+// ※ 에너미 스킬의 target_mode("none"/"optional"/"required")와 다른 개념.
+var RESIST_NORMAL     = "normal";     // 저항 판정 수행
+var RESIST_FORCE_FAIL = "forceFail";  // 판정 생략, 저항 자동 실패 (무대응/맞대응 패배 시)
+var RESIST_NONE       = "none";       // 판정 생략, 저항 적용 없이 효과 실행
+
+// ── 행 상태값 상수 (STATUS_DB, SKILL_PENDING, CHAR_PENDING, COMBAT_PENDING 등) ──
+var ST_ACTIVE   = "ACTIVE";
+var ST_PENDING  = "PENDING";
+var ST_RESOLVED = "RESOLVED";
+var ST_EXPIRED  = "EXPIRED";
+var ST_REMOVED  = "REMOVED";
+var ST_CLEARED  = "CLEARED";
+
+// ── 효과 코드 상수 (processPreDamageStatuses, processStatusBeforeCheck 등) ──
+var EFFECT_CODE_SHIELD     = "shield";
+var EFFECT_CODE_BARRIER    = "barrier";
+var EFFECT_CODE_VULNERABLE = "vulnerable";
+var EFFECT_CODE_BIND       = "bind";
+var EFFECT_CODE_WEAKEN     = "weaken";
+var EFFECT_CODE_DEBUFF     = "debuff";
+var EFFECT_CODE_ENHANCE    = "enhance";
+var EFFECT_CODE_BUFF       = "buff";
+var EFFECT_CODE_HASTE      = "haste";
+var EFFECT_CODE_FOCUS      = "focus";
+var EFFECT_CODE_SLOW       = "slow";
+var EFFECT_CODE_BLIND      = "blind";
+
 function doGet(e) {
   try {
     const q = e.parameter.q || "";
@@ -465,11 +504,7 @@ function getSheetHeaders(sheetName) {
 }
 
 function findCharacter(displayName) {
-  const characters = getSheetData(SHEET_BOT_DB);
-
-  return characters.find(c => {
-    return String(c["별명"]).trim() === String(displayName).trim();
-  }) || null;
+  return findCharacterByAlias(displayName);
 }
 
 function findCharacterByAlias(alias) {
@@ -889,21 +924,16 @@ function applyHealingToCharacter(alias, healAmount) {
   };
 }
 
-function processPreDamageStatuses(alias, damageAmount) {
-  let damage = Math.max(0, Math.floor(Number(damageAmount) || 0));
+// 취약 상태가 있으면 damage를 증가시킨다. { damage, logs } 반환.
+function _applyVulnerableEffects(rows, damage) {
   const logs = [];
-
-  const rows = getActiveStatusRows(alias);
-
   rows.forEach(status => {
-    const code = String(status["효과코드"] || "").trim();
-    const name = String(status["상태명"] || "").trim();
+    const code    = String(status["효과코드"] || "").trim();
+    const name    = String(status["상태명"]   || "").trim();
     const trigger = String(status["발동타이밍"] || "").trim();
 
     const isVulnerable =
-      code === "vulnerable" ||
-      code === "취약" ||
-      name === "취약";
+      code === EFFECT_CODE_VULNERABLE || code === "취약" || name === "취약";
 
     if (!isVulnerable) return;
     if (trigger && trigger !== "피해직전" && trigger !== "전체") return;
@@ -913,26 +943,30 @@ function processPreDamageStatuses(alias, damageAmount) {
 
     const before = damage;
     damage += value;
-
     logs.push(
       "[상태 발동: 취약]\n" +
       "피해 증가: +" + value + "\n" +
       "피해: " + before + " → " + damage
     );
-
     consumeStatusCount(status);
   });
+  return { damage, logs };
+}
 
+// 보호막 상태가 있으면 damage를 흡수한다. { damage, logs } 반환.
+// ※ 취약 처리 이후에 호출해야 한다 (순서 의존).
+function _applyShieldEffects(rows, damage) {
+  const logs = [];
   rows.forEach(status => {
     if (damage <= 0) return;
 
-    const code = String(status["효과코드"] || "").trim();
-    const name = String(status["상태명"] || "").trim();
+    const code    = String(status["효과코드"] || "").trim();
+    const name    = String(status["상태명"]   || "").trim();
     const trigger = String(status["발동타이밍"] || "").trim();
 
     const isShield =
-      code === "shield" ||
-      code === "barrier" ||
+      code === EFFECT_CODE_SHIELD ||
+      code === EFFECT_CODE_BARRIER ||
       code === "보호막" ||
       name === "보호막";
 
@@ -942,24 +976,19 @@ function processPreDamageStatuses(alias, damageAmount) {
     const shieldValue = Math.max(0, Math.floor(Number(status["수치"] || 0)));
     if (shieldValue <= 0) return;
 
-    const absorb = Math.min(shieldValue, damage);
+    const absorb      = Math.min(shieldValue, damage);
     const remainShield = shieldValue - absorb;
-    const before = damage;
-
+    const before      = damage;
     damage -= absorb;
 
     if (remainShield <= 0) {
       updateRowById(SHEET_STATUS_DB, "id", status["id"], {
-        상태: "EXPIRED",
-        수치: 0,
-        남은횟수: 0,
-        처리일: getNowText(),
-        메모: "보호막 소진"
+        상태: ST_EXPIRED, 수치: 0, 남은횟수: 0,
+        처리일: getNowText(), 메모: "보호막 소진"
       });
     } else {
       updateRowById(SHEET_STATUS_DB, "id", status["id"], {
-        수치: remainShield,
-        메모: "보호막 피해 흡수"
+        수치: remainShield, 메모: "보호막 피해 흡수"
       });
       consumeStatusCount(status);
     }
@@ -971,11 +1000,21 @@ function processPreDamageStatuses(alias, damageAmount) {
       "보호막: " + shieldValue + " → " + remainShield
     );
   });
+  return { damage, logs };
+}
 
-  return {
-    damage: damage,
-    text: logs.join("\n\n")
-  };
+function processPreDamageStatuses(alias, damageAmount) {
+  const rows   = getActiveStatusRows(alias);
+  let damage   = Math.max(0, Math.floor(Number(damageAmount) || 0));
+
+  const vulnResult   = _applyVulnerableEffects(rows, damage);
+  damage             = vulnResult.damage;
+
+  const shieldResult = _applyShieldEffects(rows, damage);
+  damage             = shieldResult.damage;
+
+  const logs = [...vulnResult.logs, ...shieldResult.logs];
+  return { damage, text: logs.join("\n\n") };
 }
 
 function applyDamageToCharacter(alias, damageAmount) {
@@ -1004,10 +1043,34 @@ function applyDamageToCharacter(alias, damageAmount) {
   const preDamage = processPreDamageStatuses(alias, originalDamage);
   const damage = Math.max(0, Math.floor(Number(preDamage.damage) || 0));
 
+  // 피해직전 패시브 트리거
+  var passivePreText = "";
+  try {
+    var charForPrePassive = findCharacterByAlias(alias);
+    if (charForPrePassive) {
+      passivePreText = firePassiveTriggerEffects(charForPrePassive, "피해직전", {
+        resistanceMode: RESIST_NONE,
+        finalValue: damage
+      });
+    }
+  } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
+
   const before = hp.currentHp;
   const after = Math.max(0, before - damage);
 
   setCellByHeader(fresh, "현재체력", after);
+
+  // 피해후 패시브 트리거
+  var passivePostText = "";
+  try {
+    var charForPostPassive = findCharacterByAlias(alias);
+    if (charForPostPassive) {
+      passivePostText = firePassiveTriggerEffects(charForPostPassive, "피해후", {
+        resistanceMode: RESIST_NONE,
+        finalValue: damage
+      });
+    }
+  } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
 
   let downText = "";
 
@@ -1021,6 +1084,8 @@ function applyDamageToCharacter(alias, damageAmount) {
   const modifierText = preDamage.text
     ? "\n\n" + preDamage.text
     : "";
+  const passivePreBlock  = passivePreText  ? "\n\n" + passivePreText  : "";
+  const passivePostBlock = passivePostText ? "\n\n" + passivePostText : "";
 
   return {
     ok: true,
@@ -1037,7 +1102,9 @@ function applyDamageToCharacter(alias, damageAmount) {
       "최종피해: " + damage + "\n" +
       "현재체력: " + before + " → " + after + " / " + hp.maxHp +
       modifierText +
-      downText
+      passivePreBlock +
+      downText +
+      passivePostBlock
   };
 }
 
@@ -1170,7 +1237,7 @@ function statCheck(parts, displayName) {
 
   const alias = String(character["별명"]).trim();
 
-  const statusResult = processStatusBeforeCheck(alias, "스탯");
+  const statusResult = processStatusBeforeCheck(alias, KIND_STAT);
 
   if (statusResult.blocked) {
     return statusResult.text;
@@ -1203,7 +1270,7 @@ function statCheck(parts, displayName) {
 
   try {
    finalValue = applyMods(base, mods);
-   statusMod = applyStatusModifierToValue(alias, finalValue, ["스탯", statName]);
+   statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_STAT, statName]);
    finalValue = statusMod.value;
   } catch (e) {
     return (
@@ -1326,7 +1393,7 @@ function rollActionValueForCharacter(character, actionName, mods) {
   let sum = rolls.reduce((a, b) => a + b, 0);
 
   const alias = String(character["별명"] || "").trim();
-  const statusMod = applyStatusModifierToValue(alias, sum, ["액션", actionName, "대응"]);
+  const statusMod = applyStatusModifierToValue(alias, sum, [KIND_ACTION, actionName, KIND_RESPONSE]);
   sum = statusMod.value;
 
   return {
@@ -1361,7 +1428,7 @@ function actionCheck(parts, displayName) {
 
   const alias = String(character["별명"]).trim();
 
-  const statusResult = processStatusBeforeCheck(alias, "액션");
+  const statusResult = processStatusBeforeCheck(alias, KIND_ACTION);
 
   if (statusResult.blocked) {
     return statusResult.text;
@@ -1433,7 +1500,7 @@ function actionCheck(parts, displayName) {
   const rolls = rollDice(diceCount, ACTION_DICE_SIDES);
   let sum = rolls.reduce((a, b) => a + b, 0);
 
-  const statusMod = applyStatusModifierToValue(alias, sum, ["액션", actionName]);
+  const statusMod = applyStatusModifierToValue(alias, sum, [KIND_ACTION, actionName]);
   sum = statusMod.value;
 
   let combatText = "";
@@ -1513,7 +1580,7 @@ function powerCheck(parts, type, displayName) {
 
   const alias = String(character["별명"]).trim();
 
-  const statusResult = processStatusBeforeCheck(alias, "이능");
+  const statusResult = processStatusBeforeCheck(alias, KIND_POWER);
 
   if (statusResult.blocked) {
     return statusResult.text;
@@ -1552,7 +1619,7 @@ function powerCheck(parts, type, displayName) {
 
   try {
    finalValue = applyMods(base, mods);
-   statusMod = applyStatusModifierToValue(alias, finalValue, ["이능", type]);
+   statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_POWER, type]);
    finalValue = statusMod.value;
   } catch (e) {
     return (
@@ -1578,7 +1645,7 @@ function powerCheck(parts, type, displayName) {
     const pending = createPendingAttackFlex(
       alias,
       targetAlias,
-      "이능",
+      KIND_POWER,
       "화력 " + rank,
       finalValue
     );
@@ -2248,12 +2315,29 @@ function buildFormulaVariables(character, rankValue, targetAlias) {
 
   const selfAlias = String(character["별명"] || "").trim();
 
+  // 현재체력비율: 조건식에서 "현재체력비율 <= 50" 형태로 사용
+  const _maxHp = Number(vars["최대체력"] || 0);
+  const _curHp = Number(vars["현재체력"] || 0);
+  vars["현재체력비율"] = _maxHp > 0 ? Math.floor(_curHp / _maxHp * 100) : 0;
+
   injectStackVariables(vars, selfAlias, "");
   injectStatusVariables(vars, selfAlias, "");
 
   if (targetAlias) {
-   injectStackVariables(vars, targetAlias, "대상");
-   injectStatusVariables(vars, targetAlias, "대상");
+    injectStackVariables(vars, targetAlias, "대상");
+    injectStatusVariables(vars, targetAlias, "대상");
+
+    // 대상 HP 비율 ("대상현재체력비율 <= 30" 등 조건에서 사용)
+    try {
+      const _tChar = findCharacterByAlias(targetAlias);
+      if (_tChar) {
+        const _tMax = Number(getDirectNumber(_tChar, "최대체력") || 0);
+        const _tCur = Number(getDirectNumber(_tChar, "현재체력") || 0);
+        vars["대상최대체력"]     = _tMax;
+        vars["대상현재체력"]     = _tCur;
+        vars["대상현재체력비율"] = _tMax > 0 ? Math.floor(_tCur / _tMax * 100) : 0;
+      }
+    } catch (_e) { /* 대상 미존재 시 무시 */ }
   }
 
   return vars;
@@ -2320,6 +2404,124 @@ function safeEvalFormula(formula, variables) {
   };
 }
 
+// ── TASK-12/13: 스킬 효과 처리 분기 헬퍼 ──────────────────────────────
+// skillUse / commonSkillUseCommand 양쪽에서 동일하게 사용.
+// opts = { rawEffectText, skillForEffects, alias, targetAlias, finalValue, type }
+// 성공: { ok:true, pendingId, healingDetailText, combatDetailText,
+//                  interferenceDetailText, effectDetailText, effectSummary }
+// 실패: { ok:false, errorText }
+function _buildSkillEffectResult(opts) {
+  const rawEffectText  = opts.rawEffectText  || "";
+  const skillForEffects = opts.skillForEffects;   // { 스킬명, 효과, ... }
+  const alias          = opts.alias;
+  const targetAlias    = opts.targetAlias    || "";
+  const finalValue     = opts.finalValue;
+  const type           = opts.type           || "";
+  const skillName      = String((skillForEffects && skillForEffects["스킬명"]) || "").trim();
+
+  const isTargetedAttack      = ATTACK_SKILL_TYPES.includes(type) && targetAlias;
+  const isTargetedInterference = type === "간섭" && targetAlias;
+
+  let pendingId            = "";
+  let healingDetailText    = "";
+  let combatDetailText     = "";
+  let interferenceDetailText = "";
+  let effectDetailText     = "";
+  let effectSummary        = summarizeSkillEffects(rawEffectText);
+
+  // ── 치유/재생 ──
+  if (type === "치유" || type === "재생") {
+    const healTarget = targetAlias || alias;
+    const healResult = applyHealingToCharacter(healTarget, finalValue);
+    healingDetailText = "\n\n" + healResult.text;
+    effectSummary = rawEffectText ? effectSummary : "회복 적용";
+  }
+
+  // ── 화력 대상 공격 → 공격 대기 ──
+  if (isTargetedAttack) {
+    const pending = createPendingAttackFlex(alias, targetAlias, KIND_SKILL, skillName, finalValue);
+
+    if (pending.ok) {
+      pendingId = pending.id;
+      combatDetailText = "\n\n" + makeCombatChoiceTextFlex(pending);
+
+      if (rawEffectText) {
+        effectSummary    = "맞게 될 시 " + summarizeSkillEffects(rawEffectText);
+        effectDetailText =
+          "\n\n[스킬 효과 대기]\n" +
+          "화력계 대상 지정 스킬의 효과는 즉시 발동하지 않습니다.\n" +
+          "대상의 대응 결과에 따라 처리됩니다.\n\n" +
+          "방어/회피 성공: 효과 무효\n" +
+          "방어/회피 실패: 효과 저항 판정\n" +
+          "무대응/맞대응 패배: 효과 저항 자동 실패";
+      } else {
+        effectSummary = "없음";
+      }
+    } else {
+      combatDetailText = "\n\n" + pending.text;
+      effectSummary    = "공격 대기 생성 실패";
+    }
+
+  // ── 간섭 대상 → 저항 판정 후 효과 처리 ──
+  } else if (isTargetedInterference) {
+    let resistance;
+    try {
+      resistance = rollResistanceForStatus(targetAlias, finalValue, []);
+    } catch (e) {
+      return { ok: false, errorText: "[간섭 저항 오류]\n" + skillName + "\n\n오류: " + e.message };
+    }
+
+    interferenceDetailText =
+      "\n\n[간섭 저항]\n" + resistance.text + "\n\n" +
+      "결과: " + (resistance.success ? "간섭 무효" : "간섭 적중");
+
+    if (resistance.success) {
+      effectSummary    = rawEffectText ? "저항 성공으로 무효" : "간섭 무효";
+      effectDetailText = rawEffectText
+        ? "\n\n[스킬 효과 무효]\n대상이 간섭 저항에 성공하여 효과가 발동하지 않습니다."
+        : "";
+    } else {
+      try {
+        const processed = processSkillEffects(rawEffectText, {
+          userAlias: alias, targetAlias, finalValue, skillName,
+          skill: skillForEffects, resistanceMode: RESIST_NONE
+        });
+        effectDetailText = processed;
+        effectSummary    = processed ? "적용됨 / " + summarizeSkillEffects(rawEffectText) : "없음";
+      } catch (e) {
+        return {
+          ok: false,
+          errorText: "[간섭 효과 처리 오류]\n" + skillName + "\n\n오류: " + e.message +
+                     "\n\n효과:\n```" + rawEffectText + "```"
+        };
+      }
+    }
+
+  // ── 그 외 (강화/방호/특수/자가치유 등) ──
+  } else {
+    try {
+      const processed = processSkillEffects(rawEffectText, {
+        userAlias: alias, targetAlias, finalValue, skillName,
+        skill: skillForEffects, resistanceMode: RESIST_NORMAL
+      });
+      effectDetailText = processed;
+      effectSummary    = processed ? "처리됨 / " + summarizeSkillEffects(rawEffectText) : "없음";
+    } catch (e) {
+      return {
+        ok: false,
+        errorText: "[스킬 효과 처리 오류]\n" + skillName + "\n\n오류: " + e.message +
+                   "\n\n효과:\n```" + rawEffectText + "```"
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    pendingId, healingDetailText, combatDetailText,
+    interferenceDetailText, effectDetailText, effectSummary
+  };
+}
+
 function getSkillResultText(type, value) {
   if (type === "화력") {
     return "처리: 피해/공격 판정값으로 사용.";
@@ -2366,79 +2568,64 @@ function getSkillResultText(type, value) {
   return "";
 }
 
-function rollSkillValueForCharacter(character, skillName, mods, targetAlias) {
-  mods = mods || [];
+// 스킬 판정값 공통 계산 코어.
+// skillRow: SKILL_DB 또는 COMMON_SKILLS 행 (계산식/계열 필드 공통).
+// 반환 객체는 rollSkillValueForCharacter / rollCommonSkillValueForCharacter와 동일한 구조.
+function _computeSkillRollCore(character, skillRow, rank, mods, targetAlias) {
+  mods        = mods        || [];
   targetAlias = targetAlias || "";
 
+  const alias     = String(character["별명"]).trim();
+  const rankValue = rankToValue(rank);
+  const erosion   = Number(character["이면침식"] || 0);
+
+  const variables = buildFormulaVariables(character, rankValue, targetAlias);
+  const calc      = safeEvalFormula(skillRow["계산식"], variables);
+
+  let result                   = Math.floor(calc.value);
+  const erosionMultiplier      = getErosionMultiplier(erosion);
+  const beforeErosionMultiplier = result;
+  result                       = Math.floor(result * erosionMultiplier);
+
+  let typeBonusText = "";
+  const type = String(skillRow["계열"] || "").trim();
+  if (type === "방호") { result += 3; typeBonusText = "방호 보정: +3"; }
+
+  let finalValue = applyMods(result, mods);
+  const statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type, KIND_RESPONSE], targetAlias || "");
+  finalValue = statusMod.value;
+
+  return {
+    alias, type, rank, rankValue,
+    diceLogs: calc.diceLogs || [],
+    expression: calc.expression,
+    baseValue: Math.floor(calc.value),
+    beforeErosionMultiplier, erosion, erosionMultiplier,
+    typeBonusText, mods, statusMod, finalValue
+  };
+}
+
+function rollSkillValueForCharacter(character, skillName, mods, targetAlias) {
   const alias = String(character["별명"]).trim();
   const skill = findApprovedSkill(alias, skillName);
 
   if (!skill) {
-    throw new Error(
-      "등록된 스킬을 찾을 수 없습니다.\n" +
-      "소유자: " + alias + "\n" +
-      "스킬명: " + skillName
-    );
+    throw new Error("등록된 스킬을 찾을 수 없습니다.\n소유자: " + alias + "\n스킬명: " + skillName);
   }
 
   const erosion = Number(character["이면침식"] || 0);
-
   if (erosion >= MAX_EROSION) {
     throw new Error(alias + "은/는 이미 로스트 상태입니다. 스킬을 사용할 수 없습니다.");
   }
 
   const rank = String(skill["랭크"]).trim().toUpperCase();
-  const rankValue = rankToValue(rank);
-
-  const variables = buildFormulaVariables(character, rankValue, targetAlias);
-  const calc = safeEvalFormula(skill["계산식"], variables);
-
-  let result = Math.floor(calc.value);
-
-  const erosionMultiplier = getErosionMultiplier(erosion);
-  const beforeErosionMultiplier = result;
-
-  result = Math.floor(result * erosionMultiplier);
-
-  let typeBonusText = "";
-  const type = String(skill["계열"]).trim();
-
-  if (type === "방호") {
-    result += 3;
-    typeBonusText = "방호 보정: +3";
-  }
-
-  let finalValue = applyMods(result, mods);
-
-  const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type, "대응"], targetAlias || "");
-  finalValue = statusMod.value;
-
-  return {
-    skill: skill,
-    alias: alias,
-    skillName: skillName,
-    type: type,
-    rank: rank,
-    rankValue: rankValue,
-    diceLogs: calc.diceLogs || [],
-    expression: calc.expression,
-    baseValue: Math.floor(calc.value),
-    beforeErosionMultiplier: beforeErosionMultiplier,
-    erosion: erosion,
-    erosionMultiplier: erosionMultiplier,
-    typeBonusText: typeBonusText,
-    mods: mods,
-    statusMod: statusMod,
-    finalValue: finalValue
-  };
+  const core = _computeSkillRollCore(character, skill, rank, mods || [], targetAlias || "");
+  return Object.assign({ skill: skill, skillName: skillName }, core);
 }
 
 // 대응용 공용 스킬 판정값 산출 (효과/대상자동처리 없이 finalValue만 계산)
 function rollCommonSkillValueForCharacter(character, skillName, mods, targetAlias) {
-  mods = mods || [];
-  targetAlias = targetAlias || "";
-
-  const alias = String(character["별명"]).trim();
+  const alias       = String(character["별명"]).trim();
   const commonSkill = findCommonSkill(skillName);
 
   if (!commonSkill) {
@@ -2448,19 +2635,13 @@ function rollCommonSkillValueForCharacter(character, skillName, mods, targetAlia
   }
 
   const displayName = String(commonSkill["이름"] || skillName).trim();
-  const status = _commonSkillUnlockStatus(commonSkill, character);
+  const status      = _commonSkillUnlockStatus(commonSkill, character);
 
   if (!status.conditionMatched) {
-    throw new Error(
-      "공용 스킬 사용 불가: " + displayName + "\n" +
-      "사유: " + status.conditionReason
-    );
+    throw new Error("공용 스킬 사용 불가: " + displayName + "\n사유: " + status.conditionReason);
   }
   if (!status.levelMatched) {
-    throw new Error(
-      "공용 스킬 잠김: " + displayName + "\n" +
-      "필요 레벨: " + status.unlockLevel + " / 현재: " + status.charLevel
-    );
+    throw new Error("공용 스킬 잠김: " + displayName + "\n필요 레벨: " + status.unlockLevel + " / 현재: " + status.charLevel);
   }
 
   const erosion = Number(character["이면침식"] || 0);
@@ -2469,47 +2650,8 @@ function rollCommonSkillValueForCharacter(character, skillName, mods, targetAlia
   }
 
   const rank = String(commonSkill["랭크"]).trim().toUpperCase();
-  const rankValue = rankToValue(rank);
-
-  const variables = buildFormulaVariables(character, rankValue, targetAlias);
-  const calc = safeEvalFormula(commonSkill["계산식"], variables);
-
-  let result = Math.floor(calc.value);
-  const erosionMultiplier = getErosionMultiplier(erosion);
-  const beforeErosionMultiplier = result;
-  result = Math.floor(result * erosionMultiplier);
-
-  let typeBonusText = "";
-  const type = String(commonSkill["계열"]).trim();
-  if (type === "방호") {
-    result += 3;
-    typeBonusText = "방호 보정: +3";
-  }
-
-  let finalValue = applyMods(result, mods);
-  const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type, "대응"], targetAlias || "");
-  finalValue = statusMod.value;
-
-  // 개인 스킬 결과와 동일한 형태로 반환 (skillName 키만 공용용 displayName)
-  return {
-    skill: commonSkill,
-    isCommon: true,
-    alias: alias,
-    skillName: displayName,
-    type: type,
-    rank: rank,
-    rankValue: rankValue,
-    diceLogs: calc.diceLogs || [],
-    expression: calc.expression,
-    baseValue: Math.floor(calc.value),
-    beforeErosionMultiplier: beforeErosionMultiplier,
-    erosion: erosion,
-    erosionMultiplier: erosionMultiplier,
-    typeBonusText: typeBonusText,
-    mods: mods,
-    statusMod: statusMod,
-    finalValue: finalValue
-  };
+  const core = _computeSkillRollCore(character, commonSkill, rank, mods || [], targetAlias || "");
+  return Object.assign({ skill: commonSkill, isCommon: true, skillName: displayName }, core);
 }
 
 function skillUse(parts, displayName) {
@@ -2578,7 +2720,7 @@ function skillUse(parts, displayName) {
     );
   }
 
-  // 조건 자동 판정
+  // 조건 자동 판정 (필수 + 세부)
   const condCheck = checkSkillConditions(skill["조건"], {
     label: "스킬",
     name: skill["스킬명"],
@@ -2587,8 +2729,9 @@ function skillUse(parts, displayName) {
   });
   if (condCheck.blocked) return condCheck.text;
   const conditionHeaderText = condCheck.headerText || "";
+  const condDetailBonus = condCheck.detailBonus || 0;
 
-  const statusResult = processStatusBeforeCheck(alias, "스킬");
+  const statusResult = processStatusBeforeCheck(alias, KIND_SKILL);
 
   if (statusResult.blocked) {
     return statusResult.text;
@@ -2630,8 +2773,10 @@ function skillUse(parts, displayName) {
 
   try {
     finalValue = applyMods(result, mods);
-    const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type], targetAlias || "");
+    const statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type], targetAlias || "");
     finalValue = statusMod.value;
+    // 세부 조건 보너스 적용
+    if (condDetailBonus !== 0) finalValue += condDetailBonus;
   } catch (e) {
     return (
       "[스킬 판정 오류]\n" +
@@ -2644,128 +2789,14 @@ function skillUse(parts, displayName) {
   const resultText = getSkillResultText(type, finalValue);
   const rawEffectText = String(skill["효과"] || "").trim();
 
-  let pendingId = "";
-  let healingDetailText = "";
-  let combatDetailText = "";
-  let interferenceDetailText = "";
-  let effectDetailText = "";
-  let effectSummary = summarizeSkillEffects(rawEffectText);
+  const _efx = _buildSkillEffectResult({
+    rawEffectText, skillForEffects: skill,
+    alias, targetAlias, finalValue, type
+  });
+  if (!_efx.ok) return _efx.errorText;
 
-  const isTargetedAttackSkill = ATTACK_SKILL_TYPES.includes(type) && targetAlias;
-  const isTargetedInterferenceSkill = type === "간섭" && targetAlias;
-
-  if (type === "치유" || type === "재생") {
-    const healTarget = targetAlias || alias;
-    const healResult = applyHealingToCharacter(healTarget, finalValue);
-
-    healingDetailText = "\n\n" + healResult.text;
-    effectSummary = rawEffectText ? effectSummary : "회복 적용";
-  }
-
-  if (isTargetedAttackSkill) {
-    const pending = createPendingAttackFlex(
-      alias,
-      targetAlias,
-      "스킬",
-      skill["스킬명"],
-      finalValue
-    );
-
-    if (pending.ok) {
-      pendingId = pending.id;
-      combatDetailText = "\n\n" + makeCombatChoiceTextFlex(pending);
-
-      if (rawEffectText) {
-        effectSummary = "맞게 될 시 " + summarizeSkillEffects(rawEffectText);
-
-        effectDetailText =
-          "\n\n[스킬 효과 대기]\n" +
-          "화력계 대상 지정 스킬의 효과는 즉시 발동하지 않습니다.\n" +
-          "대상의 대응 결과에 따라 처리됩니다.\n\n" +
-          "방어/회피 성공: 효과 무효\n" +
-          "방어/회피 실패: 효과 저항 판정\n" +
-          "무대응/맞대응 패배: 효과 저항 자동 실패";
-      } else {
-        effectSummary = "없음";
-      }
-    } else {
-      combatDetailText = "\n\n" + pending.text;
-      effectSummary = "공격 대기 생성 실패";
-    }
-
-  } else if (isTargetedInterferenceSkill) {
-    let resistance;
-
-    try {
-      resistance = rollResistanceForStatus(targetAlias, finalValue, []);
-    } catch (e) {
-      return (
-        "[간섭 저항 오류]\n" +
-        skill["스킬명"] + "\n\n" +
-        "오류: " + e.message
-      );
-    }
-
-    interferenceDetailText =
-      "\n\n[간섭 저항]\n" +
-      resistance.text + "\n\n" +
-      "결과: " + (resistance.success ? "간섭 무효" : "간섭 적중");
-
-    if (resistance.success) {
-      effectSummary = rawEffectText ? "저항 성공으로 무효" : "간섭 무효";
-      effectDetailText =
-        rawEffectText
-          ? "\n\n[스킬 효과 무효]\n대상이 간섭 저항에 성공하여 효과가 발동하지 않습니다."
-          : "";
-    } else {
-      try {
-        const processed = processSkillEffects(rawEffectText, {
-          userAlias: alias,
-          targetAlias: targetAlias,
-          finalValue: finalValue,
-          skillName: skill["스킬명"],
-          skill: skill,
-          resistanceMode: "none"
-        });
-
-        effectDetailText = processed;
-        effectSummary = processed ? "적용됨 / " + summarizeSkillEffects(rawEffectText) : "없음";
-      } catch (e) {
-        return (
-          "[간섭 효과 처리 오류]\n" +
-          skill["스킬명"] + "\n\n" +
-          "오류: " + e.message + "\n\n" +
-          "효과:\n```" +
-          rawEffectText +
-          "```"
-        );
-      }
-    }
-
-  } else {
-    try {
-      const processed = processSkillEffects(rawEffectText, {
-        userAlias: alias,
-        targetAlias: targetAlias,
-        finalValue: finalValue,
-        skillName: skill["스킬명"],
-        skill: skill,
-        resistanceMode: "normal"
-      });
-
-      effectDetailText = processed;
-      effectSummary = processed ? "처리됨 / " + summarizeSkillEffects(rawEffectText) : "없음";
-    } catch (e) {
-      return (
-        "[스킬 효과 처리 오류]\n" +
-        skill["스킬명"] + "\n\n" +
-        "오류: " + e.message + "\n\n" +
-        "효과:\n```" +
-        rawEffectText +
-        "```"
-      );
-    }
-  }
+  const { pendingId, healingDetailText, combatDetailText,
+          interferenceDetailText, effectDetailText, effectSummary } = _efx;
 
   const diceText = formatDiceLogs(calc.diceLogs);
 
@@ -4052,66 +4083,20 @@ function dailyPointRecover(parts, displayName) {
   );
 }
 
-function getErosionMultiplier(erosion) {
+// 침식 단계 임계값 변경은 이 함수 하나만 수정하면 됨.
+function getErosionInfo(erosion) {
   erosion = Number(erosion || 0);
-
-  if (erosion >= 10) return 0;
-  if (erosion >= 9) return 1.5;
-  if (erosion >= 6) return 1.25;
-  if (erosion >= 3) return 1.1;
-
-  return 1;
+  if (erosion >= 10) return { multiplier: 0,    stage: "로스트",         flavor: "캐릭터 로스트.\n이 캐릭터는 더 이상 플레이어 캐릭터로 사용할 수 없습니다.\n\n마지막 장면을 선언하십시오.\n그가 죽었는지, 괴이가 되었는지, 계약에 삼켜졌는지,\n혹은 모두의 기억에서 사라졌는지는 이야기로 결정됩니다." };
+  if (erosion >= 9)  return { multiplier: 1.5,  stage: "경계 붕괴 직전", flavor: "경고:\n경계가 무너지기 직전입니다.\n다음 침식 증가는 로스트로 이어질 수 있습니다." };
+  if (erosion >= 6)  return { multiplier: 1.25, stage: "침식",           flavor: "침식 단계:\n이면의 힘이 강해졌습니다.\n그러나 현재의 자신을 붙드는 감각은 점점 희미해집니다." };
+  if (erosion >= 3)  return { multiplier: 1.1,  stage: "위화감",         flavor: "위화감 단계:\n이면이 당신을 알아보기 시작했습니다." };
+  return               { multiplier: 1,    stage: "정상",           flavor: "정상 단계: 아직은 돌아올 수 있습니다." };
 }
 
-function getErosionStageText(erosion) {
-  erosion = Number(erosion || 0);
+function getErosionMultiplier(erosion) { return getErosionInfo(erosion).multiplier; }
+function getErosionStageText(erosion)  { return getErosionInfo(erosion).stage; }
 
-  if (erosion >= 10) return "로스트";
-  if (erosion >= 9) return "경계 붕괴 직전";
-  if (erosion >= 6) return "침식";
-  if (erosion >= 3) return "위화감";
-
-  return "정상";
-}
-
-function getErosionFlavorText(erosion) {
-  erosion = Number(erosion || 0);
-
-  if (erosion >= 10) {
-    return (
-      "캐릭터 로스트.\n" +
-      "이 캐릭터는 더 이상 플레이어 캐릭터로 사용할 수 없습니다.\n\n" +
-      "마지막 장면을 선언하십시오.\n" +
-      "그가 죽었는지, 괴이가 되었는지, 계약에 삼켜졌는지,\n" +
-      "혹은 모두의 기억에서 사라졌는지는 이야기로 결정됩니다."
-    );
-  }
-
-  if (erosion >= 9) {
-    return (
-      "경고:\n" +
-      "경계가 무너지기 직전입니다.\n" +
-      "다음 침식 증가는 로스트로 이어질 수 있습니다."
-    );
-  }
-
-  if (erosion >= 6) {
-    return (
-      "침식 단계:\n" +
-      "이면의 힘이 강해졌습니다.\n" +
-      "그러나 현재의 자신을 붙드는 감각은 점점 희미해집니다."
-    );
-  }
-
-  if (erosion >= 3) {
-    return (
-      "위화감 단계:\n" +
-      "이면이 당신을 알아보기 시작했습니다."
-    );
-  }
-
-  return "정상 단계: 아직은 돌아올 수 있습니다.";
-}
+function getErosionFlavorText(erosion) { return getErosionInfo(erosion).flavor; }
 
 function erosionModify(parts, displayName) {
   if (parts.length < 3) {
@@ -4205,7 +4190,7 @@ function rollPowerValueForResponse(type, rank, mods) {
 // response: _rollResponseSkillByMode가 돌려준 객체. {kind:"스킬", source, isCommon, name, skill, value}
 // userAlias: 효과 사용자(자신)
 // targetAlias: 효과 대상(방어/회피/저항=자신, 맞대응=공격자)
-// resistanceMode: "none" | "normal" | "forceFail"
+// resistanceMode: RESIST_NONE | RESIST_NORMAL | RESIST_FORCE_FAIL
 function _applyResponseSkillEffects(response, userAlias, targetAlias, resistanceMode) {
   if (!response || response.kind !== "스킬" || !response.skill) return "";
 
@@ -4237,7 +4222,7 @@ function _applyResponseSkillEffects(response, userAlias, targetAlias, resistance
       finalValue: response.value,
       skillName: skillName,
       skill: skillForEffects,
-      resistanceMode: resistanceMode || "none"
+      resistanceMode: resistanceMode || RESIST_NONE
     });
     return out || "";
   } catch (e) {
@@ -4452,14 +4437,367 @@ function rollResponseValue(character, defaultActionName, tokens, targetAlias) {
   };
 }
 
+// ── TASK-08: 무대응 / 상태이상 차단 ────────────────────────────────────
+function _resolveCombatNoResponse(attack, attackValue, attackerAlias, targetAlias) {
+  const damage      = attackValue;
+  const damageResult = applyDamageToCharacter(targetAlias, damage);
+  const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue);
+
+  resolvePendingAttack(attack["id"], {
+    대응종류: "무대응", 대응값: 0, 최종피해: damage,
+    메모: "무대응으로 피해 전부 적용. 스킬 효과 저항 자동 실패"
+  });
+
+  const summary =
+    "[무대응]\n" +
+    "공격번호: " + attack["id"] + "\n" +
+    "공격값: " + attackValue + "\n" +
+    "최종피해: " + damage + "\n" +
+    compactDamageText(damageResult) +
+    (attackEffectText ? "\n효과: 저항 자동 실패 / 강제 적용" : "");
+
+  const detail =
+    "[무대응 상세]\n" +
+    "공격번호: " + attack["id"] + "\n" +
+    "공격자: " + attackerAlias + "\n" +
+    "대상: " + targetAlias + "\n" +
+    "공격값: " + attackValue + "\n" +
+    "최종피해: " + damage + "\n\n" +
+    damageResult.text + attackEffectText;
+
+  return makeFoldedResponse(summary, detail);
+}
+
+function _resolveCombatStatusBlocked(attack, attackValue, attackerAlias, targetAlias, statusResult) {
+  const damage      = attackValue;
+  const damageResult = applyDamageToCharacter(targetAlias, damage);
+  const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue);
+
+  resolvePendingAttack(attack["id"], {
+    대응종류: "상태이상으로 대응불가", 대응값: 0, 최종피해: damage,
+    메모: "상태이상으로 대응 행동 저지. 무대응 처리. 스킬 효과 저항 자동 실패"
+  });
+
+  const summary =
+    "[대응 불가]\n" +
+    "상태이상으로 대응하지 못했습니다.\n" +
+    "공격번호: " + attack["id"] + "\n" +
+    "최종피해: " + damage + "\n" +
+    compactDamageText(damageResult) +
+    (attackEffectText ? "\n효과: 저항 자동 실패 / 강제 적용" : "");
+
+  const detail =
+    statusResult.text + "\n\n" +
+    "[대응 불가 상세]\n" +
+    "공격번호: " + attack["id"] + "\n" +
+    "공격자: " + attackerAlias + "\n" +
+    "대상: " + targetAlias + "\n" +
+    "공격값: " + attackValue + "\n" +
+    "최종피해: " + damage + "\n\n" +
+    damageResult.text + attackEffectText;
+
+  return makeFoldedResponse(summary, detail);
+}
+
+// ── TASK-09: 방어 / 회피 ────────────────────────────────────────────────
+function _resolveCombatDefend(attack, character, rest, selfAlias, attackValue, attackerAlias, targetAlias, statusDetailPrefix, statusSummaryLine) {
+  let response;
+  try {
+    response = rollResponseValue(character, "방어", rest, attackerAlias);
+  } catch (e) {
+    return "[방어 대응 오류]\n" + e.message;
+  }
+
+  const defenseValue    = response.value;
+  const damage          = Math.max(0, attackValue - defenseValue);
+  const defenseSuccess  = damage <= 0;
+  const damageResult    = damage > 0 ? applyDamageToCharacter(targetAlias, damage) : { text: "피해 없음." };
+
+  const attackEffectText = defenseSuccess
+    ? (getSkillFromPendingAttack(attack) ? "\n\n[스킬 효과 무효]\n방어에 성공하여 공격 스킬의 효과가 발동하지 않습니다." : "")
+    : processPendingAttackSkillEffects(attack, RESIST_NORMAL, attackValue);
+
+  const defenseSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, RESIST_NONE);
+  const defenseSkillBlock = defenseSkillEffectText
+    ? "\n\n[방어 스킬 효과]\n" + response.name + "\n" + defenseSkillEffectText
+    : "";
+
+  resolvePendingAttack(attack["id"], {
+    대응종류: "방어", 대응값: defenseValue, 최종피해: damage,
+    메모: (defenseSuccess ? "방어 성공. 공격 스킬 효과 무효" : "방어 실패. 공격 스킬 효과 저항 판정")
+          + (defenseSkillEffectText ? ". 방어 스킬 효과 적용" : "")
+  });
+
+  const methodLine = response.kind === "스킬"
+    ? "방어 방식: " + (response.source === "공용" ? "공용 스킬" : "개인 스킬") + " - " + response.name + "\n"
+    : "방어 방식: 액션 방어\n";
+
+  const summary =
+    "[방어 대응]\n" + statusSummaryLine +
+    "공격번호: " + attack["id"] + "\n" + methodLine +
+    "공격값: " + attackValue + "\n" +
+    "방어값: " + defenseValue + "\n" +
+    "결과: " + (defenseSuccess ? "방어 성공" : "방어 실패") + "\n" +
+    "최종피해: " + damage + "\n" +
+    compactDamageText(damageResult) +
+    (attackEffectText ? "\n효과: " + (defenseSuccess ? "무효" : "저항 판정 / 상세보기") : "") +
+    (defenseSkillEffectText ? "\n방어 스킬 효과: 적용 / 상세보기" : "");
+
+  const detail =
+    statusDetailPrefix +
+    "[방어 대응 상세]\n" +
+    "공격번호: " + attack["id"] + "\n" +
+    "공격자: " + attackerAlias + "\n" +
+    "대상: " + targetAlias + "\n" +
+    "공격값: " + attackValue + "\n\n" +
+    response.detailText + "\n\n" +
+    "결과: " + (defenseSuccess ? "방어 성공" : "방어 실패") + "\n" +
+    "최종피해: " + damage + "\n\n" +
+    damageResult.text + attackEffectText + defenseSkillBlock;
+
+  return makeFoldedResponse(summary, detail);
+}
+
+function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, attackerAlias, targetAlias, statusDetailPrefix, statusSummaryLine) {
+  let response;
+  try {
+    response = rollResponseValue(character, "회피", rest, attackerAlias);
+  } catch (e) {
+    return "[회피 대응 오류]\n" + e.message;
+  }
+
+  const evadeValue  = response.value;
+  const success     = evadeValue >= attackValue;
+  const damage      = success ? 0 : attackValue;
+  const damageResult = damage > 0 ? applyDamageToCharacter(targetAlias, damage) : { text: "피해 없음." };
+
+  const attackEffectText = success
+    ? (getSkillFromPendingAttack(attack) ? "\n\n[스킬 효과 무효]\n회피에 성공하여 공격 스킬의 효과가 발동하지 않습니다." : "")
+    : processPendingAttackSkillEffects(attack, RESIST_NORMAL, attackValue);
+
+  const evadeSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, RESIST_NONE);
+  const evadeSkillBlock = evadeSkillEffectText
+    ? "\n\n[회피 스킬 효과]\n" + response.name + "\n" + evadeSkillEffectText
+    : "";
+
+  resolvePendingAttack(attack["id"], {
+    대응종류: "회피", 대응값: evadeValue, 최종피해: damage,
+    메모: (success ? "회피 성공. 공격 스킬 효과 무효" : "회피 실패. 공격 스킬 효과 저항 판정")
+          + (evadeSkillEffectText ? ". 회피 스킬 효과 적용" : "")
+  });
+
+  const methodLine = response.kind === "스킬"
+    ? "회피 방식: " + (response.source === "공용" ? "공용 스킬" : "개인 스킬") + " - " + response.name + "\n"
+    : "회피 방식: 액션 회피\n";
+
+  const summary =
+    "[회피 대응]\n" + statusSummaryLine +
+    "공격번호: " + attack["id"] + "\n" + methodLine +
+    "공격값: " + attackValue + "\n" +
+    "회피값: " + evadeValue + "\n" +
+    "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
+    "최종피해: " + damage + "\n" +
+    compactDamageText(damageResult) +
+    (attackEffectText ? "\n효과: " + (success ? "무효" : "저항 판정 / 상세보기") : "") +
+    (evadeSkillEffectText ? "\n회피 스킬 효과: 적용 / 상세보기" : "") +
+    (success ? "\n추가: 다음 판정에 이득 가능" : "");
+
+  const detail =
+    statusDetailPrefix +
+    "[회피 대응 상세]\n" +
+    "공격번호: " + attack["id"] + "\n" +
+    "공격자: " + attackerAlias + "\n" +
+    "대상: " + targetAlias + "\n" +
+    "공격값: " + attackValue + "\n\n" +
+    response.detailText + "\n\n" +
+    "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
+    "최종피해: " + damage + "\n\n" +
+    damageResult.text + attackEffectText + evadeSkillBlock +
+    (success ? "\n\n다음 판정에 추가 이득을 얻을 수 있습니다." : "");
+
+  return makeFoldedResponse(summary, detail);
+}
+
+// ── TASK-10: 맞대응 / 저항 ──────────────────────────────────────────────
+function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, attackerAlias, targetAlias, statusDetailPrefix, statusSummaryLine) {
+  if (rest.length < 1) {
+    return (
+      "맞대응에 사용할 액션/이능/스킬을 입력하세요.\n" +
+      "예시:\n" +
+      "!대응 맞대응 참격\n" +
+      "!대응 맞대응 화력 A\n" +
+      "!대응 맞대응 월광참            (개인→공용 순으로 검색)\n" +
+      "!대응 맞대응 스킬 월광참       (개인→공용)\n" +
+      "!대응 맞대응 공용스킬 마탄     (공용만)"
+    );
+  }
+
+  let response;
+  try {
+    response = rollResponseValue(character, "", rest, attackerAlias);
+  } catch (e) {
+    return "[맞대응 오류]\n" + e.message;
+  }
+
+  const counterValue = response.value;
+
+  // ── 맞대응 승리 ──
+  if (counterValue > attackValue) {
+    const damage      = counterValue;
+    const damageResult = applyDamageToRef(attackerAlias, damage);
+
+    let counterEffectText = "";
+    if (response.kind === "스킬" && response.skill) {
+      counterEffectText = _applyResponseSkillEffects(response, selfAlias, attackerAlias, RESIST_FORCE_FAIL);
+    }
+
+    const attackEffectInvalidText = getSkillFromPendingAttack(attack)
+      ? "\n\n[공격 스킬 효과 무효]\n맞대응에 패배하여 공격자의 스킬 효과는 발동하지 않습니다."
+      : "";
+
+    resolvePendingAttack(attack["id"], {
+      대응종류: "맞대응", 대응값: counterValue, 최종피해: damage,
+      메모: "맞대응 성공. 공격자의 공격 무효화. 공격 스킬 효과 무효. 맞대응 스킬 효과 강제 적용"
+    });
+
+    const summary =
+      "[맞대응]\n" + statusSummaryLine +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격값: " + attackValue + "\n" + "맞대응값: " + counterValue + "\n" +
+      "결과: 맞대응 성공\n" + "반격피해: " + damage + "\n" +
+      compactDamageText(damageResult) +
+      (attackEffectInvalidText ? "\n공격 효과: 무효" : "") +
+      (counterEffectText ? "\n맞대응 효과: 강제 적용 / 상세보기" : "");
+
+    const detail =
+      statusDetailPrefix +
+      "[맞대응 상세]\n" +
+      "공격번호: " + attack["id"] + "\n공격자: " + attackerAlias + "\n대상: " + targetAlias + "\n" +
+      "공격값: " + attackValue + "\n\n" + response.detailText + "\n\n" +
+      "결과: 맞대응 성공\n공격자의 공격은 무효화됩니다.\n공격자에게 맞대응값 전체 피해를 적용합니다.\n\n" +
+      "반격피해: " + damage + "\n\n" + damageResult.text + attackEffectInvalidText + counterEffectText;
+
+    return makeFoldedResponse(summary, detail);
+  }
+
+  // ── 맞대응 패배 ──
+  if (counterValue < attackValue) {
+    const damage      = attackValue;
+    const damageResult = applyDamageToCharacter(targetAlias, damage);
+    const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue);
+
+    resolvePendingAttack(attack["id"], {
+      대응종류: "맞대응", 대응값: counterValue, 최종피해: damage,
+      메모: "맞대응 실패. 맞대응 무효화. 공격 스킬 효과 저항 자동 실패"
+    });
+
+    const summary =
+      "[맞대응]\n" + statusSummaryLine +
+      "공격번호: " + attack["id"] + "\n" +
+      "공격값: " + attackValue + "\n맞대응값: " + counterValue + "\n" +
+      "결과: 맞대응 실패\n최종피해: " + damage + "\n" +
+      compactDamageText(damageResult) +
+      (attackEffectText ? "\n공격 효과: 저항 자동 실패 / 강제 적용" : "");
+
+    const detail =
+      statusDetailPrefix +
+      "[맞대응 상세]\n" +
+      "공격번호: " + attack["id"] + "\n공격자: " + attackerAlias + "\n대상: " + targetAlias + "\n" +
+      "공격값: " + attackValue + "\n\n" + response.detailText + "\n\n" +
+      "결과: 맞대응 실패\n대상의 맞대응은 무효화됩니다.\n대상에게 공격값 전체 피해를 적용합니다.\n" +
+      "공격 스킬 효과에 대한 저항 판정은 수행하지 않습니다.\n\n" +
+      "최종피해: " + damage + "\n\n" + damageResult.text + attackEffectText;
+
+    return makeFoldedResponse(summary, detail);
+  }
+
+  // ── 동률 ──
+  const invalidText =
+    (getSkillFromPendingAttack(attack) || (response.kind === "스킬" && response.skill))
+      ? "\n스킬 효과도 발동하지 않습니다."
+      : "";
+
+  resolvePendingAttack(attack["id"], {
+    대응종류: "맞대응", 대응값: counterValue, 최종피해: 0,
+    메모: "동률. 양측 공격 상쇄. 양측 스킬 효과 무효"
+  });
+
+  const summary =
+    "[맞대응]\n" + statusSummaryLine +
+    "공격번호: " + attack["id"] + "\n" +
+    "공격값: " + attackValue + "\n맞대응값: " + counterValue + "\n" +
+    "결과: 동률 / 상쇄\n최종피해: 0" +
+    (invalidText ? "\n효과: 무효" : "");
+
+  const detail =
+    statusDetailPrefix +
+    "[맞대응 상세]\n" +
+    "공격번호: " + attack["id"] + "\n공격자: " + attackerAlias + "\n대상: " + targetAlias + "\n" +
+    "공격값: " + attackValue + "\n\n" + response.detailText + "\n\n" +
+    "동률.\n양측 공격이 상쇄됩니다." + invalidText + "\n피해 없음.";
+
+  return makeFoldedResponse(summary, detail);
+}
+
+function _resolveCombatResist(attack, character, rest, selfAlias, attackValue, attackerAlias, targetAlias, statusDetailPrefix, statusSummaryLine) {
+  if (rest.length < 1) {
+    return (
+      "저항에 사용할 스킬을 입력하세요.\n" +
+      "예시:\n" +
+      "!대응 저항 정신방벽\n" +
+      "!대응 저항 스킬 정신방벽\n" +
+      "!대응 저항 공용스킬 정신방벽"
+    );
+  }
+
+  let response;
+  try {
+    response = rollResponseValue(character, "저항", rest, attackerAlias);
+  } catch (e) {
+    return "[저항 대응 오류]\n" + e.message;
+  }
+
+  if (response.kind !== "스킬") {
+    return (
+      "[저항 대응 오류]\n" +
+      "저항 대응은 스킬 또는 공용 스킬로만 처리할 수 있습니다.\n" +
+      "예: !대응 저항 정신방벽"
+    );
+  }
+
+  const resistValue   = response.value;
+  const methodLine    = "저항 방식: " + (response.source === "공용" ? "공용 스킬" : "개인 스킬") + " - " + response.name + "\n";
+  const resistSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, RESIST_NONE);
+  const resistSkillBlock = resistSkillEffectText
+    ? "\n\n[저항 스킬 효과]\n" + response.name + "\n" + resistSkillEffectText
+    : "";
+
+  const summary =
+    "[저항 대응]\n" + statusSummaryLine +
+    "공격번호: " + attack["id"] + "\n" + methodLine +
+    "공격값: " + attackValue + "\n저항값: " + resistValue + "\n" +
+    (resistSkillEffectText ? "저항 스킬 효과: 적용 / 상세보기\n" : "") +
+    "안내: 저항 대응은 자동 피해 처리/공격 대기 해소를 수행하지 않습니다.\n" +
+    "필요 시 방어/회피/무대응으로 후속 처리하세요.";
+
+  const detail =
+    statusDetailPrefix +
+    "[저항 대응 상세]\n" +
+    "공격번호: " + attack["id"] + "\n공격자: " + attackerAlias + "\n대상: " + targetAlias + "\n" +
+    "공격값: " + attackValue + "\n\n" + response.detailText + "\n\n" +
+    "저항값: " + resistValue + "\n" +
+    "안내: 저항 대응 명령은 안내성 판정값 출력만 수행합니다.\n" +
+    "공격 대기는 그대로 유지되며, 실제 피해 처리는 별도 대응 명령으로 진행하세요." +
+    resistSkillBlock;
+
+  return makeFoldedResponse(summary, detail);
+}
+
+// ── combatResponse 본체 — 파싱 + 분기 라우팅만 담당 ──────────────────
 function combatResponse(parts, displayName) {
   const character = findCharacter(displayName);
-
   if (!character) {
-    return (
-      "캐릭터를 찾을 수 없습니다.\n" +
-      "디스코드 별명: " + displayName
-    );
+    return "캐릭터를 찾을 수 없습니다.\n디스코드 별명: " + displayName;
   }
 
   const selfAlias = String(character["별명"]).trim();
@@ -4497,9 +4835,7 @@ function combatResponse(parts, displayName) {
   const mode = String(parts[index] || "").trim();
   const rest = parts.slice(index + 1);
 
-  if (!mode) {
-    return "대응 종류를 입력하세요: 방어 / 회피 / 저항 / 맞대응 / 무대응";
-  }
+  if (!mode) return "대응 종류를 입력하세요: 방어 / 회피 / 저항 / 맞대응 / 무대응";
 
   const attack = attackId
     ? findPendingAttackById(attackId)
@@ -4523,485 +4859,30 @@ function combatResponse(parts, displayName) {
     );
   }
 
-  const attackValue = Math.floor(Number(attack["공격값"]) || 0);
+  const attackValue   = Math.floor(Number(attack["공격값"]) || 0);
   const attackerAlias = String(attack["공격자"]).trim();
-  const targetAlias = String(attack["대상"]).trim();
+  const targetAlias   = String(attack["대상"]).trim();
 
   if (mode === "무대응") {
-    const damage = attackValue;
-    const damageResult = applyDamageToCharacter(targetAlias, damage);
-
-    const attackEffectText = processPendingAttackSkillEffects(
-      attack,
-      "forceFail",
-      attackValue
-    );
-
-    resolvePendingAttack(attack["id"], {
-      대응종류: "무대응",
-      대응값: 0,
-      최종피해: damage,
-      메모: "무대응으로 피해 전부 적용. 스킬 효과 저항 자동 실패"
-    });
-
-    const summary =
-      "[무대응]\n" +
-      "공격번호: " + attack["id"] + "\n" +
-      "공격값: " + attackValue + "\n" +
-      "최종피해: " + damage + "\n" +
-      compactDamageText(damageResult) +
-      (attackEffectText ? "\n효과: 저항 자동 실패 / 강제 적용" : "");
-
-    const detail =
-      "[무대응 상세]\n" +
-      "공격번호: " + attack["id"] + "\n" +
-      "공격자: " + attackerAlias + "\n" +
-      "대상: " + targetAlias + "\n" +
-      "공격값: " + attackValue + "\n" +
-      "최종피해: " + damage + "\n\n" +
-      damageResult.text +
-      attackEffectText;
-
-    return makeFoldedResponse(summary, detail);
+    return _resolveCombatNoResponse(attack, attackValue, attackerAlias, targetAlias);
   }
 
-  const statusResult = processStatusBeforeCheck(selfAlias, "대응");
+  const statusResult = processStatusBeforeCheck(selfAlias, KIND_RESPONSE);
 
   if (statusResult.blocked) {
-    const damage = attackValue;
-    const damageResult = applyDamageToCharacter(targetAlias, damage);
-
-    const attackEffectText = processPendingAttackSkillEffects(
-      attack,
-      "forceFail",
-      attackValue
-    );
-
-    resolvePendingAttack(attack["id"], {
-      대응종류: "상태이상으로 대응불가",
-      대응값: 0,
-      최종피해: damage,
-      메모: "상태이상으로 대응 행동 저지. 무대응 처리. 스킬 효과 저항 자동 실패"
-    });
-
-    const summary =
-      "[대응 불가]\n" +
-      "상태이상으로 대응하지 못했습니다.\n" +
-      "공격번호: " + attack["id"] + "\n" +
-      "최종피해: " + damage + "\n" +
-      compactDamageText(damageResult) +
-      (attackEffectText ? "\n효과: 저항 자동 실패 / 강제 적용" : "");
-
-    const detail =
-      statusResult.text + "\n\n" +
-      "[대응 불가 상세]\n" +
-      "공격번호: " + attack["id"] + "\n" +
-      "공격자: " + attackerAlias + "\n" +
-      "대상: " + targetAlias + "\n" +
-      "공격값: " + attackValue + "\n" +
-      "최종피해: " + damage + "\n\n" +
-      damageResult.text +
-      attackEffectText;
-
-    return makeFoldedResponse(summary, detail);
+    return _resolveCombatStatusBlocked(attack, attackValue, attackerAlias, targetAlias, statusResult);
   }
 
-  const statusDetailPrefix = statusResult.text
-    ? statusResult.text + "\n\n"
-    : "";
+  const statusDetailPrefix = statusResult.text ? statusResult.text + "\n\n" : "";
+  const statusSummaryLine  = statusResult.text ? "상태 처리: 상세보기 참고\n" : "";
 
-  const statusSummaryLine = statusResult.text
-    ? "상태 처리: 상세보기 참고\n"
-    : "";
-
-  if (mode === "방어") {
-    let response;
-
-    try {
-      response = rollResponseValue(character, "방어", rest, attackerAlias);
-    } catch (e) {
-      return "[방어 대응 오류]\n" + e.message;
-    }
-
-    const defenseValue = response.value;
-    const damage = Math.max(0, attackValue - defenseValue);
-    const defenseSuccess = damage <= 0;
-
-    const damageResult = damage > 0
-      ? applyDamageToCharacter(targetAlias, damage)
-      : { text: "피해 없음." };
-
-    const attackEffectText = defenseSuccess
-      ? (
-        getSkillFromPendingAttack(attack)
-          ? "\n\n[스킬 효과 무효]\n방어에 성공하여 공격 스킬의 효과가 발동하지 않습니다."
-          : ""
-      )
-      : processPendingAttackSkillEffects(attack, "normal", attackValue);
-
-    // 방어용 스킬을 사용한 경우, 해당 스킬의 효과는 자신에게 적용한다.
-    const defenseSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, "none");
-    const defenseSkillBlock = defenseSkillEffectText
-      ? "\n\n[방어 스킬 효과]\n" + response.name + "\n" + defenseSkillEffectText
-      : "";
-
-    resolvePendingAttack(attack["id"], {
-      대응종류: "방어",
-      대응값: defenseValue,
-      최종피해: damage,
-      메모: (defenseSuccess
-        ? "방어 성공. 공격 스킬 효과 무효"
-        : "방어 실패. 공격 스킬 효과 저항 판정")
-        + (defenseSkillEffectText ? ". 방어 스킬 효과 적용" : "")
-    });
-
-    const methodLine = response.kind === "스킬"
-      ? "방어 방식: " + (response.source === "공용" ? "공용 스킬" : "개인 스킬") + " - " + response.name + "\n"
-      : "방어 방식: 액션 방어\n";
-
-    const summary =
-      "[방어 대응]\n" +
-      statusSummaryLine +
-      "공격번호: " + attack["id"] + "\n" +
-      methodLine +
-      "공격값: " + attackValue + "\n" +
-      "방어값: " + defenseValue + "\n" +
-      "결과: " + (defenseSuccess ? "방어 성공" : "방어 실패") + "\n" +
-      "최종피해: " + damage + "\n" +
-      compactDamageText(damageResult) +
-      (attackEffectText
-        ? "\n효과: " + (defenseSuccess ? "무효" : "저항 판정 / 상세보기")
-        : "") +
-      (defenseSkillEffectText ? "\n방어 스킬 효과: 적용 / 상세보기" : "");
-
-    const detail =
-      statusDetailPrefix +
-      "[방어 대응 상세]\n" +
-      "공격번호: " + attack["id"] + "\n" +
-      "공격자: " + attackerAlias + "\n" +
-      "대상: " + targetAlias + "\n" +
-      "공격값: " + attackValue + "\n\n" +
-      response.detailText + "\n\n" +
-      "결과: " + (defenseSuccess ? "방어 성공" : "방어 실패") + "\n" +
-      "최종피해: " + damage + "\n\n" +
-      damageResult.text +
-      attackEffectText +
-      defenseSkillBlock;
-
-    return makeFoldedResponse(summary, detail);
-  }
-
-  if (mode === "회피") {
-    let response;
-
-    try {
-      response = rollResponseValue(character, "회피", rest, attackerAlias);
-    } catch (e) {
-      return "[회피 대응 오류]\n" + e.message;
-    }
-
-    const evadeValue = response.value;
-    const success = evadeValue >= attackValue;
-    const damage = success ? 0 : attackValue;
-
-    const damageResult = damage > 0
-      ? applyDamageToCharacter(targetAlias, damage)
-      : { text: "피해 없음." };
-
-    const attackEffectText = success
-      ? (
-        getSkillFromPendingAttack(attack)
-          ? "\n\n[스킬 효과 무효]\n회피에 성공하여 공격 스킬의 효과가 발동하지 않습니다."
-          : ""
-      )
-      : processPendingAttackSkillEffects(attack, "normal", attackValue);
-
-    // 회피용 스킬을 사용한 경우, 해당 스킬의 효과는 자신에게 적용한다.
-    const evadeSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, "none");
-    const evadeSkillBlock = evadeSkillEffectText
-      ? "\n\n[회피 스킬 효과]\n" + response.name + "\n" + evadeSkillEffectText
-      : "";
-
-    resolvePendingAttack(attack["id"], {
-      대응종류: "회피",
-      대응값: evadeValue,
-      최종피해: damage,
-      메모: (success
-        ? "회피 성공. 공격 스킬 효과 무효"
-        : "회피 실패. 공격 스킬 효과 저항 판정")
-        + (evadeSkillEffectText ? ". 회피 스킬 효과 적용" : "")
-    });
-
-    const methodLine = response.kind === "스킬"
-      ? "회피 방식: " + (response.source === "공용" ? "공용 스킬" : "개인 스킬") + " - " + response.name + "\n"
-      : "회피 방식: 액션 회피\n";
-
-    const summary =
-      "[회피 대응]\n" +
-      statusSummaryLine +
-      "공격번호: " + attack["id"] + "\n" +
-      methodLine +
-      "공격값: " + attackValue + "\n" +
-      "회피값: " + evadeValue + "\n" +
-      "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
-      "최종피해: " + damage + "\n" +
-      compactDamageText(damageResult) +
-      (attackEffectText
-        ? "\n효과: " + (success ? "무효" : "저항 판정 / 상세보기")
-        : "") +
-      (evadeSkillEffectText ? "\n회피 스킬 효과: 적용 / 상세보기" : "") +
-      (success ? "\n추가: 다음 판정에 이득 가능" : "");
-
-    const detail =
-      statusDetailPrefix +
-      "[회피 대응 상세]\n" +
-      "공격번호: " + attack["id"] + "\n" +
-      "공격자: " + attackerAlias + "\n" +
-      "대상: " + targetAlias + "\n" +
-      "공격값: " + attackValue + "\n\n" +
-      response.detailText + "\n\n" +
-      "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
-      "최종피해: " + damage + "\n\n" +
-      damageResult.text +
-      attackEffectText +
-      evadeSkillBlock +
-      (success ? "\n\n다음 판정에 추가 이득을 얻을 수 있습니다." : "");
-
-    return makeFoldedResponse(summary, detail);
-  }
-
-  if (mode === "맞대응") {
-    if (rest.length < 1) {
-      return (
-        "맞대응에 사용할 액션/이능/스킬을 입력하세요.\n" +
-        "예시:\n" +
-        "!대응 맞대응 참격\n" +
-        "!대응 맞대응 화력 A\n" +
-        "!대응 맞대응 월광참            (개인→공용 순으로 검색)\n" +
-        "!대응 맞대응 스킬 월광참       (개인→공용)\n" +
-        "!대응 맞대응 공용스킬 마탄     (공용만)"
-      );
-    }
-
-    let response;
-
-    try {
-      response = rollResponseValue(character, "", rest, attackerAlias);
-    } catch (e) {
-      return "[맞대응 오류]\n" + e.message;
-    }
-
-    const counterValue = response.value;
-
-    if (counterValue > attackValue) {
-      const damage = counterValue;
-      const damageResult = applyDamageToRef(attackerAlias, damage);
-
-      let counterEffectText = "";
-
-      if (response.kind === "스킬" && response.skill) {
-        // 개인/공용 양쪽 모두 호환되게 헬퍼 사용 (공용 스킬 행은 "이름" 키 사용)
-        counterEffectText = _applyResponseSkillEffects(
-          response,
-          selfAlias,
-          attackerAlias,
-          "forceFail"
-        );
-      }
-
-      const attackEffectInvalidText = getSkillFromPendingAttack(attack)
-        ? "\n\n[공격 스킬 효과 무효]\n맞대응에 패배하여 공격자의 스킬 효과는 발동하지 않습니다."
-        : "";
-
-      resolvePendingAttack(attack["id"], {
-        대응종류: "맞대응",
-        대응값: counterValue,
-        최종피해: damage,
-        메모: "맞대응 성공. 공격자의 공격 무효화. 공격 스킬 효과 무효. 맞대응 스킬 효과 강제 적용"
-      });
-
-      const summary =
-        "[맞대응]\n" +
-        statusSummaryLine +
-        "공격번호: " + attack["id"] + "\n" +
-        "공격값: " + attackValue + "\n" +
-        "맞대응값: " + counterValue + "\n" +
-        "결과: 맞대응 성공\n" +
-        "반격피해: " + damage + "\n" +
-        compactDamageText(damageResult) +
-        (attackEffectInvalidText ? "\n공격 효과: 무효" : "") +
-        (counterEffectText ? "\n맞대응 효과: 강제 적용 / 상세보기" : "");
-
-      const detail =
-        statusDetailPrefix +
-        "[맞대응 상세]\n" +
-        "공격번호: " + attack["id"] + "\n" +
-        "공격자: " + attackerAlias + "\n" +
-        "대상: " + targetAlias + "\n" +
-        "공격값: " + attackValue + "\n\n" +
-        response.detailText + "\n\n" +
-        "결과: 맞대응 성공\n" +
-        "공격자의 공격은 무효화됩니다.\n" +
-        "공격자에게 맞대응값 전체 피해를 적용합니다.\n\n" +
-        "반격피해: " + damage + "\n\n" +
-        damageResult.text +
-        attackEffectInvalidText +
-        counterEffectText;
-
-      return makeFoldedResponse(summary, detail);
-    }
-
-    if (counterValue < attackValue) {
-      const damage = attackValue;
-      const damageResult = applyDamageToCharacter(targetAlias, damage);
-
-      const attackEffectText = processPendingAttackSkillEffects(
-        attack,
-        "forceFail",
-        attackValue
-      );
-
-      resolvePendingAttack(attack["id"], {
-        대응종류: "맞대응",
-        대응값: counterValue,
-        최종피해: damage,
-        메모: "맞대응 실패. 맞대응 무효화. 공격 스킬 효과 저항 자동 실패"
-      });
-
-      const summary =
-        "[맞대응]\n" +
-        statusSummaryLine +
-        "공격번호: " + attack["id"] + "\n" +
-        "공격값: " + attackValue + "\n" +
-        "맞대응값: " + counterValue + "\n" +
-        "결과: 맞대응 실패\n" +
-        "최종피해: " + damage + "\n" +
-        compactDamageText(damageResult) +
-        (attackEffectText ? "\n공격 효과: 저항 자동 실패 / 강제 적용" : "");
-
-      const detail =
-        statusDetailPrefix +
-        "[맞대응 상세]\n" +
-        "공격번호: " + attack["id"] + "\n" +
-        "공격자: " + attackerAlias + "\n" +
-        "대상: " + targetAlias + "\n" +
-        "공격값: " + attackValue + "\n\n" +
-        response.detailText + "\n\n" +
-        "결과: 맞대응 실패\n" +
-        "대상의 맞대응은 무효화됩니다.\n" +
-        "대상에게 공격값 전체 피해를 적용합니다.\n" +
-        "공격 스킬 효과에 대한 저항 판정은 수행하지 않습니다.\n\n" +
-        "최종피해: " + damage + "\n\n" +
-        damageResult.text +
-        attackEffectText;
-
-      return makeFoldedResponse(summary, detail);
-    }
-
-    const invalidText =
-      (getSkillFromPendingAttack(attack) || (response.kind === "스킬" && response.skill))
-        ? "\n스킬 효과도 발동하지 않습니다."
-        : "";
-
-    resolvePendingAttack(attack["id"], {
-      대응종류: "맞대응",
-      대응값: counterValue,
-      최종피해: 0,
-      메모: "동률. 양측 공격 상쇄. 양측 스킬 효과 무효"
-    });
-
-    const summary =
-      "[맞대응]\n" +
-      statusSummaryLine +
-      "공격번호: " + attack["id"] + "\n" +
-      "공격값: " + attackValue + "\n" +
-      "맞대응값: " + counterValue + "\n" +
-      "결과: 동률 / 상쇄\n" +
-      "최종피해: 0" +
-      (invalidText ? "\n효과: 무효" : "");
-
-    const detail =
-      statusDetailPrefix +
-      "[맞대응 상세]\n" +
-      "공격번호: " + attack["id"] + "\n" +
-      "공격자: " + attackerAlias + "\n" +
-      "대상: " + targetAlias + "\n" +
-      "공격값: " + attackValue + "\n\n" +
-      response.detailText + "\n\n" +
-      "동률.\n" +
-      "양측 공격이 상쇄됩니다." +
-      invalidText + "\n" +
-      "피해 없음.";
-
-    return makeFoldedResponse(summary, detail);
-  }
-
-  if (mode === "저항") {
-    // 저항 대응: 스킬 또는 공용 스킬로 저항값만 산출 (자동 피해/공격 대기 처리는 하지 않음)
-    if (rest.length < 1) {
-      return (
-        "저항에 사용할 스킬을 입력하세요.\n" +
-        "예시:\n" +
-        "!대응 저항 정신방벽\n" +
-        "!대응 저항 스킬 정신방벽\n" +
-        "!대응 저항 공용스킬 정신방벽"
-      );
-    }
-
-    let response;
-    try {
-      response = rollResponseValue(character, "저항", rest, attackerAlias);
-    } catch (e) {
-      return "[저항 대응 오류]\n" + e.message;
-    }
-
-    if (response.kind !== "스킬") {
-      return (
-        "[저항 대응 오류]\n" +
-        "저항 대응은 스킬 또는 공용 스킬로만 처리할 수 있습니다.\n" +
-        "예: !대응 저항 정신방벽"
-      );
-    }
-
-    const resistValue = response.value;
-    const methodLine = "저항 방식: " + (response.source === "공용" ? "공용 스킬" : "개인 스킬") + " - " + response.name + "\n";
-
-    // 저항용 스킬 효과는 자신에게 적용
-    const resistSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, "none");
-    const resistSkillBlock = resistSkillEffectText
-      ? "\n\n[저항 스킬 효과]\n" + response.name + "\n" + resistSkillEffectText
-      : "";
-
-    const summary =
-      "[저항 대응]\n" +
-      statusSummaryLine +
-      "공격번호: " + attack["id"] + "\n" +
-      methodLine +
-      "공격값: " + attackValue + "\n" +
-      "저항값: " + resistValue + "\n" +
-      (resistSkillEffectText ? "저항 스킬 효과: 적용 / 상세보기\n" : "") +
-      "안내: 저항 대응은 자동 피해 처리/공격 대기 해소를 수행하지 않습니다.\n" +
-      "필요 시 방어/회피/무대응으로 후속 처리하세요.";
-
-    const detail =
-      statusDetailPrefix +
-      "[저항 대응 상세]\n" +
-      "공격번호: " + attack["id"] + "\n" +
-      "공격자: " + attackerAlias + "\n" +
-      "대상: " + targetAlias + "\n" +
-      "공격값: " + attackValue + "\n\n" +
-      response.detailText + "\n\n" +
-      "저항값: " + resistValue + "\n" +
-      "안내: 저항 대응 명령은 안내성 판정값 출력만 수행합니다.\n" +
-      "공격 대기는 그대로 유지되며, 실제 피해 처리는 별도 대응 명령으로 진행하세요." +
-      resistSkillBlock;
-
-    return makeFoldedResponse(summary, detail);
-  }
+  if (mode === "방어")   return _resolveCombatDefend (attack, character, rest, selfAlias, attackValue, attackerAlias, targetAlias, statusDetailPrefix, statusSummaryLine);
+  if (mode === "회피")   return _resolveCombatEvade  (attack, character, rest, selfAlias, attackValue, attackerAlias, targetAlias, statusDetailPrefix, statusSummaryLine);
+  if (mode === "맞대응") return _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, attackerAlias, targetAlias, statusDetailPrefix, statusSummaryLine);
+  if (mode === "저항")   return _resolveCombatResist (attack, character, rest, selfAlias, attackValue, attackerAlias, targetAlias, statusDetailPrefix, statusSummaryLine);
 
   return "알 수 없는 대응입니다: " + mode + "\n가능한 대응: 방어 / 회피 / 저항 / 맞대응 / 무대응";
 }
-
 function makeVarSafeName(name) {
   return String(name || "")
     .trim()
@@ -5544,7 +5425,7 @@ function getSkillFromPendingAttack(attack) {
 
   const attackKind = String(attack["공격종류"] || "").trim();
 
-  if (attackKind !== "스킬") {
+  if (attackKind !== KIND_SKILL) {
     return null;
   }
 
@@ -5563,7 +5444,7 @@ function processPendingAttackSkillEffects(attack, resistanceMode, finalValueForE
 
   if (!skill) {
     const _kind = String(attack["공격종류"] || "").trim();
-    if (_kind === "에너미스킬" && Math.floor(Number(finalValueForEffect) || 0) > 0) {
+    if (_kind === KIND_ENEMY_SKILL && Math.floor(Number(finalValueForEffect) || 0) > 0) {
       const _enemySkill = getEnemySkillFromPendingAttack(attack);
       if (_enemySkill) {
         const _effectText = String(_enemySkill["effect"] || "").trim();
@@ -5650,7 +5531,7 @@ function buildStatusOptionsFromTemplate(template, opts, context) {
 function applyStatusWithResistance(targetAlias, statusName, category, effectCode, opts, context, resistanceMode) {
   opts = opts || {};
   context = context || {};
-  resistanceMode = resistanceMode || "normal";
+  resistanceMode = resistanceMode || RESIST_NORMAL;
 
   const logs = [];
 
@@ -5665,7 +5546,7 @@ function applyStatusWithResistance(targetAlias, statusName, category, effectCode
 
   const resistanceRequested = isResistanceEnabled(opts["저항"]);
 
-  if (resistanceRequested && resistanceMode === "normal") {
+  if (resistanceRequested && resistanceMode === RESIST_NORMAL) {
     const difficulty = readEffectNumber(
       opts["저항난이도"] || "최종값",
       context,
@@ -5699,7 +5580,7 @@ function applyStatusWithResistance(targetAlias, statusName, category, effectCode
     );
   }
 
-  if (resistanceRequested && resistanceMode === "forceFail") {
+  if (resistanceRequested && resistanceMode === RESIST_FORCE_FAIL) {
     logs.push(
       "[상태 저항 자동 실패]\n" +
       "대상: " + targetAlias + "\n" +
@@ -5709,7 +5590,7 @@ function applyStatusWithResistance(targetAlias, statusName, category, effectCode
     );
   }
 
-  if (resistanceRequested && resistanceMode === "none") {
+  if (resistanceRequested && resistanceMode === RESIST_NONE) {
     logs.push(
       "[상태 저항 생략]\n" +
       "대상: " + targetAlias + "\n" +
@@ -5739,7 +5620,7 @@ function applyStatusWithResistance(targetAlias, statusName, category, effectCode
 function applyTemplateStatusWithResistance(targetAlias, templateName, opts, context, resistanceMode) {
   opts = opts || {};
   context = context || {};
-  resistanceMode = resistanceMode || "normal";
+  resistanceMode = resistanceMode || RESIST_NORMAL;
 
   const template = findStatusTemplate(templateName);
 
@@ -5813,9 +5694,9 @@ function processSkillEffects(effectText, context) {
 
   if (!resistanceMode) {
     if (context.allowResistance === false) {
-      resistanceMode = "forceFail";
+      resistanceMode = RESIST_FORCE_FAIL;
     } else {
-      resistanceMode = "normal";
+      resistanceMode = RESIST_NORMAL;
     }
   }
 
@@ -5981,6 +5862,48 @@ function processSkillEffects(effectText, context) {
       return;
     }
 
+    if (command === "피해") {
+      if (tokens.length < 3) {
+        throw new Error("피해 효과 형식 오류: " + line);
+      }
+
+      const targetAlias = resolveEffectTarget(tokens[1], context);
+      const amount = Math.max(0, Math.floor(readEffectNumber(tokens[2], context, 0)));
+
+      if (!targetAlias) {
+        logs.push(
+          "[효과 무효]\n" +
+          "효과: 피해 " + (tokens[2] || "") + "\n" +
+          "이유: 대상이 지정되지 않았습니다."
+        );
+        return;
+      }
+
+      logs.push(applyDamageToRef(targetAlias, amount).text || "");
+      return;
+    }
+
+    if (command === "회복") {
+      if (tokens.length < 3) {
+        throw new Error("회복 효과 형식 오류: " + line);
+      }
+
+      const targetAlias = resolveEffectTarget(tokens[1], context);
+      const amount = Math.max(0, Math.floor(readEffectNumber(tokens[2], context, 0)));
+
+      if (!targetAlias) {
+        logs.push(
+          "[효과 무효]\n" +
+          "효과: 회복 " + (tokens[2] || "") + "\n" +
+          "이유: 대상이 지정되지 않았습니다."
+        );
+        return;
+      }
+
+      logs.push(applyHealingToRef(targetAlias, amount).text || "");
+      return;
+    }
+
     throw new Error("알 수 없는 효과 명령입니다: " + command);
   });
 
@@ -6136,7 +6059,7 @@ function processStatusBeforeCheck(alias, checkType) {
   try {
     var charForPassive = findCharacterByAlias(alias);
     if (charForPassive) {
-      var passiveText = firePassiveTriggerEffects(charForPassive, "판정시작", { resistanceMode: "none" });
+      var passiveText = firePassiveTriggerEffects(charForPassive, "판정시작", { resistanceMode: RESIST_NONE });
       if (passiveText) logs.push(passiveText);
     }
   } catch (e) {
@@ -7020,7 +6943,7 @@ function finishSession(parts, displayName) {
     allChars.forEach(function (ch) {
       var aliasV = String(ch["별명"] || "").trim();
       if (!aliasV) return;
-      var out = firePassiveTriggerEffects(ch, "세션종료", { resistanceMode: "none" });
+      var out = firePassiveTriggerEffects(ch, "세션종료", { resistanceMode: RESIST_NONE });
       if (out) passiveLogs.push("[" + aliasV + "]\n" + out);
     });
   } catch (e) {
@@ -7129,11 +7052,48 @@ function getCandidatePassivesForCharacter(character) {
 }
 
 // ── 조건 파서 ────────────────────────────────────────────────────────
+//
+// 조건 텍스트 포맷:
+//   필수 조건 — 일반 줄. 하나라도 실패하면 스킬 발동 차단.
+//   세부 조건 — "세부:" 접두어로 시작. 발동 차단은 없으나 충족 시 판정값 보너스 적용.
+//              형식: 세부: <조건> [+N 또는 -N]   (보너스 생략 시 +0)
+//   HP 비율  — 현재체력비율, 대상현재체력비율 변수로 비교 가능.
+//              예: 현재체력비율 <= 50
+//
+// parseConditionList → { required: string[], detail: {cond, bonus}[] }
+// evaluateConditionList → { ok, failed, passed, plainText, detailMet, detailBonus }
+// checkSkillConditions  → { blocked, text, headerText, detailBonus }
+
+function _parseDetailLine(raw) {
+  // "세부:" 또는 "세부 :" 접두어를 제거하고, 끝에 붙은 +N / -N 보너스를 추출.
+  var s = raw.replace(/^세부\s*[:：]\s*/i, "").trim();
+  var bonus = 0;
+  var m = s.match(/([+-]\d+(?:\.\d+)?)\s*$/);
+  if (m) {
+    bonus = Number(m[1]);
+    s = s.slice(0, s.length - m[0].length).trim();
+  }
+  return { cond: s, bonus: bonus };
+}
 
 function parseConditionList(conditionText) {
   var s = String(conditionText == null ? "" : conditionText).trim();
-  if (!s) return [];
-  return s.split(/[,，\n\r]+/).map(function (t) { return String(t).trim(); }).filter(Boolean);
+  if (!s) return { required: [], detail: [] };
+
+  var required = [];
+  var detail   = [];
+
+  s.split(/[,，\n\r]+/).forEach(function (raw) {
+    raw = String(raw || "").trim();
+    if (!raw) return;
+    if (/^세부\s*[:：]/i.test(raw)) {
+      detail.push(_parseDetailLine(raw));
+    } else {
+      required.push(raw);
+    }
+  });
+
+  return { required: required, detail: detail };
 }
 
 // 비교 연산자 분리. 반환: {variable, op, value} 또는 null.
@@ -7248,13 +7208,15 @@ function evaluateRecognizedCondition(rawCond, ctx) {
 }
 
 // 조건 목록 전체 평가.
+// 반환: { ok, failed, passed, plainText, detailBonus, detailMet, detailMissed }
 function evaluateConditionList(conditionText, ctx) {
-  var list = parseConditionList(conditionText);
-  var passed = [];
-  var failed = [];
+  var parsed = parseConditionList(conditionText);
+  var passed    = [];
+  var failed    = [];
   var plainText = [];
 
-  list.forEach(function (cond) {
+  // ── 필수 조건 ──
+  parsed.required.forEach(function (cond) {
     var r = evaluateRecognizedCondition(cond, ctx);
     if (!r.recognized) {
       plainText.push(r.message);
@@ -7264,30 +7226,54 @@ function evaluateConditionList(conditionText, ctx) {
     else failed.push(r.message);
   });
 
+  // ── 세부 조건 ──
+  var detailBonus  = 0;
+  var detailMet    = [];
+  var detailMissed = [];
+
+  parsed.detail.forEach(function (item) {
+    if (!item.cond) return;
+    var r = evaluateRecognizedCondition(item.cond, ctx);
+    if (!r.recognized) {
+      // 인식 불가 → 수동 확인으로 분류 (차단 없음)
+      plainText.push("[세부] " + item.cond);
+      return;
+    }
+    if (r.ok) {
+      detailBonus += item.bonus;
+      detailMet.push({ cond: item.cond, bonus: item.bonus });
+    } else {
+      detailMissed.push({ cond: item.cond, bonus: item.bonus });
+    }
+  });
+
   return {
-    ok: failed.length === 0,
-    failed: failed,
-    passed: passed,
-    plainText: plainText
+    ok:           failed.length === 0,
+    failed:       failed,
+    passed:       passed,
+    plainText:    plainText,
+    detailBonus:  detailBonus,
+    detailMet:    detailMet,
+    detailMissed: detailMissed
   };
 }
 
 // ── 액티브 스킬 조건 검사 ────────────────────────────────────────────
 
 // 반환:
-//   { blocked: true, text: "..." }            — 사용 막아야 할 때
-//   { blocked: false, headerText: "..." }    — 통과(헤더 텍스트 비어있을 수 있음)
+//   { blocked: true,  text: "...", headerText: "",    detailBonus: 0 }  — 필수 조건 미충족
+//   { blocked: false, text: "",    headerText: "...", detailBonus: N }  — 통과 + 세부 보너스
 function checkSkillConditions(rawCondText, options) {
   options = options || {};
-  var label = options.label || "스킬";
-  var name = options.name || "";
-  var character = options.character || null;
+  var label       = options.label || "스킬";
+  var name        = options.name  || "";
+  var character   = options.character   || null;
   var targetAlias = options.targetAlias || "";
 
   var text = String(rawCondText || "").trim();
-  if (!text) return { blocked: false, headerText: "" };
+  if (!text) return { blocked: false, headerText: "", detailBonus: 0 };
 
-  var ctx = buildConditionContext(character, targetAlias);
+  var ctx    = buildConditionContext(character, targetAlias);
   var result = evaluateConditionList(text, ctx);
 
   if (!result.ok) {
@@ -7303,23 +7289,49 @@ function checkSkillConditions(rawCondText, options) {
       blockLines.push("수동 확인:");
       result.plainText.forEach(function (c) { blockLines.push("- " + c); });
     }
-    return { blocked: true, text: blockLines.join("\n") };
+    return { blocked: true, text: blockLines.join("\n"), headerText: "", detailBonus: 0 };
   }
 
   var lines = [];
-  if (result.passed.length > 0 || result.plainText.length > 0) {
+  var hasInfo = result.passed.length > 0 || result.plainText.length > 0 ||
+                result.detailMet.length > 0 || result.detailMissed.length > 0;
+
+  if (hasInfo) {
     lines.push("[조건 확인]");
     if (result.passed.length > 0) {
       lines.push("통과:");
       result.passed.forEach(function (c) { lines.push("- " + c); });
     }
+    if (result.detailMet.length > 0) {
+      if (lines.length > 1) lines.push("");
+      lines.push("세부 충족:");
+      result.detailMet.forEach(function (d) {
+        lines.push("- " + d.cond + (d.bonus !== 0 ? " → " + formatSigned(d.bonus) : ""));
+      });
+      if (result.detailBonus !== 0) {
+        lines.push("세부 보너스 합계: " + formatSigned(result.detailBonus));
+      }
+    }
+    if (result.detailMissed.length > 0) {
+      if (lines.length > 1) lines.push("");
+      lines.push("세부 미충족:");
+      result.detailMissed.forEach(function (d) {
+        lines.push("- " + d.cond + (d.bonus !== 0 ? " (" + formatSigned(d.bonus) + " 미적용)" : ""));
+      });
+    }
     if (result.plainText.length > 0) {
-      if (result.passed.length > 0) lines.push("");
+      if (lines.length > 1) lines.push("");
       lines.push("수동 확인:");
       result.plainText.forEach(function (c) { lines.push("- " + c); });
     }
   }
-  return { blocked: false, headerText: lines.join("\n") };
+
+  return {
+    blocked:     false,
+    text:        "",
+    headerText:  lines.join("\n"),
+    detailBonus: result.detailBonus || 0
+  };
 }
 
 // ── 패시브 보정/효과 ─────────────────────────────────────────────────
@@ -7374,7 +7386,8 @@ function firePassiveTriggerEffects(character, trigger, ctxOpts) {
 
   passives.forEach(function (p) {
     var pTrigger = String(p["발동"] || "").trim();
-    if (pTrigger !== trigger) return;
+    // "항상"/"전체" 트리거는 모든 발동 시점에 실행
+    if (pTrigger !== trigger && pTrigger !== "항상" && pTrigger !== "전체") return;
 
     var effectText = String(p["효과"] || "").trim();
     if (!effectText) return;
@@ -7389,7 +7402,7 @@ function firePassiveTriggerEffects(character, trigger, ctxOpts) {
         finalValue: Number(ctxOpts.finalValue || 0),
         skillName: "패시브: " + (p["이름"] || p["key"]),
         skill: { 스킬명: p["이름"] || p["key"], 효과: effectText },
-        resistanceMode: ctxOpts.resistanceMode || "none"
+        resistanceMode: ctxOpts.resistanceMode || RESIST_NONE
       });
       if (processed) logs.push("[패시브 효과: " + (p["이름"] || p["key"]) + "]\n" + processed);
     } catch (e) {
@@ -7645,6 +7658,30 @@ function applyDamageToRef(ref, damage) {
   }
 
   return applyDamageToCharacter(ref, damage);
+}
+
+// applyDamageToRef의 회복 대칭 버전. ref가 에너미면 applyEnemyHpChange, PC면 applyHealingToCharacter.
+function applyHealingToRef(ref, amount) {
+  var enemy = null;
+  try { enemy = resolveEnemy(ref); } catch(e) {}
+
+  if (enemy) {
+    const result = applyEnemyHpChange(enemy["enemy_id"], amount, true);
+    const label  = enemy["alias"] || enemy["name"];
+    return {
+      ok: true,
+      before: result.before,
+      after:  result.after,
+      maxHp:  result.maxHp,
+      text:
+        "[회복 적용]\n" +
+        "대상: " + label + "\n" +
+        "회복량: " + amount + "\n" +
+        "체력: " + result.before + " → " + result.after + " / " + result.maxHp
+    };
+  }
+
+  return applyHealingToCharacter(ref, amount);
 }
 
 // ── Pending attack helpers ────────────────────────────────────────────
@@ -8063,7 +8100,7 @@ function enemyAttack(parts, displayName, utterance) {
       const pending = createPendingAttack(
         enemy["enemy_id"],
         targetAlias,
-        "에너미액션",
+        KIND_ENEMY_ACTION,
         attackName,
         result.total
       );
@@ -8086,6 +8123,93 @@ function enemyAttack(parts, displayName, utterance) {
 
 // ── Command: !에너미대응 ─────────────────────────────────────────────
 
+// ── TASK-14: 에너미 대응 모드별 헬퍼 ──────────────────────────────────
+function _resolveEnemyNoResponse(enemy, attack, attackValue) {
+  const result    = applyEnemyHpChange(enemy["enemy_id"], attackValue, false);
+  const effectOut = applyPendingAttackEffectIfHit(attack, attackValue, enemy["enemy_id"]);
+  resolvePendingAttack(attack["id"], { 대응종류: "무대응", 대응값: 0, 최종피해: attackValue, 메모: "에너미 무대응. 피해 전부 적용" });
+  return (
+    "[에너미 무대응]\n" +
+    "공격번호: " + attack["id"] + "\n공격값: " + attackValue + "\n최종피해: " + attackValue + "\n" +
+    "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+    (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut
+  );
+}
+
+function _resolveEnemyDefend(enemy, attack, attackValue) {
+  const defDice = Math.floor(Number(enemy["방어"]) || 0);
+  if (defDice <= 0) return "[에너미 대응 오류]\n방어 수치가 0입니다. 무대응 또는 회피를 사용하세요.";
+
+  const defRoll  = rollEnemyAction(enemy, "방어", 0);
+  const damage   = Math.max(0, attackValue - defRoll.total);
+  const success  = damage <= 0;
+  const result   = damage > 0
+    ? applyEnemyHpChange(enemy["enemy_id"], damage, false)
+    : { before: Math.floor(Number(enemy["current_hp"]) || 0),
+        after:  Math.floor(Number(enemy["current_hp"]) || 0),
+        maxHp:  Math.floor(Number(enemy["max_hp"])     || 0) };
+  const effectOut = success ? "" : applyPendingAttackEffectIfHit(attack, damage, enemy["enemy_id"]);
+
+  resolvePendingAttack(attack["id"], { 대응종류: "방어", 대응값: defRoll.total, 최종피해: damage, 메모: success ? "에너미 방어 성공" : "에너미 방어 실패" });
+  return (
+    "[에너미 방어]\n공격번호: " + attack["id"] + "\n공격값: " + attackValue + "\n" +
+    "방어 굴림: " + defRoll.rollText + "\n결과: " + (success ? "방어 성공" : "방어 실패") + "\n최종피해: " + damage + "\n" +
+    (damage > 0 ? "체력: " + result.before + " → " + result.after + " / " + result.maxHp : "피해 없음") +
+    (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut
+  );
+}
+
+function _resolveEnemyEvade(enemy, attack, attackValue) {
+  const evDice = Math.floor(Number(enemy["회피"]) || 0);
+  if (evDice <= 0) return "[에너미 대응 오류]\n회피 수치가 0입니다. 무대응 또는 방어를 사용하세요.";
+
+  const evRoll  = rollEnemyAction(enemy, "회피", 0);
+  const success = evRoll.total >= attackValue;
+  const damage  = success ? 0 : attackValue;
+  const result  = damage > 0
+    ? applyEnemyHpChange(enemy["enemy_id"], damage, false)
+    : { before: Math.floor(Number(enemy["current_hp"]) || 0),
+        after:  Math.floor(Number(enemy["current_hp"]) || 0),
+        maxHp:  Math.floor(Number(enemy["max_hp"])     || 0) };
+  const effectOut = success ? "" : applyPendingAttackEffectIfHit(attack, damage, enemy["enemy_id"]);
+
+  resolvePendingAttack(attack["id"], { 대응종류: "회피", 대응값: evRoll.total, 최종피해: damage, 메모: success ? "에너미 회피 성공" : "에너미 회피 실패" });
+  return (
+    "[에너미 회피]\n공격번호: " + attack["id"] + "\n공격값: " + attackValue + "\n" +
+    "회피 굴림: " + evRoll.rollText + "\n결과: " + (success ? "회피 성공" : "회피 실패") + "\n최종피해: " + damage + "\n" +
+    (damage > 0 ? "체력: " + result.before + " → " + result.after + " / " + result.maxHp : "피해 없음") +
+    (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut
+  );
+}
+
+function _resolveEnemyCounter(enemy, attack, attackValue, attackerRef, counterActionName) {
+  const ctrDice = Math.floor(Number(enemy[counterActionName]) || 0);
+  if (ctrDice <= 0) return "[에너미 대응 오류]\n" + counterActionName + " 수치가 0입니다.";
+
+  const ctrRoll  = rollEnemyAction(enemy, counterActionName, 0);
+  const ctrValue = ctrRoll.total;
+  const header   = "[에너미 맞대응]\n공격번호: " + attack["id"] + "\n공격값: " + attackValue + "\n맞대응 굴림: " + ctrRoll.rollText + "\n";
+
+  if (ctrValue > attackValue) {
+    const damageResult = applyDamageToRef(attackerRef, ctrValue);
+    resolvePendingAttack(attack["id"], { 대응종류: "맞대응", 대응값: ctrValue, 최종피해: ctrValue, 메모: "에너미 맞대응 성공. 공격자에게 반격 피해" });
+    return header + "결과: 에너미 맞대응 성공\n반격피해: " + ctrValue + "\n\n" + damageResult.text;
+  }
+
+  if (ctrValue < attackValue) {
+    const result      = applyEnemyHpChange(enemy["enemy_id"], attackValue, false);
+    const effectOut   = applyPendingAttackEffectIfHit(attack, attackValue, enemy["enemy_id"]);
+    resolvePendingAttack(attack["id"], { 대응종류: "맞대응", 대응값: ctrValue, 최종피해: attackValue, 메모: "에너미 맞대응 실패. 에너미에게 피해" });
+    return header + "결과: 에너미 맞대응 실패\n최종피해: " + attackValue + "\n" +
+      "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+      (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut;
+  }
+
+  resolvePendingAttack(attack["id"], { 대응종류: "맞대응", 대응값: ctrValue, 최종피해: 0, 메모: "에너미 맞대응 동률. 상쇄" });
+  return header + "결과: 동률 / 상쇄\n최종피해: 0";
+}
+
+// ── enemyRespond 본체 — 파싱 + 모드 라우팅 ───────────────────────────
 function enemyRespond(parts, displayName) {
   ensureEnemySheets();
 
@@ -8104,24 +8228,15 @@ function enemyRespond(parts, displayName) {
 
   var index = 2;
   var attackId = "";
-
-  if (/^ATK-\d+/i.test(String(parts[index] || ""))) {
-    attackId = parts[index];
-    index++;
-  }
+  if (/^ATK-\d+/i.test(String(parts[index] || ""))) { attackId = parts[index]; index++; }
 
   const mode = String(parts[index] || "").trim();
   const rest = parts.slice(index + 1);
-
-  if (!mode) {
-    return "[에너미 대응 오류]\n대응 방식을 입력하세요: 방어 / 회피 / 무대응 / 맞대응";
-  }
+  if (!mode) return "[에너미 대응 오류]\n대응 방식을 입력하세요: 방어 / 회피 / 무대응 / 맞대응";
 
   var attack;
   try {
-    attack = attackId
-      ? findPendingAttackById(attackId)
-      : findLatestPendingAttackForEnemy(parts[1]);
+    attack = attackId ? findPendingAttackById(attackId) : findLatestPendingAttackForEnemy(parts[1]);
   } catch(e) {
     return "[에너미 대응 오류]\n" + e.message;
   }
@@ -8134,192 +8249,26 @@ function enemyRespond(parts, displayName) {
     );
   }
 
-  const attackValue  = Math.floor(Number(attack["공격값"]) || 0);
-  const attackerRef  = String(attack["공격자"]).trim();
-  const enemyLabel   = enemy["alias"] || enemy["name"];
+  const attackValue = Math.floor(Number(attack["공격값"]) || 0);
+  const attackerRef = String(attack["공격자"]).trim();
 
-  // ── 무대응 ──
-  if (mode === "무대응") {
-    const result     = applyEnemyHpChange(enemy["enemy_id"], attackValue, false);
-    const effectOut  = applyPendingAttackEffectIfHit(attack, attackValue, enemy["enemy_id"]);
-    resolvePendingAttack(attack["id"], {
-      대응종류: "무대응",
-      대응값:   0,
-      최종피해: attackValue,
-      메모:     "에너미 무대응. 피해 전부 적용"
-    });
-    return (
-      "[에너미 무대응]\n" +
-      "공격번호: " + attack["id"]  + "\n" +
-      "공격값: "   + attackValue   + "\n" +
-      "최종피해: " + attackValue   + "\n" +
-      "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
-      (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") +
-      effectOut
-    );
-  }
+  if (mode === "무대응") return _resolveEnemyNoResponse(enemy, attack, attackValue);
+  if (mode === "방어")   return _resolveEnemyDefend    (enemy, attack, attackValue);
+  if (mode === "회피")   return _resolveEnemyEvade     (enemy, attack, attackValue);
 
-  // ── 방어 ──
-  if (mode === "방어") {
-    const defDice = Math.floor(Number(enemy["방어"]) || 0);
-    if (defDice <= 0) {
-      return "[에너미 대응 오류]\n방어 수치가 0입니다. 무대응 또는 회피를 사용하세요.";
-    }
-    const defRoll  = rollEnemyAction(enemy, "방어", 0);
-    const damage   = Math.max(0, attackValue - defRoll.total);
-    const success  = damage <= 0;
-    const result   = damage > 0
-      ? applyEnemyHpChange(enemy["enemy_id"], damage, false)
-      : { before: Math.floor(Number(enemy["current_hp"]) || 0),
-          after:  Math.floor(Number(enemy["current_hp"]) || 0),
-          maxHp:  Math.floor(Number(enemy["max_hp"])     || 0) };
-
-    const defEffectOut = success ? "" : applyPendingAttackEffectIfHit(attack, damage, enemy["enemy_id"]);
-    resolvePendingAttack(attack["id"], {
-      대응종류: "방어",
-      대응값:   defRoll.total,
-      최종피해: damage,
-      메모:     success ? "에너미 방어 성공" : "에너미 방어 실패"
-    });
-
-    return (
-      "[에너미 방어]\n" +
-      "공격번호: " + attack["id"]   + "\n" +
-      "공격값: "   + attackValue    + "\n" +
-      "방어 굴림: " + defRoll.rollText + "\n" +
-      "결과: "     + (success ? "방어 성공" : "방어 실패") + "\n" +
-      "최종피해: " + damage + "\n" +
-      (damage > 0
-        ? "체력: " + result.before + " → " + result.after + " / " + result.maxHp
-        : "피해 없음") +
-      (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") +
-      defEffectOut
-    );
-  }
-
-  // ── 회피 ──
-  if (mode === "회피") {
-    const evDice = Math.floor(Number(enemy["회피"]) || 0);
-    if (evDice <= 0) {
-      return "[에너미 대응 오류]\n회피 수치가 0입니다. 무대응 또는 방어를 사용하세요.";
-    }
-    const evRoll   = rollEnemyAction(enemy, "회피", 0);
-    const success  = evRoll.total >= attackValue;
-    const damage   = success ? 0 : attackValue;
-    const result   = damage > 0
-      ? applyEnemyHpChange(enemy["enemy_id"], damage, false)
-      : { before: Math.floor(Number(enemy["current_hp"]) || 0),
-          after:  Math.floor(Number(enemy["current_hp"]) || 0),
-          maxHp:  Math.floor(Number(enemy["max_hp"])     || 0) };
-
-    const evEffectOut = success ? "" : applyPendingAttackEffectIfHit(attack, damage, enemy["enemy_id"]);
-    resolvePendingAttack(attack["id"], {
-      대응종류: "회피",
-      대응값:   evRoll.total,
-      최종피해: damage,
-      메모:     success ? "에너미 회피 성공" : "에너미 회피 실패"
-    });
-
-    return (
-      "[에너미 회피]\n" +
-      "공격번호: " + attack["id"]  + "\n" +
-      "공격값: "   + attackValue   + "\n" +
-      "회피 굴림: " + evRoll.rollText + "\n" +
-      "결과: "     + (success ? "회피 성공" : "회피 실패") + "\n" +
-      "최종피해: " + damage + "\n" +
-      (damage > 0
-        ? "체력: " + result.before + " → " + result.after + " / " + result.maxHp
-        : "피해 없음") +
-      (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") +
-      evEffectOut
-    );
-  }
-
-  // ── 맞대응 ──
   if (mode === "맞대응") {
     const counterActionName = String(rest[0] || "").trim();
     if (!counterActionName || !ENEMY_ACTION_FIELDS.includes(counterActionName)) {
       return (
-        "[에너미 맞대응 오류]\n" +
-        "맞대응에 사용할 액션명을 입력하세요.\n" +
+        "[에너미 맞대응 오류]\n맞대응에 사용할 액션명을 입력하세요.\n" +
         "예: !에너미대응 " + parts[1] + " 맞대응 참격\n" +
         "사용 가능: " + ENEMY_ACTION_FIELDS.join(", ")
       );
     }
-
-    const ctrDice = Math.floor(Number(enemy[counterActionName]) || 0);
-    if (ctrDice <= 0) {
-      return "[에너미 대응 오류]\n" + counterActionName + " 수치가 0입니다.";
-    }
-
-    const ctrRoll    = rollEnemyAction(enemy, counterActionName, 0);
-    const ctrValue   = ctrRoll.total;
-
-    // 에너미 승리: 반격피해를 공격자(PC)에게
-    if (ctrValue > attackValue) {
-      const damageResult = applyDamageToRef(attackerRef, ctrValue);
-      resolvePendingAttack(attack["id"], {
-        대응종류: "맞대응",
-        대응값:   ctrValue,
-        최종피해: ctrValue,
-        메모:     "에너미 맞대응 성공. 공격자에게 반격 피해"
-      });
-      return (
-        "[에너미 맞대응]\n" +
-        "공격번호: "  + attack["id"]    + "\n" +
-        "공격값: "    + attackValue     + "\n" +
-        "맞대응 굴림: " + ctrRoll.rollText + "\n" +
-        "결과: 에너미 맞대응 성공\n" +
-        "반격피해: "  + ctrValue        + "\n\n" +
-        damageResult.text
-      );
-    }
-
-    // PC 승리: 피해를 에너미에게
-    if (ctrValue < attackValue) {
-      const result      = applyEnemyHpChange(enemy["enemy_id"], attackValue, false);
-      const ctrEffectOut = applyPendingAttackEffectIfHit(attack, attackValue, enemy["enemy_id"]);
-      resolvePendingAttack(attack["id"], {
-        대응종류: "맞대응",
-        대응값:   ctrValue,
-        최종피해: attackValue,
-        메모:     "에너미 맞대응 실패. 에너미에게 피해"
-      });
-      return (
-        "[에너미 맞대응]\n" +
-        "공격번호: "  + attack["id"]    + "\n" +
-        "공격값: "    + attackValue     + "\n" +
-        "맞대응 굴림: " + ctrRoll.rollText + "\n" +
-        "결과: 에너미 맞대응 실패\n" +
-        "최종피해: " + attackValue + "\n" +
-        "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
-        (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") +
-        ctrEffectOut
-      );
-    }
-
-    // 동률: 상쇄
-    resolvePendingAttack(attack["id"], {
-      대응종류: "맞대응",
-      대응값:   ctrValue,
-      최종피해: 0,
-      메모:     "에너미 맞대응 동률. 상쇄"
-    });
-    return (
-      "[에너미 맞대응]\n" +
-      "공격번호: "  + attack["id"]    + "\n" +
-      "공격값: "    + attackValue     + "\n" +
-      "맞대응 굴림: " + ctrRoll.rollText + "\n" +
-      "결과: 동률 / 상쇄\n" +
-      "최종피해: 0"
-    );
+    return _resolveEnemyCounter(enemy, attack, attackValue, attackerRef, counterActionName);
   }
 
-  return (
-    "[에너미 대응 오류]\n" +
-    "알 수 없는 대응 방식: " + mode + "\n" +
-    "방어 / 회피 / 무대응 / 맞대응 액션명"
-  );
+  return "[에너미 대응 오류]\n알 수 없는 대응 방식: " + mode + "\n방어 / 회피 / 무대응 / 맞대응 액션명";
 }
 
 // ── End of Enemy System v0.1 ─────────────────────────────────────────
@@ -8420,40 +8369,15 @@ function rollEnemySkill(enemy, skill, bonus) {
 
 // ── Key-value parser for !에너미생성 ─────────────────────────────────
 
+var ENEMY_CREATE_KNOWN_KEYS = [
+  "이름", "별명", "분류", "위험도", "체력",
+  "참격", "관통", "타격", "격투", "사격",
+  "방어", "회피", "저항", "조사", "해석", "은신", "추적", "설득",
+  "규칙", "징후", "메모"
+];
+
 function parseKeyValueArgs(text) {
-  const knownKeys = [
-    "이름", "별명", "분류", "위험도", "체력",
-    "참격", "관통", "타격", "격투", "사격",
-    "방어", "회피", "저항", "조사", "해석", "은신", "추적", "설득",
-    "규칙", "징후", "메모"
-  ];
-
-  text = String(text || "");
-  const positions = [];
-
-  knownKeys.forEach(function(key) {
-    const pattern = key + ":";
-    var searchFrom = 0;
-    while (searchFrom < text.length) {
-      const idx = text.indexOf(pattern, searchFrom);
-      if (idx === -1) break;
-      const prevChar = idx > 0 ? text[idx - 1] : " ";
-      if (/\s/.test(prevChar) || idx === 0) {
-        positions.push({ key: key, start: idx, valueStart: idx + pattern.length });
-      }
-      searchFrom = idx + 1;
-    }
-  });
-
-  positions.sort(function(a, b) { return a.start - b.start; });
-
-  const result = {};
-  for (var i = 0; i < positions.length; i++) {
-    const valueStart = positions[i].valueStart;
-    const end        = i + 1 < positions.length ? positions[i + 1].start : text.length;
-    result[positions[i].key] = text.slice(valueStart, end).trim();
-  }
-  return result;
+  return parseKeyValueArgsWithKeys(text, ENEMY_CREATE_KNOWN_KEYS);
 }
 
 // ── Command: !에너미생성 ─────────────────────────────────────────────
@@ -8689,7 +8613,7 @@ function enemySkillUse(parts, displayName) {
     const pending = createPendingAttackFlex(
       enemy["enemy_id"],
       targetRef,
-      "에너미스킬",
+      KIND_ENEMY_SKILL,
       skillName,
       rollResult.total
     );
@@ -8859,7 +8783,7 @@ function validateEnemySkillEffect(effectText) {
 
 function getEnemySkillFromPendingAttack(attack) {
   if (!attack) return null;
-  if (String(attack["공격종류"] || "").trim() !== "에너미스킬") return null;
+  if (String(attack["공격종류"] || "").trim() !== KIND_ENEMY_SKILL) return null;
 
   const attackerRef = String(attack["공격자"] || "").trim();
   const skillName   = String(attack["공격명"] || "").trim();
@@ -8873,6 +8797,8 @@ function getEnemySkillFromPendingAttack(attack) {
 
 // ── Enemy skill effect application ───────────────────────────────────
 
+// 피해/회복은 processSkillEffects(applyDamageToRef / applyHealingToRef)가 처리.
+// 에너미 대상 상태/스택은 미지원이므로 별도 차단 후 나머지는 processSkillEffects에 위임.
 function applyEnemySkillEffect(effectText, context) {
   effectText = String(effectText || "").trim();
   if (!effectText) return "";
@@ -8896,36 +8822,6 @@ function applyEnemySkillEffect(effectText, context) {
     var entityIsEnemy = false;
     if (actualAlias) {
       try { resolveEnemy(actualAlias); entityIsEnemy = true; } catch(e) {}
-    }
-
-    if (cmd === "피해") {
-      const amt = Math.floor(Number(tokens[2]) || 0);
-      if (entityIsEnemy) {
-        logs.push(applyDamageToRef(actualAlias, amt).text);
-      } else if (actualAlias) {
-        logs.push(applyDamageToCharacter(actualAlias, amt).text);
-      }
-      return;
-    }
-
-    if (cmd === "회복") {
-      const amt = Math.floor(Number(tokens[2]) || 0);
-      if (entityIsEnemy) {
-        var en = null;
-        try { en = resolveEnemy(actualAlias); } catch(e) {}
-        if (en) {
-          const r = applyEnemyHpChange(en["enemy_id"], amt, true);
-          logs.push(
-            "[회복 적용]\n" +
-            "대상: " + (en["alias"] || en["name"]) + "\n" +
-            "회복량: " + amt + "\n" +
-            "체력: " + r.before + " → " + r.after + " / " + r.maxHp
-          );
-        }
-      } else if (actualAlias) {
-        logs.push(applyHealingToCharacter(actualAlias, amt).text);
-      }
-      return;
     }
 
     if (entityIsEnemy &&
@@ -8960,7 +8856,7 @@ function applyPendingAttackEffectIfHit(attack, finalDamage, targetRef) {
   const atkTarget   = String(attack["대상"]     || "").trim();
   const resolvedTarget = targetRef || atkTarget;
 
-  if (attackKind === "에너미스킬") {
+  if (attackKind === KIND_ENEMY_SKILL) {
     const enemySkill = getEnemySkillFromPendingAttack(attack);
     if (!enemySkill) return "";
     const effectText = String(enemySkill["effect"] || "").trim();
@@ -8975,7 +8871,7 @@ function applyPendingAttackEffectIfHit(attack, finalDamage, targetRef) {
     });
   }
 
-  if (attackKind === "스킬") {
+  if (attackKind === KIND_SKILL) {
     const memo = String(attack["메모"] || "").trim();
     if (memo.indexOf("TARGET_TYPE:ENEMY") < 0) return "";
     const skill = getSkillFromPendingAttack(attack);
@@ -9881,8 +9777,9 @@ function commonSkillUseCommand(parts, displayName) {
   });
   if (commonCondCheck.blocked) return commonCondCheck.text;
   const conditionHeaderText = commonCondCheck.headerText || "";
+  const condDetailBonus     = commonCondCheck.detailBonus || 0;
 
-  const statusResult = processStatusBeforeCheck(alias, "스킬");
+  const statusResult = processStatusBeforeCheck(alias, KIND_SKILL);
   if (statusResult.blocked) {
     return statusResult.text;
   }
@@ -9918,8 +9815,9 @@ function commonSkillUseCommand(parts, displayName) {
   let finalValue;
   try {
     finalValue = applyMods(result, mods);
-    const statusMod = applyStatusModifierToValue(alias, finalValue, ["스킬", type], effectiveTarget || "");
+    const statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type], effectiveTarget || "");
     finalValue = statusMod.value;
+    if (condDetailBonus !== 0) finalValue += condDetailBonus;
   } catch (e) {
     return (
       "[공용 스킬 판정 오류]\n" +
@@ -9932,125 +9830,27 @@ function commonSkillUseCommand(parts, displayName) {
   const resultText = getSkillResultText(type, finalValue);
   const rawEffectText = String(commonSkill["효과"] || "").trim();
 
-  let pendingId = "";
-  let healingDetailText = "";
-  let combatDetailText = "";
-  let interferenceDetailText = "";
-  let effectDetailText = "";
-  let effectSummary = summarizeSkillEffects(rawEffectText);
-
-  const isTargetedAttackSkill = ATTACK_SKILL_TYPES.includes(type) && effectiveTarget;
-  const isTargetedInterferenceSkill = type === "간섭" && effectiveTarget;
-
-  // 공용 스킬을 일반 스킬 처리 함수에 넘기기 위한 호환 객체 (스킬명 키 매핑)
+  // 공용 스킬을 processSkillEffects 호환 형태로 래핑 (스킬명 키 매핑)
   const skillForEffects = {
     "스킬명": displaySkillName,
-    "계통": commonSkill["계통"] || "",
-    "계열": type,
-    "랭크": rank,
+    "계통":   commonSkill["계통"] || "",
+    "계열":   type,
+    "랭크":   rank,
     "계산식": commonSkill["계산식"] || "",
-    "효과": rawEffectText,
-    "조건": commonSkill["조건"] || "",
-    "대가": "",
-    "설명": commonSkill["설명"] || ""
+    "효과":   rawEffectText,
+    "조건":   commonSkill["조건"] || "",
+    "대가":   "",
+    "설명":   commonSkill["설명"] || ""
   };
 
-  if (type === "치유" || type === "재생") {
-    const healTarget = effectiveTarget || alias;
-    const healResult = applyHealingToCharacter(healTarget, finalValue);
-    healingDetailText = "\n\n" + healResult.text;
-    effectSummary = rawEffectText ? effectSummary : "회복 적용";
-  }
+  const _efx = _buildSkillEffectResult({
+    rawEffectText, skillForEffects,
+    alias, targetAlias: effectiveTarget, finalValue, type
+  });
+  if (!_efx.ok) return _efx.errorText;
 
-  if (isTargetedAttackSkill) {
-    const pending = createPendingAttackFlex(
-      alias,
-      effectiveTarget,
-      "스킬",
-      displaySkillName,
-      finalValue
-    );
-
-    if (pending.ok) {
-      pendingId = pending.id;
-      combatDetailText = "\n\n" + makeCombatChoiceTextFlex(pending);
-
-      if (rawEffectText) {
-        effectSummary = "맞게 될 시 " + summarizeSkillEffects(rawEffectText);
-        effectDetailText =
-          "\n\n[스킬 효과 대기]\n" +
-          "화력계 대상 지정 스킬의 효과는 즉시 발동하지 않습니다.\n" +
-          "대상의 대응 결과에 따라 처리됩니다.";
-      } else {
-        effectSummary = "없음";
-      }
-    } else {
-      combatDetailText = "\n\n" + pending.text;
-      effectSummary = "공격 대기 생성 실패";
-    }
-  } else if (isTargetedInterferenceSkill) {
-    let resistance;
-    try {
-      resistance = rollResistanceForStatus(effectiveTarget, finalValue, []);
-    } catch (e) {
-      return (
-        "[간섭 저항 오류]\n" +
-        displaySkillName + "\n\n" +
-        "오류: " + e.message
-      );
-    }
-
-    interferenceDetailText =
-      "\n\n[간섭 저항]\n" +
-      resistance.text + "\n\n" +
-      "결과: " + (resistance.success ? "간섭 무효" : "간섭 적중");
-
-    if (resistance.success) {
-      effectSummary = rawEffectText ? "저항 성공으로 무효" : "간섭 무효";
-      effectDetailText =
-        rawEffectText
-          ? "\n\n[스킬 효과 무효]\n대상이 간섭 저항에 성공하여 효과가 발동하지 않습니다."
-          : "";
-    } else {
-      try {
-        const processed = processSkillEffects(rawEffectText, {
-          userAlias: alias,
-          targetAlias: effectiveTarget,
-          finalValue: finalValue,
-          skillName: displaySkillName,
-          skill: skillForEffects,
-          resistanceMode: "none"
-        });
-        effectDetailText = processed;
-        effectSummary = processed ? "적용됨 / " + summarizeSkillEffects(rawEffectText) : "없음";
-      } catch (e) {
-        return (
-          "[간섭 효과 처리 오류]\n" +
-          displaySkillName + "\n\n" +
-          "오류: " + e.message
-        );
-      }
-    }
-  } else {
-    try {
-      const processed = processSkillEffects(rawEffectText, {
-        userAlias: alias,
-        targetAlias: effectiveTarget,
-        finalValue: finalValue,
-        skillName: displaySkillName,
-        skill: skillForEffects,
-        resistanceMode: "normal"
-      });
-      effectDetailText = processed;
-      effectSummary = processed ? "처리됨 / " + summarizeSkillEffects(rawEffectText) : "없음";
-    } catch (e) {
-      return (
-        "[공용 스킬 효과 처리 오류]\n" +
-        displaySkillName + "\n\n" +
-        "오류: " + e.message
-      );
-    }
-  }
+  const { pendingId, healingDetailText, combatDetailText,
+          interferenceDetailText, effectDetailText, effectSummary } = _efx;
 
   const diceText = formatDiceLogs(calc.diceLogs);
 
