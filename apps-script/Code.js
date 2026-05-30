@@ -624,6 +624,28 @@ function ensureNicknameSheet() {
   return sh;
 }
 
+// 토큰 배열에서 가장 긴 캐릭터 별명/닉네임을 찾는다.
+// tokens: 분리된 단어 배열, start: 탐색 시작 인덱스, minRemaining: 뒤에 남겨야 할 최소 토큰 수
+// 반환: { alias: 정식별명, rest: 나머지토큰 }
+// 못 찾으면 { alias: tokens[start], rest: tokens.slice(start+1) }
+function _resolveAliasFromTokens(tokens, start, minRemaining) {
+  start = start || 1;
+  minRemaining = minRemaining || 0;
+  var maxLen = tokens.length - start - minRemaining;
+  if (maxLen < 1) return { alias: tokens[start] || "", rest: tokens.slice(start + 1) };
+
+  // 긴 것부터 시도 (공백 포함 닉네임 우선)
+  for (var len = maxLen; len >= 1; len--) {
+    var candidate = tokens.slice(start, start + len).join(" ");
+    var char = findCharacterByAlias(candidate);  // 내부에서 닉네임도 체크
+    if (char) {
+      return { alias: String(char["별명"] || candidate).trim(), rest: tokens.slice(start + len) };
+    }
+  }
+  // 매칭 실패 → 첫 토큰 반환 (기존 동작)
+  return { alias: tokens[start] || "", rest: tokens.slice(start + 1) };
+}
+
 // 입력값 → 정식 별명 변환. 못 찾으면 입력값 그대로 반환.
 function _resolveNickname(input) {
   var s = String(input || "").trim();
@@ -669,7 +691,10 @@ function nicknameList(parts) {
   var rows = getSheetData(SHEET_NICKNAME_DB);
   if (rows.length === 0) return "등록된 닉네임이 없습니다.";
 
-  var filterAlias = (parts && parts.length >= 2) ? String(parts[1]).trim() : "";
+  var filterAlias = "";
+  if (parts && parts.length >= 2) {
+    filterAlias = _resolveAliasFromTokens(parts, 1, 0).alias;
+  }
   var filtered = filterAlias
     ? rows.filter(function(r){ return String(r["별명"] || "").trim() === filterAlias; })
     : rows;
@@ -685,15 +710,16 @@ function nicknameList(parts) {
   return lines.join("\n");
 }
 
-// !닉네임추가 별명 닉네임1 닉네임2 ...
+// !닉네임추가 별명 닉네임1 닉네임2 ...  (별명에 공백 포함 가능, 닉네임은 공백 없이 각각)
 function nicknameAdd(parts) {
   if (!parts || parts.length < 3) {
     return "사용법: !닉네임추가 별명 닉네임1 닉네임2 ...\n예시: !닉네임추가 월하륜 월하 월짱";
   }
-  var alias = String(parts[1]).trim();
+  var resolved = _resolveAliasFromTokens(parts, 1, 1);
+  var alias = resolved.alias;
   if (!findCharacterByAlias(alias)) return "BOT_DB에 없는 별명입니다: " + alias;
 
-  var newNicks = parts.slice(2).map(function(n){ return n.trim(); }).filter(Boolean);
+  var newNicks = resolved.rest.map(function(n){ return n.trim(); }).filter(Boolean);
   if (newNicks.length === 0) return "추가할 닉네임을 입력하세요.";
 
   ensureNicknameSheet();
@@ -717,13 +743,14 @@ function nicknameAdd(parts) {
   }
 }
 
-// !닉네임삭제 별명 닉네임
+// !닉네임삭제 별명 닉네임  (별명/닉네임 모두 공백 포함 가능)
 function nicknameRemove(parts) {
   if (!parts || parts.length < 3) {
     return "사용법: !닉네임삭제 별명 닉네임\n예시: !닉네임삭제 월하륜 월짱";
   }
-  var alias  = String(parts[1]).trim();
-  var target = String(parts[2]).trim().toLowerCase();
+  var resolved = _resolveAliasFromTokens(parts, 1, 1);
+  var alias  = resolved.alias;
+  var target = resolved.rest.join(" ").trim().toLowerCase();
 
   ensureNicknameSheet();
   var existing = _findNicknameRow(alias);
@@ -1497,8 +1524,9 @@ function damageApply(parts, displayName) {
     );
   }
 
-  const alias = parts[1];
-  const amount = parts[2];
+  const resolved = _resolveAliasFromTokens(parts, 1, 1);
+  const alias  = resolved.alias;
+  const amount = resolved.rest[0] || parts[parts.length - 1];
 
   const result = applyDamageToCharacter(alias, amount);
   if (!result.ok) return result.text;
@@ -7852,7 +7880,11 @@ function firePassiveTriggerEffects(character, trigger, ctxOpts) {
 // ── !패시브목록 명령어 ──────────────────────────────────────────────
 
 function passiveListCommand(parts, displayName) {
-  var targetAlias = (parts && parts.length >= 2) ? String(parts[1]).trim() : "";
+  var targetAlias = "";
+  if (parts && parts.length >= 2) {
+    var r = _resolveAliasFromTokens(parts, 1, 0);
+    targetAlias = r.alias;
+  }
   var character = targetAlias ? findCharacterByAlias(targetAlias) : findCharacter(displayName);
 
   if (!character) {
