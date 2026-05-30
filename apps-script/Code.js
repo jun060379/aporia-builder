@@ -1052,12 +1052,15 @@ function _applyPassiveDamageModifier(alias, damage) {
       debugLogs.push("조건결과 ok=" + result.ok + " failed=" + JSON.stringify(result.failed));
       if (!result.ok) return;
 
-      const v = _evalPassiveValue(p["수치"], ctx.vars) + (result.detailBonus || 0);
+      const baseV = _evalPassiveValue(p["수치"], ctx.vars);
+      const v = Math.floor(baseV * (result.detailMult || 1)) + (result.detailBonus || 0);
       if (!v) { debugLogs.push("수치=0 스킵"); return; }
 
       delta += v;
-      const bonusNote = result.detailBonus ? " (세부 +" + result.detailBonus + " 포함)" : "";
-      logs.push("[패시브: " + (p["이름"] || p["key"]) + "]\n피해 보정: " + formatSigned(v) + bonusNote);
+      const multNote  = (result.detailMult  && result.detailMult  !== 1) ? " ×" + result.detailMult  : "";
+      const bonusNote = result.detailBonus ? " +" + result.detailBonus : "";
+      const noteStr   = (multNote || bonusNote) ? " (세부" + multNote + bonusNote + " 적용)" : "";
+      logs.push("[패시브: " + (p["이름"] || p["key"]) + "]\n피해 보정: " + formatSigned(v) + noteStr);
     });
 
     damage = Math.max(0, damage + delta);
@@ -1088,7 +1091,8 @@ function _applyPassiveHealingModifier(alias, amount) {
       const result = evaluateConditionList(p["조건"], ctx);
       if (!result.ok) return;
 
-      const v = _evalPassiveValue(p["수치"], ctx.vars) + (result.detailBonus || 0);
+      const baseV = _evalPassiveValue(p["수치"], ctx.vars);
+      const v = Math.floor(baseV * (result.detailMult || 1)) + (result.detailBonus || 0);
       if (!v) return;
 
       delta += v;
@@ -2845,6 +2849,7 @@ function skillUse(parts, displayName) {
   if (condCheck.blocked) return condCheck.text;
   const conditionHeaderText = condCheck.headerText || "";
   const condDetailBonus = condCheck.detailBonus || 0;
+  const condDetailMult  = condCheck.detailMult  || 1;
 
   const statusResult = processStatusBeforeCheck(alias, KIND_SKILL);
 
@@ -2890,7 +2895,8 @@ function skillUse(parts, displayName) {
     finalValue = applyMods(result, mods);
     const statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type], targetAlias || "");
     finalValue = statusMod.value;
-    // 세부 조건 보너스 적용
+    // 세부 조건 보정 적용 (곱셈 → 덧셈 순)
+    if (condDetailMult !== 1) finalValue = Math.floor(finalValue * condDetailMult);
     if (condDetailBonus !== 0) finalValue += condDetailBonus;
   } catch (e) {
     return (
@@ -7189,15 +7195,23 @@ function getCandidatePassivesForCharacter(character) {
 // checkSkillConditions  → { blocked, text, headerText, detailBonus }
 
 function _parseDetailLine(raw) {
-  // "세부:" 또는 "세부 :" 접두어를 제거하고, 끝에 붙은 +N / -N 보너스를 추출.
+  // "세부:" 접두어 제거 후 끝의 보너스/배율 추출.
+  // 형식: +N/-N (덧셈) 또는 *N/×N (곱셈, 기본 1)
   var s = raw.replace(/^세부\s*[:：]\s*/i, "").trim();
   var bonus = 0;
-  var m = s.match(/([+-]\d+(?:\.\d+)?)\s*$/);
-  if (m) {
-    bonus = Number(m[1]);
-    s = s.slice(0, s.length - m[0].length).trim();
+  var mult  = 1;
+  var mMult = s.match(/[*×](\d+(?:\.\d+)?)\s*$/);
+  if (mMult) {
+    mult = Number(mMult[1]);
+    s = s.slice(0, s.length - mMult[0].length).trim();
+  } else {
+    var mAdd = s.match(/([+-]\d+(?:\.\d+)?)\s*$/);
+    if (mAdd) {
+      bonus = Number(mAdd[1]);
+      s = s.slice(0, s.length - mAdd[0].length).trim();
+    }
   }
-  return { cond: s, bonus: bonus };
+  return { cond: s, bonus: bonus, mult: mult };
 }
 
 function parseConditionList(conditionText) {
@@ -7357,6 +7371,7 @@ function evaluateConditionList(conditionText, ctx) {
 
   // ── 세부 조건 ──
   var detailBonus  = 0;
+  var detailMult   = 1;
   var detailMet    = [];
   var detailMissed = [];
 
@@ -7364,15 +7379,15 @@ function evaluateConditionList(conditionText, ctx) {
     if (!item.cond) return;
     var r = evaluateRecognizedCondition(item.cond, ctx);
     if (!r.recognized) {
-      // 인식 불가 → 수동 확인으로 분류 (차단 없음)
       plainText.push("[세부] " + item.cond);
       return;
     }
     if (r.ok) {
       detailBonus += item.bonus;
-      detailMet.push({ cond: item.cond, bonus: item.bonus });
+      detailMult  *= item.mult;
+      detailMet.push({ cond: item.cond, bonus: item.bonus, mult: item.mult });
     } else {
-      detailMissed.push({ cond: item.cond, bonus: item.bonus });
+      detailMissed.push({ cond: item.cond, bonus: item.bonus, mult: item.mult });
     }
   });
 
@@ -7382,6 +7397,7 @@ function evaluateConditionList(conditionText, ctx) {
     passed:       passed,
     plainText:    plainText,
     detailBonus:  detailBonus,
+    detailMult:   detailMult,
     detailMet:    detailMet,
     detailMissed: detailMissed
   };
@@ -7498,7 +7514,8 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
     var cond = evaluateConditionList(p["조건"], ctx);
     if (!cond.ok) return;
 
-    var v = _evalPassiveValue(p["수치"], ctx.vars) + (cond.detailBonus || 0);
+    var baseV = _evalPassiveValue(p["수치"], ctx.vars);
+    var v = Math.floor(baseV * (cond.detailMult || 1)) + (cond.detailBonus || 0);
     if (!v) return;
     delta += v;
     lines.push("[패시브: " + (p["이름"] || p["key"]) + "]\n보정: " + formatSigned(v));
@@ -9957,6 +9974,7 @@ function commonSkillUseCommand(parts, displayName) {
   if (commonCondCheck.blocked) return commonCondCheck.text;
   const conditionHeaderText = commonCondCheck.headerText || "";
   const condDetailBonus     = commonCondCheck.detailBonus || 0;
+  const condDetailMult      = commonCondCheck.detailMult  || 1;
 
   const statusResult = processStatusBeforeCheck(alias, KIND_SKILL);
   if (statusResult.blocked) {
@@ -9996,6 +10014,7 @@ function commonSkillUseCommand(parts, displayName) {
     finalValue = applyMods(result, mods);
     const statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type], effectiveTarget || "");
     finalValue = statusMod.value;
+    if (condDetailMult !== 1) finalValue = Math.floor(finalValue * condDetailMult);
     if (condDetailBonus !== 0) finalValue += condDetailBonus;
   } catch (e) {
     return (
