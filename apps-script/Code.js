@@ -193,16 +193,34 @@ function doGet(e) {
 
 function getGameData() {
   try {
-    var charRows  = getSheetData(SHEET_BOT_DB);
-    var skillRows = getSheetData(SHEET_SKILL_DB);
+    var charRows    = getSheetData(SHEET_BOT_DB);
+    var skillRows   = getSheetData(SHEET_SKILL_DB);
+    var passiveRows = [];
+    try { passiveRows = getSheetData(SHEET_PASSIVE_SKILLS); } catch(_e) {}
+
+    var statFields    = ["근력","민첩","내구","감각","지능"];
+    var featureFields = ["무기술","격투술","사격술","기동술","방어술","인내","관찰","추적술","은밀행동","지식","이면학","화술"];
+    var profFields    = ["참격숙련","관통숙련","타격숙련","격투숙련","사격숙련","회피숙련","방어숙련","저항숙련","조사숙련","해석숙련","은신숙련","추적숙련","설득숙련"];
 
     var characters = charRows.map(function(r) {
+      var stats = {};
+      statFields.forEach(function(f) { stats[f] = String(r[f] || "F").trim(); });
+      var features = {};
+      featureFields.forEach(function(f) { features[f] = Number(r[f] || 0); });
+      var profs = {};
+      profFields.forEach(function(f) { profs[f] = Number(r[f] || 0); });
       return {
-        alias:   String(r["별명"]   || "").trim(),
-        name:    String(r["이름"]   || "").trim(),
-        race:    String(r["종족"]   || "").trim(),
-        faction: String(r["소속"]   || "무소속").trim(),
-        level:   Number(r["레벨"]   || 0),
+        alias:     String(r["별명"]    || "").trim(),
+        name:      String(r["이름"]    || "").trim(),
+        race:      String(r["종족"]    || "").trim(),
+        faction:   String(r["소속"]    || "무소속").trim(),
+        level:     Number(r["레벨"]    || 0),
+        erosion:   Number(r["이면침식"] || 0),
+        maxHp:     Number(r["최대체력"] || 0),
+        currentHp: Number(r["현재체력"] || 0),
+        stats:    stats,
+        features: features,
+        profs:    profs,
       };
     }).filter(function(c) { return c.alias; });
 
@@ -213,11 +231,27 @@ function getGameData() {
         tradition:   String(r["계통"]   || "").trim(),
         series:      String(r["계열"]   || "").trim(),
         rank:        String(r["랭크"]   || "").trim(),
+        formula:     String(r["계산식"] || "").trim(),
+        condition:   String(r["조건"]   || "").trim(),
+        cost:        String(r["대가"]   || "").trim(),
         description: String(r["설명"]   || "").trim(),
       };
     }).filter(function(s) { return s.owner && s.name; });
 
-    return { ok: true, characters: characters, skills: skills };
+    var passives = passiveRows.map(function(r) {
+      return {
+        owner:     String(r["소유키"]  || "").trim(),
+        ownerType: String(r["소유타입"] || "").trim(),
+        name:      String(r["이름"]    || "").trim(),
+        category:  String(r["분류"]    || "").trim(),
+        value:     String(r["수치"]    || "").trim(),
+        trigger:   String(r["발동"]    || "").trim(),
+        condition: String(r["조건"]    || "").trim(),
+        description: String(r["설명"] || "").trim(),
+      };
+    }).filter(function(p) { return p.name; });
+
+    return { ok: true, characters: characters, skills: skills, passives: passives };
   } catch (e) {
     return { ok: false, error: e.message };
   }
