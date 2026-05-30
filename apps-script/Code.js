@@ -3439,7 +3439,7 @@ function characterSubmit(utterance, displayName) {
     추적숙련: getNumberField(data, "추적숙련", 0),
     설득숙련: getNumberField(data, "설득숙련", 0),
 
-    일상점: getNumberField(data, "일상점", 0),
+    일상점: (data["일상점"] !== undefined && String(data["일상점"]).trim() !== "") ? getNumberField(data, "일상점", 0) : "",
     이면침식: getNumberField(data, "이면침식", 0),
 
     신청일: now,
