@@ -17,6 +17,33 @@ const DESCRIPTIONS = {
   free:         '자동 블럭으로 만들 수 없는 효과를 직접 입력합니다. 운영진 수동 검수 대상입니다.',
 };
 
+const NUM_TOKENS = [
+  { label: '랭크', token: '랭크' },
+  { label: '근력', token: '근력' }, { label: '민첩', token: '민첩' },
+  { label: '내구', token: '내구' }, { label: '감각', token: '감각' }, { label: '지능', token: '지능' },
+  { label: 'HP%', token: '현재체력비율' }, { label: '침식', token: '이면침식' },
+  { label: '최종값', token: '최종값' },
+];
+
+function NumTokenBar({ onInsert }) {
+  return (
+    <div className="flex flex-wrap gap-1 pt-0.5">
+      {NUM_TOKENS.map(({ label, token }) => (
+        <button key={token} type="button" onClick={() => onInsert(token)}
+          className="text-[10px] px-1.5 py-0.5 bg-slate-100 hover:bg-cyan-100 text-slate-500 hover:text-cyan-700 border border-slate-200 hover:border-cyan-300 rounded font-mono transition-colors">
+          {label}
+        </button>
+      ))}
+      {['+', '-', '*', '/'].map(op => (
+        <button key={op} type="button" onClick={() => onInsert(` ${op} `)}
+          className="text-[10px] px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-400 border border-slate-200 rounded font-mono transition-colors">
+          {op}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const TEMPLATE_NAMES = ['출혈', '구속', '보호막', '취약', '쇠약', '강화', '직접입력'];
 const CUSTOM_CATEGORIES = ['지속피해', '행동방해', '보호', '약화', '강화', '기타'];
 const EFFECT_CODES = ['bleed', 'bind', 'shield', 'vulnerable', 'weaken', 'buff', '직접입력'];
@@ -208,7 +235,7 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
                   </label>
                 ))}
               </div>
-              <p className="text-[10px] text-slate-400">수치·최대에 수식 가능: 근력, 스택_혈인, 이면침식 등</p>
+              <NumTokenBar onInsert={t => setParam('value', (params.value || '') + t)} />
               <ResistSection params={params} setParam={setParam} />
             </div>
           )}
@@ -299,7 +326,7 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
                   </label>
                 )}
               </div>
-              <p className="text-[10px] text-slate-400">수식 가능: 근력, 스택_혈인, 이면침식, 최종값 등</p>
+              <NumTokenBar onInsert={t => setParam('value', (params.value || '') + t)} />
             </div>
           )}
 
