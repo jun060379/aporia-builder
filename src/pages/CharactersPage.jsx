@@ -27,7 +27,6 @@ const SERIES_CLS = {
   강화:'bg-amber-50 text-amber-600 border-amber-200',
   특수:'bg-slate-100 text-slate-500 border-slate-200',
 };
-const STAT_VALUE = {E:1,D:2,C:4,B:7,A:14,S:24};
 
 // ── 유틸 ──────────────────────────────────────────────────────
 function Badge({ text, cls }) {
@@ -107,12 +106,10 @@ function CharacterModal({ char, skills, passives, onClose }) {
             <div className="grid grid-cols-5 gap-2">
               {STAT_NAMES.map(s => {
                 const grade = char.stats?.[s] || 'F';
-                const val   = STAT_VALUE[grade] || 0;
                 return (
                   <div key={s} className="text-center bg-slate-50 rounded-xl py-3 border border-slate-100">
                     <div className="text-[10px] text-slate-400 mb-1">{s}</div>
                     <div className="text-lg font-bold text-amber-600">{grade}</div>
-                    <div className="text-[10px] text-slate-400">{val}</div>
                   </div>
                 );
               })}
