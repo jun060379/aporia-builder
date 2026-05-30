@@ -1613,23 +1613,41 @@ function applyMods(value, mods) {
 function parseTargetAndMods(tokens) {
   const mods = [];
   let target = "";
+  let i = 0;
 
-  tokens.forEach(token => {
-    token = String(token || "").trim();
-    if (!token) return;
+  while (i < tokens.length) {
+    var token = String(tokens[i] || "").trim();
+    if (!token) { i++; continue; }
 
     if (token.startsWith("대상:") || token.startsWith("대상=")) {
       target = token.replace(/^대상[:=]/, "").trim();
-      return;
+      i++;
+      // 다음 토큰이 이름의 연장인지 탐욕적으로 확인 (공백 포함 닉네임 지원)
+      while (i < tokens.length) {
+        var next = String(tokens[i] || "").trim();
+        // +2/-3 보정값, key:value 옵션이면 중단
+        if (!next || /^[+\-]/.test(next) || /^[가-힣A-Za-z0-9_]+[:=]/.test(next)) break;
+        var combined = target + " " + next;
+        if (findCharacterByAlias(combined)) {
+          target = combined;
+          i++;
+        } else {
+          break;
+        }
+      }
+    } else {
+      mods.push(token);
+      i++;
     }
+  }
 
-    mods.push(token);
-  });
+  // 최종 닉네임 → 정식 별명 변환
+  if (target && target !== "자신" && target !== "대상") {
+    var char = findCharacterByAlias(target);
+    if (char) target = String(char["별명"] || target).trim();
+  }
 
-  return {
-    target: target,
-    mods: mods
-  };
+  return { target: target, mods: mods };
 }
 
 function statCheck(parts, displayName) {
@@ -6701,7 +6719,7 @@ function statusListCommand(parts, displayName) {
   let targetAlias = "";
 
   if (parts.length >= 2) {
-    targetAlias = parts[1];
+    targetAlias = _resolveAliasFromTokens(parts, 1, 0).alias;
   } else {
     try {
       targetAlias = getSelfAlias(displayName);
@@ -6826,7 +6844,7 @@ function stackListCommand(parts, displayName) {
   let targetAlias = "";
 
   if (parts.length >= 2) {
-    targetAlias = parts[1];
+    targetAlias = _resolveAliasFromTokens(parts, 1, 0).alias;
   } else {
     try {
       targetAlias = getSelfAlias(displayName);
