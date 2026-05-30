@@ -67,6 +67,7 @@ function SiteHeader({ user, isAdmin, displayName, loading, signOut }) {
   const navItems = [
     { to: '/', label: '홈' },
     { to: '/builder', label: '캐릭터 빌더' },
+    { to: '/characters', label: '캐릭터 일람' },
     { to: '/enemy', label: '에너미 신청' },
     { to: '/my', label: '내 신청' },
     { to: '/admin', label: '관리자', adminHighlight: true },
@@ -281,6 +282,13 @@ const MENU = [
     title: '캐릭터 빌더',
     desc: '캐릭터 데이터를 작성하고 신청합니다.',
     cta: '빌더 열기',
+  },
+  {
+    key: 'characters',
+    to: '/characters',
+    title: '캐릭터 & 스킬 일람',
+    desc: '등록된 캐릭터와 보유 스킬 목록을 확인합니다.',
+    cta: '일람 보기',
   },
   {
     key: 'enemy',

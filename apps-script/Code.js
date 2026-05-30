@@ -162,6 +162,17 @@ var EFFECT_CODE_BLIND      = "blind";
 
 function doGet(e) {
   try {
+    // 게임 데이터 조회 엔드포인트
+    if (e.parameter.action === "gamedata") {
+      var expected = "";
+      try { expected = PropertiesService.getScriptProperties().getProperty(APORIA_PORTAL_SECRET_PROP) || ""; } catch (_) {}
+      var provided = String(e.parameter.secret || "");
+      if (!expected || provided !== expected) {
+        return returnJson({ ok: false, error: "Unauthorized" });
+      }
+      return returnJson(getGameData());
+    }
+
     const q = e.parameter.q || "";
     const name = e.parameter.name || "";
 
@@ -177,6 +188,38 @@ function doGet(e) {
         "스택:\n" + (err.stack || "스택 정보 없음")
       )
     });
+  }
+}
+
+function getGameData() {
+  try {
+    var charRows  = getSheetData(SHEET_BOT_DB);
+    var skillRows = getSheetData(SHEET_SKILL_DB);
+
+    var characters = charRows.map(function(r) {
+      return {
+        alias:   String(r["별명"]   || "").trim(),
+        name:    String(r["이름"]   || "").trim(),
+        race:    String(r["종족"]   || "").trim(),
+        faction: String(r["소속"]   || "무소속").trim(),
+        level:   Number(r["레벨"]   || 0),
+      };
+    }).filter(function(c) { return c.alias; });
+
+    var skills = skillRows.map(function(r) {
+      return {
+        owner:       String(r["소유자"] || "").trim(),
+        name:        String(r["스킬명"] || "").trim(),
+        tradition:   String(r["계통"]   || "").trim(),
+        series:      String(r["계열"]   || "").trim(),
+        rank:        String(r["랭크"]   || "").trim(),
+        description: String(r["설명"]   || "").trim(),
+      };
+    }).filter(function(s) { return s.owner && s.name; });
+
+    return { ok: true, characters: characters, skills: skills };
+  } catch (e) {
+    return { ok: false, error: e.message };
   }
 }
 
@@ -1012,17 +1055,33 @@ function _applyShieldEffects(rows, damage) {
   return { damage, logs };
 }
 
-// 패시브 수치 필드를 평가한다. 순수 숫자면 빠르게 반환, 아니면 수식으로 평가.
-function _evalPassiveValue(raw, vars) {
+// 패시브 수치 필드 파싱.
+// "* 수식" 또는 "× 수식" → { mode:'mult', value:N }  (피해/회복/판정값에 곱셈 적용)
+// 그 외 수식/숫자    → { mode:'add',  value:N }  (기존 덧셈 보정)
+function _parsePassiveSuChi(raw, vars) {
   var s = String(raw == null ? "" : raw).trim();
-  if (!s) return 0;
-  var n = Number(s);
-  if (!isNaN(n)) return Math.floor(n);
-  var result = safeEvalFormula(s, vars || {});
-  if (result !== null && result !== undefined && !isNaN(Number(result))) {
-    return Math.floor(Number(result));
+  if (!s) return { mode: 'add', value: 0 };
+
+  if (/^[*×]/.test(s)) {
+    var formulaPart = s.slice(1).trim();
+    try {
+      var res = safeEvalFormula(formulaPart || "1", vars || {});
+      var v = res && res.value !== undefined ? res.value : Number(res);
+      return { mode: 'mult', value: isNaN(v) ? 1 : v };
+    } catch (_e) {
+      return { mode: 'mult', value: 1 };
+    }
   }
-  return 0;
+
+  var n = Number(s);
+  if (!isNaN(n)) return { mode: 'add', value: Math.floor(n) };
+  try {
+    var res = safeEvalFormula(s, vars || {});
+    var v = res && res.value !== undefined ? res.value : Number(res);
+    return { mode: 'add', value: isNaN(v) ? 0 : Math.floor(v) };
+  } catch (_e) {
+    return { mode: 'add', value: 0 };
+  }
 }
 
 // 피해보정 패시브 (분류=피해보정 또는 효과코드=피해보정) 적용.
@@ -1038,7 +1097,8 @@ function _applyPassiveDamageModifier(alias, damage) {
     debugLogs.push("후보수=" + passives.length + " 캐릭터=" + alias);
     const ctx      = buildConditionContext(character, "");
     debugLogs.push("현재체력비율=" + (ctx.vars["현재체력비율"] || 0));
-    let delta = 0;
+    let addDelta  = 0;
+    let multFactor = 1;
 
     passives.forEach(function (p) {
       const category   = String(p["분류"]    || "").trim();
@@ -1052,18 +1112,27 @@ function _applyPassiveDamageModifier(alias, damage) {
       debugLogs.push("조건결과 ok=" + result.ok + " failed=" + JSON.stringify(result.failed));
       if (!result.ok) return;
 
-      const baseV = _evalPassiveValue(p["수치"], ctx.vars);
-      const v = Math.floor(baseV * (result.detailMult || 1)) + (result.detailBonus || 0);
-      if (!v) { debugLogs.push("수치=0 스킵"); return; }
+      const parsed = _parsePassiveSuChi(p["수치"], ctx.vars);
+      const dMult  = result.detailMult  || 1;
+      const dBonus = result.detailBonus || 0;
+      const name   = p["이름"] || p["key"];
 
-      delta += v;
-      const multNote  = (result.detailMult  && result.detailMult  !== 1) ? " ×" + result.detailMult  : "";
-      const bonusNote = result.detailBonus ? " +" + result.detailBonus : "";
-      const noteStr   = (multNote || bonusNote) ? " (세부" + multNote + bonusNote + " 적용)" : "";
-      logs.push("[패시브: " + (p["이름"] || p["key"]) + "]\n피해 보정: " + formatSigned(v) + noteStr);
+      if (parsed.mode === 'mult') {
+        const factor = parsed.value * dMult;
+        if (factor === 1 && !dBonus) { debugLogs.push("배율=1 스킵"); return; }
+        multFactor *= factor;
+        if (dBonus) addDelta += dBonus;
+        logs.push("[패시브: " + name + "]\n피해 배율: ×" + factor + (dBonus ? " 추가보정 " + formatSigned(dBonus) : ""));
+      } else {
+        const v = Math.floor(parsed.value * dMult) + dBonus;
+        if (!v) { debugLogs.push("수치=0 스킵"); return; }
+        addDelta += v;
+        const noteStr = (dMult !== 1 || dBonus) ? " (세부 ×" + dMult + (dBonus ? " +" + dBonus : "") + " 적용)" : "";
+        logs.push("[패시브: " + name + "]\n피해 보정: " + formatSigned(v) + noteStr);
+      }
     });
 
-    damage = Math.max(0, damage + delta);
+    damage = Math.max(0, Math.floor(damage * multFactor) + addDelta);
   } catch (_e) { debugLogs.push("오류: " + _e.message); }
 
   return { damage, logs, debugLogs };
@@ -1078,7 +1147,8 @@ function _applyPassiveHealingModifier(alias, amount) {
 
     const passives = getCandidatePassivesForCharacter(character);
     const ctx      = buildConditionContext(character, "");
-    let delta = 0;
+    let addDelta  = 0;
+    let multFactor = 1;
 
     passives.forEach(function (p) {
       const category   = String(p["분류"]    || "").trim();
@@ -1091,15 +1161,26 @@ function _applyPassiveHealingModifier(alias, amount) {
       const result = evaluateConditionList(p["조건"], ctx);
       if (!result.ok) return;
 
-      const baseV = _evalPassiveValue(p["수치"], ctx.vars);
-      const v = Math.floor(baseV * (result.detailMult || 1)) + (result.detailBonus || 0);
-      if (!v) return;
+      const parsed = _parsePassiveSuChi(p["수치"], ctx.vars);
+      const dMult  = result.detailMult  || 1;
+      const dBonus = result.detailBonus || 0;
+      const name   = p["이름"] || p["key"];
 
-      delta += v;
-      logs.push("[패시브: " + (p["이름"] || p["key"]) + "]\n회복 보정: " + formatSigned(v));
+      if (parsed.mode === 'mult') {
+        const factor = parsed.value * dMult;
+        if (factor === 1 && !dBonus) return;
+        multFactor *= factor;
+        if (dBonus) addDelta += dBonus;
+        logs.push("[패시브: " + name + "]\n회복 배율: ×" + factor);
+      } else {
+        const v = Math.floor(parsed.value * dMult) + dBonus;
+        if (!v) return;
+        addDelta += v;
+        logs.push("[패시브: " + name + "]\n회복 보정: " + formatSigned(v));
+      }
     });
 
-    amount = Math.max(0, amount + delta);
+    amount = Math.max(0, Math.floor(amount * multFactor) + addDelta);
   } catch (_e) { /* 무시 */ }
 
   return { amount, logs };
@@ -2123,7 +2204,7 @@ function findApprovedSkill(owner, skillName) {
 }
 
 function validateSkillData(data) {
-  const required = ["이름", "계통", "계열", "랭크", "계산식", "조건", "대가", "설명"];
+  const required = ["이름", "계통", "계열", "랭크", "계산식"];
 
   for (const key of required) {
     if (!data[key]) {
@@ -5480,10 +5561,13 @@ function readEffectNumber(value, context, fallback) {
   if (!isNaN(n)) return n;
 
   // 수식 평가 (스탯·스택·DB 변수 참조 가능)
-  var vars = (context && context.vars) ? context.vars : {};
-  if (context && context.finalValue != null) vars = Object.assign({}, vars, { 최종값: context.finalValue });
-  var result = safeEvalFormula(value, vars);
-  if (result !== null && result !== undefined && !isNaN(Number(result))) return Number(result);
+  try {
+    var vars = (context && context.vars) ? context.vars : {};
+    if (context && context.finalValue != null) vars = Object.assign({}, vars, { 최종값: context.finalValue });
+    var res = safeEvalFormula(value, vars);
+    var v = res && res.value !== undefined ? res.value : Number(res);
+    if (!isNaN(v)) return v;
+  } catch (_e) { /* 수식 평가 실패 시 fallback */ }
 
   return fallback || 0;
 }
@@ -6873,13 +6957,15 @@ function applyStatusModifierToValue(alias, value, checkTypes, targetAlias) {
 
   // 패시브(분류=판정보정) 보정도 합산.
   var passiveDelta = 0;
-  var passiveText = "";
+  var passiveMult  = 1;
+  var passiveText  = "";
   try {
     var character = findCharacterByAlias(alias);
     if (character) {
       var pm = getPassiveValueModifier(character, checkTypes, String(targetAlias || ""));
       passiveDelta = pm.delta || 0;
-      passiveText = pm.text || "";
+      passiveMult  = pm.mult  || 1;
+      passiveText  = pm.text  || "";
     }
   } catch (e) {
     // 패시브 시트 없거나 오류 → 무시.
@@ -6887,7 +6973,7 @@ function applyStatusModifierToValue(alias, value, checkTypes, targetAlias) {
 
   const before = Math.floor(Number(value) || 0);
   const totalDelta = modifier.delta + passiveDelta;
-  const after = before + totalDelta;
+  const after = Math.floor(before * passiveMult) + totalDelta;
 
   var combinedText = modifier.text || "";
   if (passiveText) combinedText = combinedText ? (combinedText + "\n\n" + passiveText) : passiveText;
@@ -7498,6 +7584,7 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
   var passives = getCandidatePassivesForCharacter(character);
   var ctx = buildConditionContext(character, String(targetAlias || ""));
   var delta = 0;
+  var mult  = 1;
   var lines = [];
 
   passives.forEach(function (p) {
@@ -7514,14 +7601,23 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
     var cond = evaluateConditionList(p["조건"], ctx);
     if (!cond.ok) return;
 
-    var baseV = _evalPassiveValue(p["수치"], ctx.vars);
-    var v = Math.floor(baseV * (cond.detailMult || 1)) + (cond.detailBonus || 0);
-    if (!v) return;
-    delta += v;
-    lines.push("[패시브: " + (p["이름"] || p["key"]) + "]\n보정: " + formatSigned(v));
+    var parsed = _parsePassiveSuChi(p["수치"], ctx.vars);
+    var dMult  = cond.detailMult  || 1;
+    var dBonus = cond.detailBonus || 0;
+    var name   = p["이름"] || p["key"];
+    if (parsed.mode === 'mult') {
+      var factor = parsed.value * dMult;
+      if (factor !== 1) { mult *= factor; lines.push("[패시브: " + name + "]\n판정 배율: ×" + factor); }
+      if (dBonus) { delta += dBonus; }
+    } else {
+      var v = Math.floor(parsed.value * dMult) + dBonus;
+      if (!v) return;
+      delta += v;
+      lines.push("[패시브: " + name + "]\n보정: " + formatSigned(v));
+    }
   });
 
-  return { delta: delta, text: lines.join("\n\n") };
+  return { delta: delta, mult: mult, text: lines.join("\n\n") };
 }
 
 // 트리거 기반 패시브 효과 실행. 1차 구현: 효과 필드가 있으면 processSkillEffects로 처리.
@@ -9566,6 +9662,9 @@ function registerPortalCharacterData(payload, outputText, application) {
   if (_portalLooksLikeFailure(charApproveResp) || !/\[캐릭터 승인 완료\]/.test(String(charApproveResp))) {
     return { ok: false, error: "캐릭터는 접수됐으나 승인 단계에서 실패했습니다.\n" + String(charApproveResp) };
   }
+
+  // BOT_DB 쓰기가 즉시 반영되도록 flush
+  try { SpreadsheetApp.flush(); } catch (_e) {}
 
   // 3) 플레이어 스킬들 신청 + 승인 (개별 실패는 경고로만 누적)
   var skillResults = [];

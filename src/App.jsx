@@ -7,6 +7,7 @@ import MyPage from './pages/MyPage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
 import Login from './pages/Login.jsx';
 import Signup from './pages/Signup.jsx';
+import CharactersPage from './pages/CharactersPage.jsx';
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Hub />} />
           <Route path="/builder" element={<Builder />} />
+          <Route path="/characters" element={<CharactersPage />} />
           <Route path="/enemy" element={<EnemyPage />} />
           <Route path="/my" element={<MyPage />} />
           <Route path="/admin" element={<AdminPage />} />
