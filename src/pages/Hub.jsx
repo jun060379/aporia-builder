@@ -68,6 +68,7 @@ function SiteHeader({ user, isAdmin, displayName, loading, signOut }) {
     { to: '/', label: '홈' },
     { to: '/builder', label: '캐릭터 빌더' },
     { to: '/characters', label: '캐릭터 일람' },
+    { to: '/my-character', label: '내 캐릭터' },
     { to: '/enemy', label: '에너미 신청' },
     { to: '/items', label: '아이템 제작', adminHighlight: true },
     { to: '/my', label: '내 신청' },
@@ -290,6 +291,14 @@ const MENU = [
     title: '캐릭터 & 스킬 일람',
     desc: '등록된 캐릭터와 보유 스킬 목록을 확인합니다.',
     cta: '일람 보기',
+  },
+  {
+    key: 'my-character',
+    to: '/my-character',
+    title: '내 캐릭터 관리',
+    desc: '성장예산으로 스탯·기능·숙련을 강화하고 장비를 장착합니다.',
+    cta: '내 캐릭터',
+    needsAuth: true,
   },
   {
     key: 'enemy',

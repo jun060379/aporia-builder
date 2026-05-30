@@ -171,6 +171,16 @@ function doGet(e) {
       return returnJson(handleInventoryApi(e));
     }
 
+    // 내 캐릭터 관리 API (웹 빌더 전용, Vercel에서 secret 검증 후 호출)
+    if (e.parameter.api === "mychar") {
+      var expectedMc = "";
+      try { expectedMc = PropertiesService.getScriptProperties().getProperty(APORIA_PORTAL_SECRET_PROP) || ""; } catch (_) {}
+      if (!expectedMc || String(e.parameter.secret || "") !== expectedMc) {
+        return returnJson({ ok: false, error: "Unauthorized" });
+      }
+      return returnJson(handleMyCharApi(e));
+    }
+
     // 게임 데이터 조회 엔드포인트
     if (e.parameter.action === "gamedata") {
       var expected = "";
@@ -11105,4 +11115,127 @@ function getItemDbList() {
       };
     }).filter(function (i) { return i.name; });
   } catch (e) { return []; }
+}
+
+// =====================================================================
+// 내 캐릭터 관리 API (웹 빌더 전용)
+// doGet ?api=mychar&secret=... 로 진입. Vercel이 JWT 검증 후 호출.
+// =====================================================================
+
+function handleMyCharApi(e) {
+  try {
+    var action = String((e && e.parameter && e.parameter.action) || "").trim();
+    var alias  = String((e && e.parameter && e.parameter.alias)  || "").trim();
+    var field  = String((e && e.parameter && e.parameter.field)  || "").trim();
+    var invId  = String((e && e.parameter && e.parameter.invId)  || "").trim();
+    var slot   = String((e && e.parameter && e.parameter.slot)   || "").trim();
+
+    if (!alias) return { ok: false, error: "alias가 필요합니다." };
+    var charRow = findCharacterByAlias(alias);
+    if (!charRow) return { ok: false, error: "캐릭터를 찾을 수 없습니다: " + alias };
+    alias = String(charRow["별명"] || alias).trim();
+
+    if (action === "view")    return _myCharView(alias);
+    if (action === "grow")    return _myCharGrow(alias, field);
+    if (action === "equip")   return _myCharEquip(alias, invId);
+    if (action === "unequip") return _myCharUnequip(alias, slot || invId);
+
+    return { ok: false, error: "알 수 없는 action: " + action };
+  } catch (err) {
+    return { ok: false, error: "[내캐릭터 API 오류] " + (err && err.message ? err.message : String(err)) };
+  }
+}
+
+// 한 항목의 다음 성장 비용/최대 여부 계산.
+function _growthInfo(character, field) {
+  try {
+    var g = calculateGrowthCostDelta(character, field);
+    return { next: g.newValue, cost: g.need, isMax: false };
+  } catch (_e) {
+    return { next: null, cost: null, isMax: true };
+  }
+}
+
+function _myCharView(alias) {
+  var rowInfo = rereadCharacterRow(alias);
+  if (!rowInfo) return { ok: false, error: "캐릭터 행을 찾을 수 없습니다: " + alias };
+  var character = rowInfo.character;
+
+  var budget = readCharacterBudget(character);
+  var used   = calculateCharacterUsedPoints(character);
+  var remain = budget - used;
+
+  function buildGroup(fields) {
+    var out = {};
+    fields.forEach(function (f) {
+      var cur = STAT_FIELDS.indexOf(f) >= 0
+        ? String(character[f] || "E").trim()
+        : Number(character[f] || 0);
+      var gi = _growthInfo(character, f);
+      out[f] = { current: cur, next: gi.next, cost: gi.cost, isMax: gi.isMax };
+    });
+    return out;
+  }
+
+  var stats    = buildGroup(STAT_FIELDS);
+  var features = buildGroup(FEATURE_FIELDS);
+  var profs    = buildGroup(PROF_FIELDS);
+
+  // 소유 스킬
+  var skills = getSheetData(SHEET_SKILL_DB)
+    .filter(function (r) { return String(r["소유자"] || "").trim() === alias; })
+    .map(function (r) {
+      return {
+        name:        String(r["스킬명"] || ""),
+        tradition:   String(r["계통"]   || ""),
+        series:      String(r["계열"]   || ""),
+        rank:        String(r["랭크"]   || ""),
+        formula:     String(r["계산식"] || ""),
+        condition:   String(r["조건"]   || ""),
+        cost:        String(r["대가"]   || ""),
+        description: String(r["설명"]   || "")
+      };
+    });
+
+  // 인벤토리 / 장비 (인벤토리 API 재사용)
+  var view = _invApiView(alias);
+
+  return {
+    ok: true,
+    alias: alias,
+    name:  String(character["이름"] || ""),
+    race:  String(character["종족"] || ""),
+    faction: String(character["소속"] || "무소속"),
+    level: Number(character["레벨"] || 0),
+    budget: budget, used: used, remain: remain,
+    stats: stats, features: features, profs: profs,
+    skills: skills,
+    items: view.items || [],
+    equipment: view.equipment || []
+  };
+}
+
+function _myCharGrow(alias, field) {
+  if (!field) return { ok: false, error: "성장할 항목(field)이 필요합니다." };
+  if (STAT_FIELDS.indexOf(field) < 0 && FEATURE_FIELDS.indexOf(field) < 0 && PROF_FIELDS.indexOf(field) < 0) {
+    return { ok: false, error: "성장 가능한 항목이 아닙니다: " + field };
+  }
+  var resultText = characterGrow(["!성장", alias, field], "web");
+  var success = /\[성장 완료\]/.test(String(resultText));
+  if (!success) {
+    return { ok: false, error: String(resultText).split("\n").slice(0, 6).join("\n") };
+  }
+  return Object.assign(_myCharView(alias), { ok: true, message: field + " 성장 완료" });
+}
+
+function _myCharEquip(alias, invId) {
+  var r = _invApiEquip(alias, invId);
+  if (!r.ok) return r;
+  return Object.assign(_myCharView(alias), { ok: true, message: r.message });
+}
+
+function _myCharUnequip(alias, slotOrInvId) {
+  var r = _invApiUnequip(alias, slotOrInvId);
+  if (!r.ok) return r;
+  return Object.assign(_myCharView(alias), { ok: true, message: r.message });
 }
