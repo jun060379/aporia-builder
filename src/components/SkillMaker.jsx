@@ -165,12 +165,12 @@ function buildPassivePreview(row, catInfo) {
   const v     = Number(row.수치);
   const sign  = v > 0 ? '+' : '';
   switch (catInfo?.value) {
-    case '판정보정':  return \`"\${name}": \${cond}\${row.판정 || '모든'} 판정에 \${sign}\${v || '?'} 보정\`;
-    case '피해보정':  return \`"\${name}": \${cond}받는 피해 \${sign}\${v || '?'}\`;
-    case '회복보정':  return \`"\${name}": \${cond}체력 회복량 \${sign}\${v || '?'}\`;
-    case '저항':      return \`"\${name}": \${cond}저항 판정에 \${sign}\${v || '?'}\`;
-    case '트리거효과':return \`"\${name}": \${row.발동 || '?'} 시점에 효과 자동 발동\`;
-    default:          return \`"\${name}"\`;
+    case '판정보정':  return `"${name}": ${cond}${row.판정 || '모든'} 판정에 ${sign}${v || '?'} 보정`;
+    case '피해보정':  return `"${name}": ${cond}받는 피해 ${sign}${v || '?'}`;
+    case '회복보정':  return `"${name}": ${cond}체력 회복량 ${sign}${v || '?'}`;
+    case '저항':      return `"${name}": ${cond}저항 판정에 ${sign}${v || '?'}`;
+    case '트리거효과':return `"${name}": ${row.발동 || '?'} 시점에 효과 자동 발동`;
+    default:          return `"${name}"`;
   }
 }
 
@@ -504,8 +504,7 @@ function PassiveForm({ passives, onSavePassive, onRemovePassive }) {
               className={`${inputCls} h-20 resize-none font-mono`}
               value={row.효과}
               onChange={field('효과')}
-              placeholder={'상태부여 자신 집중 버프 enhance 수치:3 횟수:1
-스택증가 자신 혈인 1 최대:5'}
+              placeholder={'상태부여 자신 집중 버프 enhance 수치:3 횟수:1\n스택증가 자신 혈인 1 최대:5'}
             />
           </label>
         )}
