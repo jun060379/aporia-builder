@@ -69,6 +69,7 @@ function SiteHeader({ user, isAdmin, displayName, loading, signOut }) {
     { to: '/builder', label: '캐릭터 빌더' },
     { to: '/characters', label: '캐릭터 일람' },
     { to: '/enemy', label: '에너미 신청' },
+    { to: '/items', label: '아이템 제작', adminHighlight: true },
     { to: '/my', label: '내 신청' },
     { to: '/admin', label: '관리자', adminHighlight: true },
   ];
@@ -305,6 +306,15 @@ const MENU = [
     desc: '제출한 신청과 검수 상태를 확인합니다.',
     cta: '내 신청 보기',
     needsAuth: true,
+  },
+  {
+    key: 'items',
+    to: '/items',
+    title: '장비 · 아이템 제작',
+    desc: 'ITEM_DB에 아이템을 등록하거나 TSV로 내보냅니다.',
+    cta: '아이템 제작',
+    needsAuth: true,
+    adminOnly: true,
   },
   {
     key: 'admin',

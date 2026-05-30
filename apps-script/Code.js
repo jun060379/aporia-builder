@@ -260,7 +260,10 @@ function getGameData() {
       };
     }).filter(function(p) { return p.name; });
 
-    return { ok: true, characters: characters, skills: skills, passives: passives };
+    var items = [];
+    try { items = getItemDbList(); } catch (_e) { items = []; }
+
+    return { ok: true, characters: characters, skills: skills, passives: passives, items: items };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -9746,6 +9749,11 @@ function handlePortalWebhook(body) {
     });
   } catch (_) { /* noop */ }
 
+  // 아이템 등록 (관리자 전용, Vercel에서 admin 검증 후 호출)
+  if (action === "register_item") {
+    return registerItemFromPayload((body && body.item) || null);
+  }
+
   if (action !== "approve_application") {
     return { ok: false, error: "Unsupported action: " + action };
   }
@@ -10505,6 +10513,11 @@ function ensureItemSheets() {
   ensure(SHEET_EQUIPMENT_DB, ["id","소유자","슬롯","아이템명","장착일"]);
 }
 
+function _makeItemId() {
+  ensureItemSheets();
+  var rows = getSheetData(SHEET_ITEM_DB);
+  return "ITEM-" + String(rows.length + 1).padStart(4, "0");
+}
 function _makeInvId() {
   ensureItemSheets();
   var rows = getSheetData(SHEET_INVENTORY_DB);
@@ -10978,4 +10991,70 @@ function _invApiUse(alias, invId, target) {
   var qtyNote = newQty <= 0 ? " (소진됨)" : " (남은 수량: " + newQty + ")";
 
   return Object.assign(_invApiView(alias), { ok: true, message: result + qtyNote });
+}
+
+// ── 아이템 등록 (웹 빌더 배포용, 관리자 전용) ─────────────────────────
+// payload: { 이름, 분류, 슬롯, 효과코드, 수치, 횟수, 설명, 메모 }
+// 같은 이름이 있으면 갱신(id 유지), 없으면 새 id로 추가.
+function registerItemFromPayload(item) {
+  try {
+    if (!item || typeof item !== "object") {
+      return { ok: false, error: "item 데이터가 비어 있습니다." };
+    }
+    var name = String(item["이름"] || "").trim();
+    if (!name) return { ok: false, error: "아이템 이름은 필수입니다." };
+
+    var category = String(item["분류"] || "").trim();
+    if (["소모품", "장비", "기타"].indexOf(category) < 0) {
+      return { ok: false, error: "분류는 소모품/장비/기타 중 하나여야 합니다: " + category };
+    }
+
+    ensureItemSheets();
+
+    var row = {
+      이름:     name,
+      분류:     category,
+      슬롯:     String(item["슬롯"]    || "").trim(),
+      효과코드: String(item["효과코드"] || "").trim(),
+      수치:     (item["수치"] === undefined || item["수치"] === null || String(item["수치"]).trim() === "") ? "" : Number(item["수치"]),
+      횟수:     (item["횟수"] === undefined || item["횟수"] === null || String(item["횟수"]).trim() === "") ? "" : Number(item["횟수"]),
+      설명:     String(item["설명"] || "").trim(),
+      메모:     String(item["메모"] || "").trim()
+    };
+
+    var existing = getItemByName(name);
+    if (existing) {
+      var existingId = String(existing["id"] || "").trim();
+      updateRowById(SHEET_ITEM_DB, "id", existingId, row);
+      return { ok: true, message: "아이템 갱신됨", id: existingId, name: name, mode: "updated" };
+    } else {
+      var id = _makeItemId();
+      row["id"] = id;
+      appendRowByHeaders(SHEET_ITEM_DB, row);
+      return { ok: true, message: "아이템 등록됨", id: id, name: name, mode: "inserted" };
+    }
+  } catch (err) {
+    return { ok: false, error: "[아이템 등록 오류] " + (err && err.message ? err.message : String(err)) };
+  }
+}
+
+// 아이템 목록 조회 API (ITEM_DB 전체). doGet ?api=inventory&action=items 로도 접근 가능하게.
+function getItemDbList() {
+  try {
+    ensureItemSheets();
+    var rows = getSheetData(SHEET_ITEM_DB);
+    return rows.map(function (r) {
+      return {
+        id:       String(r["id"]     || ""),
+        name:     String(r["이름"]   || ""),
+        category: String(r["분류"]   || ""),
+        slot:     String(r["슬롯"]   || ""),
+        effect:   String(r["효과코드"] || ""),
+        value:    (r["수치"] === undefined || r["수치"] === "") ? "" : Number(r["수치"]),
+        count:    (r["횟수"] === undefined || r["횟수"] === "") ? "" : Number(r["횟수"]),
+        description: String(r["설명"] || ""),
+        memo:     String(r["메모"]   || "")
+      };
+    }).filter(function (i) { return i.name; });
+  } catch (e) { return []; }
 }
