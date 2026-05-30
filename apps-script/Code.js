@@ -263,7 +263,55 @@ function getGameData() {
     var items = [];
     try { items = getItemDbList(); } catch (_e) { items = []; }
 
-    return { ok: true, characters: characters, skills: skills, passives: passives, items: items };
+    // 아이템 정의 맵 (이름 → 효과/슬롯) — 조인용
+    var itemMap = {};
+    items.forEach(function (it) { itemMap[it.name] = it; });
+
+    // 인벤토리 (ACTIVE, 수량>0)
+    var inventory = [];
+    try {
+      ensureItemSheets();
+      getSheetData(SHEET_INVENTORY_DB).forEach(function (r) {
+        var owner = String(r["소유자"] || "").trim();
+        var name  = String(r["아이템명"] || "").trim();
+        if (!owner || !name) return;
+        if (String(r["상태"] || "").trim() !== "ACTIVE") return;
+        if (Number(r["수량"] || 0) <= 0) return;
+        var def = itemMap[name] || {};
+        inventory.push({
+          owner:    owner,
+          invId:    String(r["id"] || ""),
+          name:     name,
+          quantity: Number(r["수량"] || 0),
+          category: def.category || "",
+          slot:     def.slot     || "",
+          effect:   def.effect   || "",
+          value:    (def.value === undefined ? "" : def.value),
+          description: def.description || ""
+        });
+      });
+    } catch (_e) {}
+
+    // 장비
+    var equipment = [];
+    try {
+      getSheetData(SHEET_EQUIPMENT_DB).forEach(function (r) {
+        var owner = String(r["소유자"] || "").trim();
+        var name  = String(r["아이템명"] || "").trim();
+        if (!owner || !name) return;
+        var def = itemMap[name] || {};
+        equipment.push({
+          owner:  owner,
+          slot:   String(r["슬롯"] || ""),
+          name:   name,
+          effect: def.effect || "",
+          value:  (def.value === undefined ? "" : def.value)
+        });
+      });
+    } catch (_e) {}
+
+    return { ok: true, characters: characters, skills: skills, passives: passives,
+             items: items, inventory: inventory, equipment: equipment };
   } catch (e) {
     return { ok: false, error: e.message };
   }

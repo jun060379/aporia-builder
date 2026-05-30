@@ -43,7 +43,9 @@ function SectionTitle({ children }) {
 }
 
 // ── 캐릭터 상세 모달 ──────────────────────────────────────────
-function CharacterModal({ char, skills, passives, onClose }) {
+const EQUIP_SLOTS = ['무기', '방어구', '장신구1', '장신구2'];
+
+function CharacterModal({ char, skills, passives, inventory, equipment, onClose }) {
   // ESC 닫기
   useEffect(() => {
     const fn = (e) => { if (e.key === 'Escape') onClose(); };
@@ -57,6 +59,10 @@ function CharacterModal({ char, skills, passives, onClose }) {
     p.ownerType === 'global' ||
     (p.ownerType === 'character' && p.owner === char.alias)
   );
+  const myInventory = (inventory || []).filter(i => i.owner === char.alias);
+  const myEquipment = (equipment || []).filter(e => e.owner === char.alias);
+  const equipBySlot = {};
+  myEquipment.forEach(e => { equipBySlot[e.slot] = e; });
 
   const hpPct = char.maxHp > 0 ? Math.round(char.currentHp / char.maxHp * 100) : 0;
 
@@ -175,8 +181,79 @@ function CharacterModal({ char, skills, passives, onClose }) {
               </div>
             )}
           </section>
+
+          {/* ── 장비 ── */}
+          <section>
+            <SectionTitle>장비</SectionTitle>
+            <div className="grid grid-cols-2 gap-2">
+              {EQUIP_SLOTS.map(slot => {
+                const eq = equipBySlot[slot];
+                return (
+                  <div key={slot} className={`rounded-xl border px-3 py-2.5 ${eq ? 'bg-violet-50 border-violet-100' : 'bg-slate-50 border-slate-100'}`}>
+                    <div className="text-[10px] text-slate-400 mb-0.5">{slot}</div>
+                    {eq ? (
+                      <>
+                        <div className="text-sm font-medium text-slate-800">{eq.name}</div>
+                        {eq.effect && (
+                          <div className="text-[10px] text-violet-600 font-mono mt-0.5">{eq.effect}{eq.value !== '' ? ` ${eq.value}` : ''}</div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-xs text-slate-300">비어 있음</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* ── 인벤토리 ── */}
+          <section>
+            <SectionTitle>인벤토리 ({myInventory.length})</SectionTitle>
+            {myInventory.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">보유 아이템이 없습니다.</p>
+            ) : (
+              <div className="space-y-2">
+                {myInventory.map((it, i) => (
+                  <InventoryRow key={i} item={it} />
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       </div>
+    </div>
+  );
+}
+
+function InventoryRow({ item }) {
+  const [open, setOpen] = useState(false);
+  const catCls = {
+    소모품: 'bg-emerald-50 text-emerald-600 border-emerald-200',
+    장비:   'bg-violet-50 text-violet-600 border-violet-200',
+    기타:   'bg-slate-100 text-slate-500 border-slate-200',
+  };
+  const hasDetail = item.effect || item.description || item.slot;
+  return (
+    <div className="rounded-xl border border-slate-100 overflow-hidden">
+      <button
+        onClick={() => hasDetail && setOpen(v => !v)}
+        className={`w-full flex items-center gap-2 px-4 py-2.5 bg-slate-50 transition text-left ${hasDetail ? 'hover:bg-slate-100' : 'cursor-default'}`}
+      >
+        <span className="flex-1 text-sm font-medium text-slate-700">{item.name}</span>
+        <span className="text-xs text-slate-400 font-mono">×{item.quantity}</span>
+        <div className="flex gap-1 shrink-0">
+          {item.category && <Badge text={item.category} cls={`${catCls[item.category] || catCls.기타} text-[10px]`} />}
+        </div>
+        {hasDetail && <span className="text-slate-300 text-xs">{open ? '▲' : '▼'}</span>}
+      </button>
+      {open && hasDetail && (
+        <div className="px-4 py-3 bg-white space-y-1.5 text-xs text-slate-600 border-t border-slate-100">
+          {item.slot   && <p><span className="text-slate-400 mr-1">슬롯</span>{item.slot}</p>}
+          {item.effect && <p><span className="text-slate-400 mr-1">효과</span><code className="font-mono text-violet-700">{item.effect}{item.value !== '' ? ` ${item.value}` : ''}</code></p>}
+          {item.description && <p className="text-slate-500 leading-relaxed">{item.description}</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -243,7 +320,7 @@ function PassiveRow({ p }) {
 }
 
 // ── 캐릭터 카드 (목록) ─────────────────────────────────────────
-function CharacterCard({ char, skillCount, passiveCount, onClick }) {
+function CharacterCard({ char, skillCount, passiveCount, itemCount, equipCount, onClick }) {
   const hpPct = char.maxHp > 0 ? Math.round(char.currentHp / char.maxHp * 100) : null;
   return (
     <button
@@ -263,9 +340,11 @@ function CharacterCard({ char, skillCount, passiveCount, onClick }) {
             {char.race    && <span className="text-[11px] text-slate-400">{char.race}</span>}
             {char.faction && <span className="text-[11px] text-slate-400">· {char.faction}</span>}
           </div>
-          <div className="flex gap-2 mt-1.5">
+          <div className="flex gap-2 mt-1.5 flex-wrap">
             {skillCount > 0   && <span className="text-[10px] text-violet-500">스킬 {skillCount}</span>}
             {passiveCount > 0 && <span className="text-[10px] text-indigo-500">패시브 {passiveCount}</span>}
+            {equipCount > 0   && <span className="text-[10px] text-sky-500">장비 {equipCount}</span>}
+            {itemCount > 0    && <span className="text-[10px] text-emerald-500">아이템 {itemCount}</span>}
           </div>
         </div>
         <div className="shrink-0 text-right">
@@ -380,6 +459,8 @@ export default function CharactersPage() {
                   passiveCount={(data?.passives || []).filter(p =>
                     p.ownerType === 'global' || (p.ownerType === 'character' && p.owner === char.alias)
                   ).length}
+                  itemCount={(data?.inventory || []).filter(i => i.owner === char.alias).length}
+                  equipCount={(data?.equipment || []).filter(e => e.owner === char.alias).length}
                   onClick={() => setSelected(char.alias)}
                 />
               ))
@@ -399,6 +480,8 @@ export default function CharactersPage() {
           char={selectedChar}
           skills={data?.skills || []}
           passives={data?.passives || []}
+          inventory={data?.inventory || []}
+          equipment={data?.equipment || []}
           onClose={() => setSelected(null)}
         />
       )}
