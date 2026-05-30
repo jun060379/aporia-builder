@@ -39,7 +39,7 @@ export default function PassiveMaker() {
   }
 
   const tsv = useMemo(() => {
-    return HEADERS.map((h) => String(row[h] ?? '').replace(/\t/g, ' ').replace(/\r?\n/g, ' / ')).join('\t');
+    return HEADERS.map((h) => String(row[h] ?? '').replace(/\t/g, ' ').replace(/\r?\n/g, ', ')).join('\t');
   }, [row]);
 
   const errors = useMemo(() => {

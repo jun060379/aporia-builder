@@ -1628,13 +1628,12 @@ function actionCheck(parts, displayName) {
 
   const alias = String(character["별명"]).trim();
 
-  const statusResult = processStatusBeforeCheck(alias, KIND_ACTION);
+  const actionName = parts[1];
+  const statusResult = processStatusBeforeCheck(alias, [KIND_ACTION, actionName]);
 
   if (statusResult.blocked) {
     return statusResult.text;
   }
-
-  const actionName = parts[1];
   const isDamage = isDamageAction(actionName);
 
   const targetParsed = parseTargetAndMods(parts.slice(2));
@@ -6155,14 +6154,15 @@ function consumeStatusCount(status) {
   }
 }
 
-function processStatusBeforeCheck(alias, checkType) {
+function processStatusBeforeCheck(alias, checkTypeOrTypes) {
+  var checkTypes = Array.isArray(checkTypeOrTypes) ? checkTypeOrTypes : [checkTypeOrTypes];
   const rows = getActiveStatusRows(alias);
   const logs = [];
   let blocked = false;
 
   rows.forEach(status => {
     if (String(status["발동타이밍"] || "").trim() !== "판정시작") return;
-    if (!statusMatchesCheckType(status, checkType)) return;
+    if (!statusMatchesAnyCheckType(status, checkTypes)) return;
 
     const category = String(status["분류"] || "").trim();
     const code = String(status["효과코드"] || "").trim();
@@ -6899,7 +6899,6 @@ function getStatusValueModifier(alias, checkTypes) {
     const name = String(status["상태명"] || "").trim();
     const trigger = String(status["발동타이밍"] || "").trim();
 
-    if (category !== "쇠약강화") return;
     if (trigger && trigger !== "판정시작" && trigger !== "판정계산전" && trigger !== "판정계산후" && trigger !== "전체") return;
     if (!statusMatchesAnyCheckType(status, checkTypes)) return;
 
@@ -6916,7 +6915,9 @@ function getStatusValueModifier(alias, checkTypes) {
       code === "쇠약" ||
       name === "쇠약" ||
       name === "둔화" ||
-      name === "실명";
+      name === "실명" ||
+      category === "약화" ||
+      category === "쇠약";
 
     const isBuff =
       code === "enhance" ||
@@ -6927,7 +6928,11 @@ function getStatusValueModifier(alias, checkTypes) {
       code === "가속" ||
       name === "강화" ||
       name === "가속" ||
-      name === "집중";
+      name === "집중" ||
+      category === "강화";
+
+    // 쇠약강화 전용 분류이거나 효과코드/카테고리가 버프/디버프면 처리
+    if (category !== "쇠약강화" && !isBuff && !isDebuff) return;
 
     if (isDebuff) {
       modValue = -Math.abs(rawValue);
