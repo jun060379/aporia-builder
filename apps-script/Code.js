@@ -5901,18 +5901,29 @@ function removeStatusFromCharacter(targetAlias, statusName) {
 
 function parseEffectOptions(tokens) {
   const options = {};
+  // 쉼표로 끝난 값의 키 — 다음 토큰이 key:value 형식이 아니면 해당 값에 이어붙인다.
+  // 예: "판정:타격," "방어," "저항" → 판정: "타격, 방어, 저항"
+  let continuationKey = null;
 
   tokens.forEach(token => {
     token = String(token || "").trim();
     if (!token) return;
 
-    const match = token.match(/^(.+?)[:：=](.+)$/);
-    if (!match) return;
+    const match = token.match(/^(.+?)[:：](.+)$/);
+    if (match) {
+      const key = match[1].trim();
+      const value = match[2].trim();
+      options[key] = value;
+      continuationKey = value.endsWith(",") ? key : null;
+      return;
+    }
 
-    const key = match[1].trim();
-    const value = match[2].trim();
-
-    options[key] = value;
+    // key:value 패턴이 아닌 토큰 — 이전 값이 쉼표로 끝났으면 이어붙임
+    if (continuationKey && options[continuationKey] !== undefined) {
+      options[continuationKey] = options[continuationKey] + " " + token;
+      if (!token.endsWith(",")) continuationKey = null;
+    }
+    // 그 외는 무시 (기존 동작과 동일)
   });
 
   return options;
