@@ -1,6 +1,7 @@
 export const STAT_NAMES = ['근력', '민첩', '내구', '감각', '지능'];
 
 export const STAT_GRADES = [
+  { grade: 'F', value: 1,  cost: 0  },
   { grade: 'E', value: 3,  cost: 1  },
   { grade: 'D', value: 5,  cost: 3  },
   { grade: 'C', value: 10, cost: 7  },

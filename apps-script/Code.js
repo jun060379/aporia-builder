@@ -942,11 +942,19 @@ function getScaleValue(sheetName, keyColumn, valueColumn, key) {
   return Number(found[valueColumn]);
 }
 
+// 시트 조회 실패 시 fallback. STAT_SCALE 시트에 F행이 없는 경우에도 동작.
+const STAT_VALUE_FALLBACK = { F: 1, E: 3, D: 5, C: 10, B: 20, A: 30, S: 40 };
+
 function statToValue(statGrade) {
   if (typeof statGrade === "number") return statGrade;
 
   const key = String(statGrade).trim().toUpperCase();
-  return getScaleValue(SHEET_STAT_SCALE, "grade", "value", key);
+  try {
+    return getScaleValue(SHEET_STAT_SCALE, "grade", "value", key);
+  } catch (_e) {
+    if (STAT_VALUE_FALLBACK.hasOwnProperty(key)) return STAT_VALUE_FALLBACK[key];
+    throw new Error("변환표에서 값을 찾을 수 없습니다: " + key);
+  }
 }
 
 function rankToValue(rank) {
