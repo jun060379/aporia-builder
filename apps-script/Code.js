@@ -5984,19 +5984,31 @@ function checkSkillCostGate(alias, skillName, costText) {
       if (!caStatus) {
         // 캐스팅 상태 없음 → 캐스팅 시작 (스킬 차단, 상태 부여)
         var caTurns = Number(caM[1]);
+        // 첫 !스킬명 사용 자체가 1번째 캐스팅 턴 — count = N-1
+        var caInitCount = Math.max(0, caTurns - 1);
         addStatusToCharacter(alias, _castingStatusName(skillName), COST_COOLDOWN_CAT, COST_CASTING_CODE, {
           value: caTurns,
-          count: caTurns,
+          count: caInitCount,
           stackMode: "덮어쓰기",
           trigger: "판정시작",
           checkType: "전체",
           source: skillName,
           memo: "캐스팅 중"
         });
+        if (caInitCount === 0) {
+          // 캐스팅:1 — 첫 사용으로 즉시 완료
+          return {
+            blocked: true,
+            text: "[캐스팅 완료]\n" + skillName + "\n" +
+                  "집속이 완료되었습니다! 발동 준비가 됐습니다.\n\n" +
+                  "!스킬 " + skillName + "\n또는\n!공용스킬 " + skillName + "\n\n" +
+                  "위 명령으로 발동하세요."
+          };
+        }
         return {
           blocked: true,
-          text: "[캐스팅 시작]\n" + skillName + "\n" +
-                "집속을 시작합니다. !캐스팅 명령으로 진행하세요.\n\n" +
+          text: "[캐스팅 시작]\n" + skillName + " (" + caInitCount + "턴 남음)\n" +
+                "집속을 시작합니다. !캐스팅 명령으로 계속 진행하세요.\n\n" +
                 "!캐스팅 " + skillName + "\n\n" +
                 "캐스팅 중에는 다른 스킬을 사용할 수 없습니다."
         };
