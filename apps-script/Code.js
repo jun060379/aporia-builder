@@ -3566,10 +3566,11 @@ function characterSubmit(utterance, displayName) {
     소속: (data["소속"] && String(data["소속"]).trim()) || DEFAULT_FACTION,
 
     레벨: "",
-    경험치: getNumberField(data, "경험치", 0),
+    경험치: 0,
     성장예산: "",
     사용점수: "",
     남은점수: "",
+    사용일상점: 0,
 
     근력: String(data["근력"]).trim().toUpperCase(),
     민첩: String(data["민첩"]).trim().toUpperCase(),
