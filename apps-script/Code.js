@@ -5256,8 +5256,13 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
 
   const counterValue = response.value;
 
-  // ── 맞대응 승리 ──
-  if (counterValue > attackValue) {
+  // 성공 기준: 공격값의 1.5배 이상 (정수 비교: counterValue * 2 >= attackValue * 3)
+  // 부동소수점 없이 정확히 처리.
+  const counterSuccess = counterValue * 2 >= attackValue * 3;
+
+  // ── 맞대응 성공 ──
+  if (counterSuccess) {
+    const threshold = Math.ceil(attackValue * 1.5);
     const damage      = counterValue;
     const damageResult = applyDamageToRef(attackerAlias, damage);
 
@@ -5272,13 +5277,14 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
 
     resolvePendingAttack(attack["id"], {
       대응종류: "맞대응", 대응값: counterValue, 최종피해: damage,
-      메모: "맞대응 성공. 공격자의 공격 무효화. 공격 스킬 효과 무효. 맞대응 스킬 효과 강제 적용"
+      메모: "맞대응 성공 (기준 " + threshold + " 이상). 공격자의 공격 무효화. 공격 스킬 효과 무효. 맞대응 스킬 효과 강제 적용"
     });
 
     const summary =
       "[맞대응]\n" + statusSummaryLine +
       "공격번호: " + attack["id"] + "\n" +
-      "공격값: " + attackValue + "\n" + "맞대응값: " + counterValue + "\n" +
+      "공격값: " + attackValue + " (성공 기준: " + threshold + ")\n" +
+      "맞대응값: " + counterValue + "\n" +
       "결과: 맞대응 성공\n" + "반격피해: " + damage + "\n" +
       compactDamageText(damageResult) +
       (attackEffectInvalidText ? "\n공격 효과: 무효" : "") +
@@ -5288,28 +5294,35 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
       statusDetailPrefix +
       "[맞대응 상세]\n" +
       "공격번호: " + attack["id"] + "\n공격자: " + attackerAlias + "\n대상: " + targetAlias + "\n" +
-      "공격값: " + attackValue + "\n\n" + response.detailText + "\n\n" +
+      "공격값: " + attackValue + "  (성공 기준: 공격값 × 1.5 = " + threshold + " 이상)\n\n" +
+      response.detailText + "\n\n" +
       "결과: 맞대응 성공\n공격자의 공격은 무효화됩니다.\n공격자에게 맞대응값 전체 피해를 적용합니다.\n\n" +
       "반격피해: " + damage + "\n\n" + damageResult.text + attackEffectInvalidText + counterEffectText;
 
     return makeFoldedResponse(summary, detail);
   }
 
-  // ── 맞대응 패배 ──
-  if (counterValue < attackValue) {
+  // ── 맞대응 실패 (1.5배 미달 전부 — 동률 포함) ──
+  {
+    const threshold = Math.ceil(attackValue * 1.5);
     const damage      = attackValue;
     const damageResult = applyDamageToCharacter(targetAlias, damage);
     const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue);
 
+    const shortReason = counterValue >= attackValue
+      ? "맞대응값 " + counterValue + "이 기준(" + threshold + ")에 미달"
+      : "맞대응값 " + counterValue + "이 공격값(" + attackValue + ")보다 낮음";
+
     resolvePendingAttack(attack["id"], {
       대응종류: "맞대응", 대응값: counterValue, 최종피해: damage,
-      메모: "맞대응 실패. 맞대응 무효화. 공격 스킬 효과 저항 자동 실패"
+      메모: "맞대응 실패 (" + shortReason + "). 맞대응 무효화. 공격 스킬 효과 저항 자동 실패"
     });
 
     const summary =
       "[맞대응]\n" + statusSummaryLine +
       "공격번호: " + attack["id"] + "\n" +
-      "공격값: " + attackValue + "\n맞대응값: " + counterValue + "\n" +
+      "공격값: " + attackValue + " (성공 기준: " + threshold + ")\n" +
+      "맞대응값: " + counterValue + "\n" +
       "결과: 맞대응 실패\n최종피해: " + damage + "\n" +
       compactDamageText(damageResult) +
       (attackEffectText ? "\n공격 효과: 저항 자동 실패 / 강제 적용" : "");
@@ -5318,40 +5331,15 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
       statusDetailPrefix +
       "[맞대응 상세]\n" +
       "공격번호: " + attack["id"] + "\n공격자: " + attackerAlias + "\n대상: " + targetAlias + "\n" +
-      "공격값: " + attackValue + "\n\n" + response.detailText + "\n\n" +
-      "결과: 맞대응 실패\n대상의 맞대응은 무효화됩니다.\n대상에게 공격값 전체 피해를 적용합니다.\n" +
+      "공격값: " + attackValue + "  (성공 기준: 공격값 × 1.5 = " + threshold + " 이상)\n\n" +
+      response.detailText + "\n\n" +
+      "결과: 맞대응 실패 (" + shortReason + ")\n" +
+      "대상의 맞대응은 무효화됩니다.\n대상에게 공격값 전체 피해를 적용합니다.\n" +
       "공격 스킬 효과에 대한 저항 판정은 수행하지 않습니다.\n\n" +
       "최종피해: " + damage + "\n\n" + damageResult.text + attackEffectText;
 
     return makeFoldedResponse(summary, detail);
   }
-
-  // ── 동률 ──
-  const invalidText =
-    (getSkillFromPendingAttack(attack) || (response.kind === "스킬" && response.skill))
-      ? "\n스킬 효과도 발동하지 않습니다."
-      : "";
-
-  resolvePendingAttack(attack["id"], {
-    대응종류: "맞대응", 대응값: counterValue, 최종피해: 0,
-    메모: "동률. 양측 공격 상쇄. 양측 스킬 효과 무효"
-  });
-
-  const summary =
-    "[맞대응]\n" + statusSummaryLine +
-    "공격번호: " + attack["id"] + "\n" +
-    "공격값: " + attackValue + "\n맞대응값: " + counterValue + "\n" +
-    "결과: 동률 / 상쇄\n최종피해: 0" +
-    (invalidText ? "\n효과: 무효" : "");
-
-  const detail =
-    statusDetailPrefix +
-    "[맞대응 상세]\n" +
-    "공격번호: " + attack["id"] + "\n공격자: " + attackerAlias + "\n대상: " + targetAlias + "\n" +
-    "공격값: " + attackValue + "\n\n" + response.detailText + "\n\n" +
-    "동률.\n양측 공격이 상쇄됩니다." + invalidText + "\n피해 없음.";
-
-  return makeFoldedResponse(summary, detail);
 }
 
 function _resolveCombatResist(attack, character, rest, selfAlias, attackValue, attackerAlias, targetAlias, statusDetailPrefix, statusSummaryLine) {
