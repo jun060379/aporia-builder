@@ -21,7 +21,7 @@ export const COMMON_SKILL_FACTIONS = [...FACTION_OPTIONS];
 export const COMMON_SKILLS_HEADERS = [
   'key', '이름', '유형', '소속', '종족', '해금레벨',
   '계통', '계열', '랭크', '계산식', '효과', '대상',
-  '조건', '설명', '메모',
+  '조건', '대가', '설명', '메모',
 ];
 
 export function defaultCommonSkill() {
@@ -39,6 +39,7 @@ export function defaultCommonSkill() {
     effects: [],
     target: 'optional',
     condition: '',
+    cost: '',
     description: '',
     memo: '',
   };
@@ -73,6 +74,7 @@ export function buildCommonSkillTSV(skill) {
     effectsText,
     skill.target,
     skill.condition,
+    skill.cost || '',
     skill.description,
     skill.memo,
   ];
@@ -95,6 +97,7 @@ export function buildCommonSkillPreview(skill) {
   if (effectsText) lines.push(`효과:\n${effectsText}`);
   lines.push(`대상: ${skill.target}`);
   if (skill.condition) lines.push(`조건: ${skill.condition}`);
+  if (skill.cost) lines.push(`대가: ${skill.cost}`);
   if (skill.description) lines.push(`설명: ${skill.description}`);
   if (skill.memo) lines.push(`메모: ${skill.memo}`);
   return lines.join('\n');

@@ -19,6 +19,7 @@ import { ABILITY_NAMES } from '../data/abilities';
 import { PROFICIENCY_NAMES } from '../data/proficiencies';
 import EffectBlockModal from './EffectBlockModal';
 import FormulaBlockModal from './FormulaBlockModal';
+import CostEditor from './CostEditor.jsx';
 
 const inputCls = "w-full min-w-0 bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
 const selectCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 outline-none transition-colors";
@@ -346,6 +347,11 @@ export default function CommonSkillMaker() {
           value={skill.condition}
           onChange={(v) => setSkill((s) => ({ ...s, condition: v }))}
         />
+      </div>
+
+      <div className="space-y-1.5">
+        <span className="text-[11px] text-slate-500 tracking-wide">대가</span>
+        <CostEditor value={skill.cost} onChange={(v) => setSkill((s) => ({ ...s, cost: v }))} />
       </div>
 
       <label className="flex flex-col gap-1">
