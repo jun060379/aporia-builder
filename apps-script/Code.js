@@ -5692,15 +5692,22 @@ function _statusToNum(v) {
   return isFinite(n) ? n : 0;
 }
 
-// 옵션 maxValue 후보(최대/최대값/최대치) 중 첫 유효값 반환. 없으면 "".
+// 옵션 maxValue 후보(최대/최대값/최대치/최대수치) 중 첫 유효값 반환. 없으면 "".
 function _pickMaxOption(opts) {
   if (!opts) return "";
-  var keys = ["최대", "최대값", "최대치"];
+  var keys = ["최대", "최대값", "최대치", "최대수치"];
   for (var i = 0; i < keys.length; i++) {
     var v = opts[keys[i]];
     if (v !== undefined && v !== null && String(v).trim() !== "") return v;
   }
   return "";
+}
+
+// 옵션 maxCount 후보(최대횟수) 반환. 없으면 "".
+function _pickMaxCountOption(opts) {
+  if (!opts) return "";
+  var v = opts["최대횟수"];
+  return (v !== undefined && v !== null && String(v).trim() !== "") ? v : "";
 }
 
 // STATUS_DB에서 같은 대상/상태명의 ACTIVE 행 찾기 (가장 최근 = 가장 아래 행)
@@ -5756,12 +5763,15 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
   var now = getNowText();
   var stackMode = String(options.stackMode || "허용").trim();
 
-  // 옵션 maxValue (없으면 "")
+  // 옵션 maxValue (수치 상한, 없으면 "")
   var optMax = options.maxValue;
-  if (optMax === undefined || optMax === null || String(optMax).trim() === "") {
-    optMax = "";
-  }
+  if (optMax === undefined || optMax === null || String(optMax).trim() === "") optMax = "";
   var optMaxNum = _statusToNum(optMax);
+
+  // 옵션 maxCount (횟수 상한, 없으면 "")
+  var optMaxCount = options.maxCount;
+  if (optMaxCount === undefined || optMaxCount === null || String(optMaxCount).trim() === "") optMaxCount = "";
+  var optMaxCountNum = _statusToNum(optMaxCount);
 
   var existing = findActiveStatusRowInfo(targetAlias, statusName);
 
@@ -5771,10 +5781,10 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
     var initValue = _statusToNum(options.value);
     var initCount = (options.count === undefined || options.count === null || options.count === "")
       ? "" : _statusToNum(options.count);
-    if (optMaxNum > 0) {
-      if (initValue > optMaxNum) initValue = optMaxNum;
-      if (initCount !== "" && initCount > optMaxNum) initCount = optMaxNum;
-    }
+    // 수치 상한: 최대 적용
+    if (optMaxNum > 0 && initValue > optMaxNum) initValue = optMaxNum;
+    // 횟수 상한: 최대횟수 적용
+    if (optMaxCountNum > 0 && initCount !== "" && initCount > optMaxCountNum) initCount = optMaxCountNum;
 
     var row = {
       id: id,
@@ -5797,11 +5807,10 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
       생성일: now,
       처리일: ""
     };
-    // 최대값/최대치 헤더가 있으면 기록 (없으면 appendRowByHeaders가 무시)
-    if (optMax !== "") {
-      row["최대값"] = optMax;
-      row["최대치"] = optMax;
-    }
+    // 최대값/최대치(수치 상한) 헤더가 있으면 기록
+    if (optMax !== "") { row["최대값"] = optMax; row["최대치"] = optMax; }
+    // 최대횟수(횟수 상한) 헤더가 있으면 기록
+    if (optMaxCount !== "") { row["최대횟수"] = optMaxCount; }
     appendRowByHeaders(SHEET_STATUS_DB, row);
 
     var out = "[상태 부여]\n" +
@@ -5810,15 +5819,19 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
               "분류: " + category + "\n" +
               "효과코드: " + effectCode +
               "\n수치: " + initValue;
-    if (initCount !== "") out += "\n남은횟수: " + initCount;
-    if (optMax !== "")    out += "\n최대: " + optMax;
+    if (initCount !== "")   out += "\n남은횟수: " + initCount;
+    if (optMax !== "")      out += "\n최대수치: " + optMax;
+    if (optMaxCount !== "") out += "\n최대횟수: " + optMaxCount;
     return out;
   }
 
   // ─── B/C. 기존 ACTIVE 갱신 ────────────────────────────────────
   var existingMax = _statusToNum(existing.status["최대값"]);
   if (existingMax <= 0) existingMax = _statusToNum(existing.status["최대치"]);
-  var maxCap = optMaxNum > 0 ? optMaxNum : existingMax;  // 0이면 제한 없음
+  var maxCap = optMaxNum > 0 ? optMaxNum : existingMax;  // 수치 상한 (0=무제한)
+
+  var existingMaxCount = _statusToNum(existing.status["최대횟수"]);
+  var maxCountCap = optMaxCountNum > 0 ? optMaxCountNum : existingMaxCount;  // 횟수 상한 (0=무제한)
 
   var prevValue = _statusToNum(existing.status["수치"]);
   var prevCountRaw = existing.status["남은횟수"];
@@ -5847,7 +5860,7 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
     newCountForLog = prevCountBlank ? "-" : prevCount;
   } else {
     var calc = isOverwrite ? addCount : (prevCountBlank ? addCount : (prevCount + addCount));
-    if (maxCap > 0 && calc > maxCap) calc = maxCap;
+    if (maxCountCap > 0 && calc > maxCountCap) calc = maxCountCap;  // 횟수는 maxCountCap으로
     newCount = calc;
     newCountForLog = calc;
   }
@@ -5869,10 +5882,8 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
   setStatusCell(existing, "중복방식", stackMode);
   if (options.source) setStatusCell(existing, "출처", options.source);
   if (options.memo)   setStatusCell(existing, "메모", options.memo);
-  if (maxCap > 0) {
-    setStatusCell(existing, "최대값", maxCap);
-    setStatusCell(existing, "최대치", maxCap);
-  }
+  if (maxCap > 0) { setStatusCell(existing, "최대값", maxCap); setStatusCell(existing, "최대치", maxCap); }
+  if (maxCountCap > 0) setStatusCell(existing, "최대횟수", maxCountCap);
   setStatusCell(existing, "처리일", now);
   setStatusCell(existing, "수정일", now);
 
@@ -5887,7 +5898,8 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
     body += "수치: " + prevValue + " → " + newValue + "\n" +
             "남은횟수: " + (prevCountBlank ? "-" : prevCount) + " → " + newCountForLog;
   }
-  if (maxCap > 0) body += "\n최대: " + maxCap;
+  if (maxCap > 0)      body += "\n최대수치: " + maxCap;
+  if (maxCountCap > 0) body += "\n최대횟수: " + maxCountCap;
   return body;
 }
 
@@ -6364,6 +6376,7 @@ function buildStatusOptionsFromTemplate(template, opts, context) {
     count: pickOption(opts, "횟수", pickOption(opts, "남은횟수", template["남은횟수"] || "")),
     stackMode: pickOption(opts, "중복", pickOption(opts, "중복방식", template["중복방식"] || "허용")),
     maxValue: _pickMaxOption(opts) || template["최대값"] || template["최대치"] || "",
+    maxCount: _pickMaxCountOption(opts) || template["최대횟수"] || "",
     source: context.skillName || "상태템플릿",
     memo: pickOption(opts, "메모", template["메모"] || "")
   };
@@ -6451,6 +6464,7 @@ function applyStatusWithResistance(targetAlias, statusName, category, effectCode
     count: opts["횟수"] || "",
     stackMode: opts["중복"] || "허용",
     maxValue: _pickMaxOption(opts),
+    maxCount: _pickMaxCountOption(opts),
     source: context.skillName || "",
     memo: opts["메모"] || ""
   }));

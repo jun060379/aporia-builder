@@ -57,9 +57,10 @@ function buildText(type, params) {
     const name = params.templateName === '직접입력' ? (params.customTemplateName || '') : (params.templateName || '');
     if (!name) return '';
     let t = `상태템플릿부여 ${params.target || '대상'} ${name}`;
-    if (params.value)  t += ` 수치:${params.value}`;
-    if (params.count)  t += ` 횟수:${params.count}`;
-    if (params.max)    t += ` 최대:${params.max}`;
+    if (params.value)    t += ` 수치:${params.value}`;
+    if (params.count)    t += ` 횟수:${params.count}`;
+    if (params.max)      t += ` 최대:${params.max}`;
+    if (params.maxCount) t += ` 최대횟수:${params.maxCount}`;
     if (params.resist === 'possible') {
       t += ' 저항:가능';
       if (params.resistDifficulty) t += ` 저항난이도:${params.resistDifficulty}`;
@@ -76,6 +77,7 @@ function buildText(type, params) {
     if (params.probability) t += ` 확률:${params.probability}`;
     if (params.count)       t += ` 횟수:${params.count}`;
     if (params.max)         t += ` 최대:${params.max}`;
+    if (params.maxCount)    t += ` 최대횟수:${params.maxCount}`;
     if (params.activation)  t += ` 발동:${params.activation}`;
     if (params.judgment)    t += ` 판정:${params.judgment}`;
     if (params.duplicate)   t += ` 중복:${params.duplicate}`;
@@ -239,13 +241,21 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
                   <input className={`${inputCls} mt-1`} value={params.customTemplateName || ''} onChange={e => setParam('customTemplateName', e.target.value)} placeholder="템플릿명 직접 입력" />
                 )}
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                {[['수치','value','0'], ['횟수','count','1'], ['최대','max','']].map(([lbl, key, ph]) => (
+              <div className="grid grid-cols-2 gap-2">
+                {[['수치','value','0'], ['횟수','count','1']].map(([lbl, key, ph]) => (
                   <label key={key} className="flex flex-col gap-1">
                     <span className="text-[11px] text-slate-500">{lbl}</span>
                     <input className={`${inputCls} font-mono`} value={params[key] || ''} onChange={e => setParam(key, e.target.value)} placeholder={ph} />
                   </label>
                 ))}
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">최대 <span className="text-slate-400">(수치 상한)</span></span>
+                  <input className={`${inputCls} font-mono`} value={params.max || ''} onChange={e => setParam('max', e.target.value)} placeholder="무제한" />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">최대횟수 <span className="text-slate-400">(횟수 상한)</span></span>
+                  <input className={`${inputCls} font-mono`} value={params.maxCount || ''} onChange={e => setParam('maxCount', e.target.value)} placeholder="무제한" />
+                </label>
               </div>
               <NumTokenBar onInsert={t => setParam('value', (params.value || '') + t)} />
               <ResistSection params={params} setParam={setParam} />
@@ -284,10 +294,14 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
                 <EffectVariableHelp compact />
               </div>
               <div className="grid grid-cols-2 gap-2">
-                {[['수치','value'], ['확률','probability'], ['횟수','count'], ['최대(수치/횟수 상한)','max'], ['발동','activation'], ['판정','judgment'], ['중복','duplicate']].map(([lbl, key]) => (
+                {[
+                  ['수치','value'], ['확률','probability'], ['횟수','count'],
+                  ['최대(수치 상한)','max'], ['최대횟수(횟수 상한)','maxCount'],
+                  ['발동','activation'], ['판정','judgment'], ['중복','duplicate']
+                ].map(([lbl, key]) => (
                   <label key={key} className="flex flex-col gap-1">
                     <span className="text-[11px] text-slate-500">{lbl}</span>
-                    <input className={inputCls} value={params[key] || ''} onChange={e => setParam(key, e.target.value)} placeholder={lbl} />
+                    <input className={inputCls} value={params[key] || ''} onChange={e => setParam(key, e.target.value)} placeholder="" />
                   </label>
                 ))}
               </div>
