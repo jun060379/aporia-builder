@@ -454,6 +454,7 @@ function handleCommand(utterance, displayName) {
   if (command === "!스킬반려") return skillReject(parts, displayName, utterance);
   if (command === "!스킬목록") return skillList(displayName);
   if (command === "!스킬") return skillUse(parts, displayName);
+  if (command === "!캐스팅") return castingProgressCommand(parts, displayName);
 
   if (command === "!공용스킬목록") return commonSkillListCommand(parts, displayName);
   if (command === "!공용스킬") return commonSkillUseCommand(parts, displayName);
@@ -3256,6 +3257,16 @@ function skillUse(parts, displayName) {
   }
 
   const alias = String(character["별명"]).trim();
+
+  // 다른 스킬 캐스팅 진행 중 차단 — 해당 스킬 자신의 캐스팅(완료 포함)은 통과
+  const castingBlock = _checkAnyCastingBlock(alias);
+  if (castingBlock.blocked) {
+    // 이 스킬 자신의 캐스팅이 완료 상태(count=0)라면 통과
+    const selfCastInfo = findActiveStatusRowInfo(alias, _castingStatusName(skillName));
+    const selfCastDone = selfCastInfo && _statusToNum(selfCastInfo.status["남은횟수"]) === 0;
+    if (!selfCastDone) return castingBlock.text;
+  }
+
   const skill = findApprovedSkill(alias, skillName);
 
   if (!skill) {
@@ -5958,15 +5969,15 @@ function checkSkillCostGate(alias, skillName, costText) {
     if (cdM) {
       var cdStatus = findActiveStatusRowInfo(alias, _cooldownStatusName(skillName));
       if (cdStatus) {
+        var cdRemain = _statusToNum(cdStatus.status["남은횟수"]);
         return {
           blocked: true,
-          text: "[스킬 사용 불가: 쿨타임]\n스킬: " + skillName +
-                "\n사유: 아직 재사용 대기 중입니다.\n상태: " + _cooldownStatusName(skillName)
+          text: "[쿨타임]\n" + skillName + "\n해당 스킬은 아직 사용할 수 없습니다.\n남은 쿨타임: " + cdRemain
         };
       }
     }
 
-    // 캐스팅 확인 — 캐스팅 상태가 없으면 차단하고 상태 부여, 있으면 소모하고 발동 허용
+    // 캐스팅 확인 — 캐스팅 상태가 없으면 시작, 있으면 count 확인
     var caM = line.match(/^캐스팅[:：](\d+(?:\.\d+)?)$/);
     if (caM) {
       var caStatus = findActiveStatusRowInfo(alias, _castingStatusName(skillName));
@@ -5984,19 +5995,21 @@ function checkSkillCostGate(alias, skillName, costText) {
         });
         return {
           blocked: true,
-          text: "[캐스팅 시작]\n스킬: " + skillName +
-                "\n" + caTurns + "회 판정 후 사용 가능합니다.\n" +
-                "캐스팅 상태: " + _castingStatusName(skillName) + " 부여"
+          text: "[캐스팅 시작]\n" + skillName + "\n" +
+                "집속을 시작합니다. !캐스팅 명령으로 진행하세요.\n\n" +
+                "!캐스팅 " + skillName + "\n\n" +
+                "캐스팅 중에는 다른 스킬을 사용할 수 없습니다."
         };
       }
       // 캐스팅 상태 있음 — 남은 횟수 확인
       var caRemain = _statusToNum(caStatus.status["남은횟수"]);
       if (caRemain > 0) {
-        // 아직 카운트다운 중 → 차단
         return {
           blocked: true,
-          text: "[캐스팅 중]\n스킬: " + skillName +
-                "\n남은 판정: " + caRemain + "회\n판정을 " + caRemain + "회 더 하면 사용 가능합니다."
+          text: "[캐스팅 진행 중]\n" + skillName + " (" + caRemain + "턴 남음)\n" +
+                "캐스팅 중에는 다른 스킬을 사용할 수 없습니다.\n\n" +
+                "!캐스팅 " + skillName + "\n\n" +
+                "위 명령으로 집속을 진행하세요."
         };
       }
       // caRemain === 0 → 캐스팅 완료 → 발동 허용 (상태는 payCost에서 소모)
@@ -6126,6 +6139,92 @@ function payCost(alias, skillName, costText, context) {
   });
 
   return { ok: true, logs: logs };
+}
+
+// ── 캐스팅 진행 중 여부 확인 — 다른 스킬 사용 시 차단용 ─────────────────
+// 현재 캐릭터에게 count > 0 인 캐스팅 상태가 있으면 { blocked, text } 반환.
+function _checkAnyCastingBlock(alias) {
+  var rows = getActiveStatusRows(alias);
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (String(r["분류"]    || "").trim() !== COST_COOLDOWN_CAT) continue;
+    if (String(r["효과코드"] || "").trim() !== COST_CASTING_CODE) continue;
+    var sName = String(r["상태명"] || "").trim();
+    if (!sName.startsWith(COST_CASTING_PREFIX)) continue;
+    var remain = _statusToNum(r["남은횟수"]);
+    if (remain <= 0) continue;  // count=0 은 "완료 대기" — 발동 허용
+    var castSkill = sName.slice(COST_CASTING_PREFIX.length);
+    return {
+      blocked: true,
+      text: "[캐스팅 진행 중]\n" + castSkill + " (" + remain + "턴 남음)\n" +
+            "캐스팅 중에는 다른 스킬을 사용할 수 없습니다.\n\n" +
+            "!캐스팅 " + castSkill + "\n\n" +
+            "위 명령으로 집속을 계속 진행하세요."
+    };
+  }
+  return { blocked: false };
+}
+
+// ── !캐스팅 커맨드 ────────────────────────────────────────────────────────
+function castingProgressCommand(parts, displayName) {
+  var character = findCharacter(displayName);
+  if (!character) return "캐릭터를 찾을 수 없습니다.\n디스코드 별명: " + displayName;
+  var alias = String(character["별명"]).trim();
+
+  // 인자 없음 → 진행 중인 캐스팅 목록 표시
+  if (parts.length < 2) {
+    var allRows = getActiveStatusRows(alias).filter(function(r) {
+      return String(r["분류"] || "").trim() === COST_COOLDOWN_CAT &&
+             String(r["효과코드"] || "").trim() === COST_CASTING_CODE &&
+             String(r["상태명"] || "").trim().startsWith(COST_CASTING_PREFIX);
+    });
+    if (allRows.length === 0) {
+      return "[캐스팅 없음]\n현재 진행 중인 캐스팅이 없습니다.";
+    }
+    var lines = allRows.map(function(r) {
+      var sn = String(r["상태명"] || "").trim().slice(COST_CASTING_PREFIX.length);
+      var cnt = _statusToNum(r["남은횟수"]);
+      return cnt > 0
+        ? sn + " — " + cnt + "턴 남음 (계속: !캐스팅 " + sn + ")"
+        : sn + " — 발동 준비 완료 (!스킬 " + sn + " 또는 !공용스킬 " + sn + ")";
+    });
+    return "[캐스팅 목록]\n" + lines.join("\n");
+  }
+
+  var skillName = parts.slice(1).join(" ");
+  var statusName = _castingStatusName(skillName);
+  var statusInfo = findActiveStatusRowInfo(alias, statusName);
+
+  if (!statusInfo) {
+    return "[캐스팅 오류]\n" + skillName + "의 캐스팅이 진행 중이 아닙니다.\n" +
+           "먼저 !스킬 " + skillName + " 또는 !공용스킬 " + skillName + " 으로 캐스팅을 시작하세요.";
+  }
+
+  var current = _statusToNum(statusInfo.status["남은횟수"]);
+
+  if (current <= 0) {
+    // 이미 완료
+    return "[캐스팅 완료]\n" + skillName + "\n" +
+           "집속이 이미 완료되었습니다. 다음 명령으로 발동하세요.\n\n" +
+           "!스킬 " + skillName + "\n또는\n!공용스킬 " + skillName;
+  }
+
+  var next = current - 1;
+  updateRowById(SHEET_STATUS_DB, "id", statusInfo.status["id"], { 남은횟수: next });
+  invalidateSheetCache(SHEET_STATUS_DB);
+
+  if (next > 0) {
+    return "[캐스팅 중]\n" + skillName + "\n" +
+           "집속 진행 중... (" + next + "턴 남음)\n\n" +
+           "!캐스팅 " + skillName + "\n\n" +
+           "위 명령을 " + next + "번 더 입력하세요.";
+  }
+
+  // next === 0 → 완료!
+  return "[캐스팅 완료]\n" + skillName + "\n" +
+         "집속이 완료되었습니다! 발동 준비가 됐습니다.\n\n" +
+         "!스킬 " + skillName + "\n또는\n!공용스킬 " + skillName + "\n\n" +
+         "위 명령으로 발동하세요.";
 }
 
 function parseEffectOptions(tokens) {
@@ -7021,19 +7120,13 @@ function processStatusBeforeCheck(alias, checkTypeOrTypes) {
       return;
     }
 
-    // 시스템 분류 — 쿨타임/캐스팅 카운트다운 (차단 없음)
+    // 시스템 분류 — 쿨타임만 자동 차감, 캐스팅은 !캐스팅 명령으로만 진행
     if (category === "시스템") {
       const code = String(status["효과코드"] || "").trim();
       if (code === "쿨타임") {
-        // 표준 consumeStatusCount — 0이 되면 EXPIRED로 만료
-        consumeStatusCount(status);
-      } else if (code === "캐스팅") {
-        // 캐스팅은 0에서 만료시키지 않고 0을 "시전 완료" 신호로 유지
-        var curCast = _statusToNum(status["남은횟수"]);
-        if (curCast > 0) {
-          updateRowById(SHEET_STATUS_DB, "id", status["id"], { 남은횟수: curCast - 1 });
-        }
+        consumeStatusCount(status);  // 0이 되면 EXPIRED 만료
       }
+      // 캐스팅은 여기서 건드리지 않음 — !캐스팅 명령에서만 차감
       return;
     }
   });
@@ -10777,6 +10870,14 @@ function commonSkillUseCommand(parts, displayName) {
   const targetParsed = parseTargetAndMods(rest.slice(1));
   const mods = targetParsed.mods;
   const targetAlias = targetParsed.target;
+
+  // 다른 스킬 캐스팅 진행 중 차단 — 해당 스킬 자신의 캐스팅(완료)은 통과
+  const commonCastBlock = _checkAnyCastingBlock(alias);
+  if (commonCastBlock.blocked) {
+    const selfCastInfo = findActiveStatusRowInfo(alias, _castingStatusName(skillName));
+    const selfCastDone = selfCastInfo && _statusToNum(selfCastInfo.status["남은횟수"]) === 0;
+    if (!selfCastDone) return commonCastBlock.text;
+  }
 
   const skillRows = readCommonSkills();
   if (skillRows === null) {
