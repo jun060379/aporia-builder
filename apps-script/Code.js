@@ -662,15 +662,25 @@ function commandListCommand() {
   ].join("\n");
 }
 
-// _getSpreadsheet()는 호출마다 IPC 비용이 든다.
-// 한 실행 컨텍스트 안에서는 한 번만 얻어서 재사용한다.
+// ── 실행 컨텍스트 내 시트 데이터 인메모리 캐시 ─────────────────────────
+// GAS는 요청 1건 = 실행 1건이다. 동일 실행 안에서는 같은 시트를 여러 번
+// getValues()로 읽어도 결과가 바뀌지 않으므로 첫 번째 결과를 재사용한다.
+// (grow/equip 같은 쓰기 경로는 쓴 직후 다시 읽어야 하므로 invalidateSheetCache로 해당 시트만 무효화)
 var _ssInstance = null;
 function _getSpreadsheet() {
   if (!_ssInstance) _ssInstance = SpreadsheetApp.getActiveSpreadsheet();
   return _ssInstance;
 }
 
+var _sheetDataCache = {};
+function invalidateSheetCache(sheetName) {
+  if (sheetName) delete _sheetDataCache[sheetName];
+  else _sheetDataCache = {};
+}
+
 function getSheetData(sheetName) {
+  if (_sheetDataCache[sheetName]) return _sheetDataCache[sheetName];
+
   const ss = _getSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
 
@@ -679,17 +689,17 @@ function getSheetData(sheetName) {
   }
 
   const values = sheet.getDataRange().getValues();
-  if (values.length < 2) return [];
-
-  const headers = values[0].map(h => String(h).trim());
-
-  return values.slice(1).map(row => {
-    const obj = {};
-    headers.forEach((header, index) => {
-      obj[header] = row[index];
+  const result = values.length < 2 ? [] : (function() {
+    const headers = values[0].map(h => String(h).trim());
+    return values.slice(1).map(row => {
+      const obj = {};
+      headers.forEach((header, index) => { obj[header] = row[index]; });
+      return obj;
     });
-    return obj;
-  });
+  })();
+
+  _sheetDataCache[sheetName] = result;
+  return result;
 }
 
 function getSheetHeaders(sheetName) {
@@ -1239,6 +1249,8 @@ function setCellByHeader(rowInfo, headerName, value) {
 
   rowInfo.sheet.getRange(rowInfo.rowIndex, columnIndex + 1).setValue(value);
   rowInfo.character[headerName] = value;
+  // 이 시트의 실행-내 캐시 무효화 (다음 읽기에서 최신값 반영)
+  invalidateSheetCache(rowInfo.sheet.getName());
   return true;
 }
 
@@ -2414,6 +2426,7 @@ function appendRowByHeaders(sheetName, obj) {
 
   const row = headers.map(h => obj[h] !== undefined ? obj[h] : "");
   sheet.appendRow(row);
+  invalidateSheetCache(sheetName);
 }
 
 function makeAttackId() {
@@ -2538,6 +2551,7 @@ function updateRowById(sheetName, idColumn, idValue, updates) {
           sheet.getRange(r + 1, c + 1).setValue(updates[key]);
         }
       });
+      invalidateSheetCache(sheetName);
       return true;
     }
   }
@@ -11324,7 +11338,7 @@ function handleMyCharApi(e) {
     if (!charRow) return { ok: false, error: "캐릭터를 찾을 수 없습니다: " + alias };
     alias = String(charRow["별명"] || alias).trim();
 
-    if (action === "view")    return _myCharView(alias);
+    if (action === "view")    return _myCharViewCached(alias);
     if (action === "grow")    return _myCharGrow(alias, field);
     if (action === "equip")   return _myCharEquip(alias, invId);
     if (action === "unequip") return _myCharUnequip(alias, slot || invId);
@@ -11343,6 +11357,29 @@ function _growthInfo(character, field) {
   } catch (_e) {
     return { next: null, cost: null, isMax: true };
   }
+}
+
+var MYCHAR_CACHE_TTL = 30; // 초
+
+function _myCharCacheKey(alias) { return "mychar_v1_" + alias; }
+
+function _myCharViewCached(alias) {
+  try {
+    var sc = CacheService.getScriptCache();
+    var hit = sc.get(_myCharCacheKey(alias));
+    if (hit) return JSON.parse(hit);
+  } catch (_e) {}
+  var result = _myCharView(alias);
+  if (result && result.ok) {
+    try {
+      CacheService.getScriptCache().put(_myCharCacheKey(alias), JSON.stringify(result), MYCHAR_CACHE_TTL);
+    } catch (_e) {}
+  }
+  return result;
+}
+
+function _invalidateMyCharCache(alias) {
+  try { CacheService.getScriptCache().remove(_myCharCacheKey(alias)); } catch (_e) {}
 }
 
 function _myCharView(alias) {
@@ -11434,18 +11471,21 @@ function _myCharGrow(alias, field) {
   if (!success) {
     return { ok: false, error: String(resultText).split("\n").slice(0, 6).join("\n") };
   }
+  _invalidateMyCharCache(alias);
   return Object.assign(_myCharView(alias), { ok: true, message: field + " 성장 완료" });
 }
 
 function _myCharEquip(alias, invId) {
   var r = _invApiEquip(alias, invId);
   if (!r.ok) return r;
+  _invalidateMyCharCache(alias);
   return Object.assign(_myCharView(alias), { ok: true, message: r.message });
 }
 
 function _myCharUnequip(alias, slotOrInvId) {
   var r = _invApiUnequip(alias, slotOrInvId);
   if (!r.ok) return r;
+  _invalidateMyCharCache(alias);
   return Object.assign(_myCharView(alias), { ok: true, message: r.message });
 }
 

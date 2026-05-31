@@ -120,11 +120,13 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
 
   const remain = data.remain ?? 0;
 
+  const afterWrite = (r, notice) => { clearDataCache(); writeDataCache(r); onReload(r); setNotice(notice); };
+
   const grow = async (field) => {
     setBusy(field); setError(''); setNotice('');
     try {
       const r = await callMyChar('grow', { field });
-      if (r.ok) { onReload(r); setNotice(`${field} 성장 완료`); }
+      if (r.ok) afterWrite(r, `${field} 성장 완료`);
       else setError(r.error || r.message || '성장에 실패했습니다.');
     } catch (e) { setError(e.message); }
     finally { setBusy(''); }
@@ -134,7 +136,7 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
     setBusy('eq:' + invId); setError(''); setNotice('');
     try {
       const r = await callMyChar('equip', { invId });
-      if (r.ok) { onReload(r); setNotice(r.message || '장착 완료'); }
+      if (r.ok) afterWrite(r, r.message || '장착 완료');
       else setError(r.error || r.message || '장착에 실패했습니다.');
     } catch (e) { setError(e.message); }
     finally { setBusy(''); }
@@ -144,7 +146,7 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
     setBusy('uneq:' + slot); setError(''); setNotice('');
     try {
       const r = await callMyChar('unequip', { slot });
-      if (r.ok) { onReload(r); setNotice(r.message || '해제 완료'); }
+      if (r.ok) afterWrite(r, r.message || '해제 완료');
       else setError(r.error || r.message || '해제에 실패했습니다.');
     } catch (e) { setError(e.message); }
     finally { setBusy(''); }
@@ -392,52 +394,95 @@ function AliasRegister({ initial, onSaved }) {
   );
 }
 
+// ── sessionStorage SWR 헬퍼 ──────────────────────────────────
+const ALIAS_CACHE_KEY   = 'aporia-mychar-alias-v1';
+const MYDATA_CACHE_KEY  = 'aporia-mychar-data-v1';
+const MYDATA_CACHE_TTL  = 30 * 1000; // 30초 (HP 등 변동 고려)
+
+function readAliasCache()  { try { return sessionStorage.getItem(ALIAS_CACHE_KEY) || null; } catch { return null; } }
+function writeAliasCache(a){ try { sessionStorage.setItem(ALIAS_CACHE_KEY, a); } catch {} }
+function clearAliasCache() { try { sessionStorage.removeItem(ALIAS_CACHE_KEY); } catch {} }
+
+function readDataCache() {
+  try {
+    const raw = sessionStorage.getItem(MYDATA_CACHE_KEY);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    return Date.now() - ts < MYDATA_CACHE_TTL ? data : null;
+  } catch { return null; }
+}
+function writeDataCache(d) { try { sessionStorage.setItem(MYDATA_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: d })); } catch {} }
+function clearDataCache()  { try { sessionStorage.removeItem(MYDATA_CACHE_KEY); } catch {} }
+
 export default function MyCharacterPage() {
   const { user, loading } = useAuth();
-  const [alias, setAlias] = useState(null);     // null=미확인, ''=미등록
-  const [data, setData] = useState(null);
-  const [pageLoading, setPageLoading] = useState(true);
-  const [error, setError] = useState('');
+
+  const cachedAlias = readAliasCache();
+  const cachedData  = readDataCache();
+
+  const [alias, setAlias]           = useState(cachedAlias);  // null=미확인, ''=미등록
+  const [data, setData]             = useState(cachedData);
+  const [pageLoading, setPageLoading] = useState(!cachedAlias); // 캐시 있으면 스피너 스킵
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError]           = useState('');
   const [editingAlias, setEditingAlias] = useState(false);
 
-  // 별명 조회
+  // 캐릭터 데이터 로드 (background=true 이면 스피너 없이 백그라운드 갱신)
+  const loadChar = useCallback(async (background = false) => {
+    if (background) setRefreshing(true);
+    setError('');
+    try {
+      const r = await callMyChar('view');
+      if (r.ok) { writeDataCache(r); setData(r); }
+      else if (r.error === 'NO_ALIAS') { clearAliasCache(); setAlias(''); }
+      else setError(r.error || r.message || '캐릭터 조회 실패');
+    } catch (e) { if (!background) setError(e.message); }
+    finally { setRefreshing(false); }
+  }, []);
+
+  // alias 확보 — 캐시 있으면 Supabase 호출 생략
   useEffect(() => {
     if (!user || !supabase) { setPageLoading(false); return; }
+    if (cachedAlias !== null) {
+      // 캐시 alias 사용 — 백그라운드에서 Supabase 검증 후 갱신
+      setPageLoading(false);
+      (async () => {
+        try {
+          const { data: prof } = await supabase
+            .from('profiles').select('character_alias').eq('id', user.id).maybeSingle();
+          const fresh = String(prof?.character_alias || '');
+          if (fresh !== cachedAlias) { writeAliasCache(fresh); setAlias(fresh); clearDataCache(); setData(null); }
+        } catch {}
+      })();
+      return;
+    }
+    // 캐시 없음 — Supabase 로 alias 확인
     let cancelled = false;
     (async () => {
       try {
         const { data: prof, error: err } = await supabase
           .from('profiles').select('character_alias').eq('id', user.id).maybeSingle();
         if (cancelled) return;
-        if (err) {
-          setError('프로필 조회 실패: ' + err.message);
-          setAlias('');
-        } else {
-          setAlias(String(prof?.character_alias || ''));
-        }
-      } catch (e) {
-        if (!cancelled) { setError(e.message); setAlias(''); }
-      } finally {
-        if (!cancelled) setPageLoading(false);
-      }
+        if (err) { setError('프로필 조회 실패: ' + err.message); setAlias(''); }
+        else { const a = String(prof?.character_alias || ''); writeAliasCache(a); setAlias(a); }
+      } catch (e) { if (!cancelled) { setError(e.message); setAlias(''); } }
+      finally { if (!cancelled) setPageLoading(false); }
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // 캐릭터 데이터 로드
-  const loadChar = useCallback(async () => {
-    setError('');
-    try {
-      const r = await callMyChar('view');
-      if (r.ok) setData(r);
-      else if (r.error === 'NO_ALIAS') setAlias('');
-      else setError(r.error || r.message || '캐릭터 조회 실패');
-    } catch (e) { setError(e.message); }
-  }, []);
-
+  // alias 확보 후 데이터 로드
   useEffect(() => {
-    if (alias) loadChar();
-  }, [alias, loadChar]);
+    if (!alias) return;
+    if (cachedData) {
+      // 캐시 있으면 즉시 표시 후 백그라운드 갱신
+      loadChar(true);
+    } else {
+      loadChar(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alias]);
 
   if (loading || pageLoading) return <PlaceholderPage title="내 캐릭터" body="불러오는 중입니다…" />;
   if (!user) {
@@ -461,7 +506,22 @@ export default function MyCharacterPage() {
             <span className="bg-gradient-to-r from-violet-700 to-indigo-600 bg-clip-text text-xl font-bold text-transparent">APORIA</span>
             <span className="text-slate-400 text-[13px] font-light tracking-widest">MY CHARACTER</span>
           </Link>
-          <Link to="/" className="inline-flex items-center rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:from-violet-700 hover:to-indigo-700 transition">홈</Link>
+          <div className="flex items-center gap-2">
+            {refreshing && (
+              <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full border border-violet-300 border-t-violet-600 animate-spin inline-block" />
+                갱신 중
+              </span>
+            )}
+            {data && !editingAlias && (
+              <button
+                onClick={() => { clearDataCache(); loadChar(false); }}
+                disabled={refreshing}
+                className="text-[11px] px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-500 rounded-lg transition disabled:opacity-40"
+              >새로고침</button>
+            )}
+            <Link to="/" className="inline-flex items-center rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:from-violet-700 hover:to-indigo-700 transition">홈</Link>
+          </div>
         </div>
       </header>
 
