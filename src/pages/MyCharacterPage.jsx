@@ -253,6 +253,31 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
           </div>
         )}
       </section>
+
+      {/* 패시브 */}
+      <section>
+        <SectionTitle extra={<Link to="/builder" className="text-[11px] text-violet-600 hover:underline">빌더에서 수정 신청 →</Link>}>패시브</SectionTitle>
+        <p className="text-[10px] text-slate-400 mb-2">패시브 추가/수정은 캐릭터 빌더에서 작성 후 신청하면 관리자 승인 뒤 반영됩니다.</p>
+        {(data.passives || []).length === 0 ? (
+          <p className="text-xs text-slate-400 italic">적용 중인 패시브가 없습니다.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {data.passives.map((p, i) => (
+              <div key={i} className="bg-slate-50 rounded-lg border border-slate-100 px-3 py-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium text-slate-700">{p.name}</span>
+                  {p.category && <span className="text-[10px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{p.category}</span>}
+                  {p.trigger && <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">{p.trigger}</span>}
+                  {p.value && <span className="text-[10px] text-slate-400 font-mono">수치 {p.value}</span>}
+                </div>
+                {p.condition && <p className="text-[10px] text-slate-400 font-mono mt-0.5 whitespace-pre-wrap break-all">조건: {p.condition}</p>}
+                {p.effect && <p className="text-[10px] text-indigo-500 font-mono mt-0.5 whitespace-pre-wrap break-all">효과: {p.effect}</p>}
+                {p.description && <p className="text-[10px] text-slate-400 mt-0.5">{p.description}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

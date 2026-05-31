@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import ConditionEditor from './ConditionEditor.jsx';
+import EffectRowsEditor from './EffectRowsEditor.jsx';
 
 const inputCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
 const selectCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 outline-none transition-colors";
@@ -39,7 +40,11 @@ export default function PassiveMaker() {
   }
 
   const tsv = useMemo(() => {
-    return HEADERS.map((h) => String(row[h] ?? '').replace(/\t/g, ' ').replace(/\r?\n/g, ', ')).join('\t');
+    return HEADERS.map((h) => {
+      // 효과 컬럼은 줄마다 ' ; ' 로 구분 보존(Apps Script가 ';'로 분리).
+      const sep = h === '효과' ? ' ; ' : ', ';
+      return String(row[h] ?? '').replace(/\t/g, ' ').replace(/\r?\n/g, sep);
+    }).join('\t');
   }, [row]);
 
   const errors = useMemo(() => {
@@ -138,10 +143,10 @@ export default function PassiveMaker() {
         <ConditionEditor value={row.조건} onChange={(v) => setRow((r) => ({ ...r, 조건: v }))} />
       </div>
 
-      <label className="flex flex-col gap-1">
-        <span className="text-[11px] text-slate-500 tracking-wide">효과 (트리거효과 분류일 때만 사용; 효과코드 + 인자)</span>
-        <textarea className={`${inputCls} h-16 resize-none font-mono`} value={row.효과} onChange={field('효과')} placeholder="예) 상태부여 자기 집중 수치:1 횟수:1" />
-      </label>
+      <div className="flex flex-col gap-1">
+        <span className="text-[11px] text-slate-500 tracking-wide">효과 (세부조건 → 세부효과 행 방식)</span>
+        <EffectRowsEditor value={row.효과} onChange={(v) => setRow((r) => ({ ...r, 효과: v }))} />
+      </div>
 
       <label className="flex flex-col gap-1">
         <span className="text-[11px] text-slate-500 tracking-wide">설명</span>

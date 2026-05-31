@@ -6222,6 +6222,90 @@ function applyTemplateStatusWithResistance(targetAlias, templateName, opts, cont
   );
 }
 
+// ── 세부효과: "변수 = 값" / "변수 == 값" 설정 표현식 파서 ──────────────
+// 단일 변수명 뒤에 = 또는 == 가 오면 "값 설정" 효과로 인식.
+// 기존 효과 명령(상태부여/스택증가 등)은 첫 토큰 뒤에 공백+다른 단어가
+// 오므로 이 정규식과 매칭되지 않는다 → 충돌 없음.
+function _parseSetEffect(effPart) {
+  var m = String(effPart == null ? "" : effPart)
+    .match(/^\s*([^\s=<>!]+)\s*(==|=)\s*(.+?)\s*$/);
+  if (!m) return null;
+  return { variable: m[1].trim(), value: m[3].trim() };
+}
+
+// 설정 효과 실행.
+// DB 직접 기록 변수(이면침식/현재체력/일상점)는 시트 셀에 set + 클램프.
+// 모디파이어 개념 변수(피해감소/피해보정/회복보정/판정보정)는 이번 단계에서는
+//   로그/반환값까지만 (실제 전투 합산 연동은 후속).
+// 그 외 변수는 오류 메시지 반환.
+function applySetEffect(variable, valueExpr, context) {
+  context = context || {};
+  var v = String(variable).trim();
+
+  var alias = String(
+    context.userAlias ||
+    (context.character && context.character["별명"]) || ""
+  ).trim();
+  var character = context.character || (alias ? findCharacterByAlias(alias) : null);
+
+  // 우변 평가용 컨텍스트(스탯/DB 변수 참조 허용)
+  var evalCtx = context;
+  if (character && !context.vars) {
+    try {
+      var cc = buildConditionContext(character, context.targetAlias || "");
+      evalCtx = Object.assign({}, context, { vars: cc.vars });
+    } catch (_e) { /* vars 없이 진행 */ }
+  }
+
+  var num;
+  try { num = readEffectNumber(valueExpr, evalCtx, NaN); }
+  catch (_e) { num = NaN; }
+  if (isNaN(Number(num))) {
+    return "[설정 실패]\n변수: " + v + "\n값을 숫자로 해석할 수 없습니다: " + valueExpr;
+  }
+  num = Math.floor(Number(num));
+
+  // ── 모디파이어 개념 변수: 로그/반환만 ──
+  var MODIFIER_LABEL = {
+    "피해감소": "받는 피해 감소",
+    "피해보정": "피해 보정",
+    "회복보정": "회복 보정",
+    "판정보정": "판정 보정"
+  };
+  if (MODIFIER_LABEL.hasOwnProperty(v)) {
+    return "[보정] " + MODIFIER_LABEL[v] + " = " + num;
+  }
+
+  // ── DB 직접 기록 변수 ──
+  if (v !== "이면침식" && v !== "현재체력" && v !== "일상점") {
+    return "[설정 실패]\n설정할 수 없는 변수입니다: " + v +
+      "\n(가능: 이면침식, 현재체력, 일상점, 피해감소, 회복보정, 판정보정)";
+  }
+  if (!alias) {
+    return "[설정 실패]\n변수: " + v + "\n대상 캐릭터를 확인할 수 없습니다.";
+  }
+
+  var rowInfo = rereadCharacterRow(alias);
+  if (!rowInfo) return "[설정 실패]\n캐릭터를 찾을 수 없습니다: " + alias;
+  if (rowInfo.headers.indexOf(v) < 0) {
+    return "[설정 실패]\nBOT_DB에 " + v + " 열이 없습니다.";
+  }
+
+  var before = Number(rowInfo.character[v] || 0);
+  var after = num;
+  if (v === "이면침식") {
+    after = Math.max(0, Math.min(MAX_EROSION, num));
+  } else if (v === "현재체력") {
+    var hp = getHealthInfo(rowInfo.character);
+    after = clampHp(num, hp.maxHp);
+  } else if (v === "일상점") {
+    var maxDaily = Number(rowInfo.character["최대일상점"] || 0);
+    after = maxDaily > 0 ? Math.max(0, Math.min(maxDaily, num)) : Math.max(0, num);
+  }
+  setCellByHeader(rowInfo, v, after);
+  return "[설정] " + v + ": " + before + " → " + after;
+}
+
 function processSkillEffects(effectText, context) {
   effectText = String(effectText || "").trim();
 
@@ -6241,11 +6325,40 @@ function processSkillEffects(effectText, context) {
     }
   }
 
-  const lines = effectText.split(/\n/).map(l => l.trim()).filter(Boolean);
+  // 줄 구분: 개행 또는 ';' (TSV 한 셀에 여러 효과를 넣는 경우 ';' 로 구분).
+  const lines = effectText.split(/[\n;]/).map(l => l.trim()).filter(Boolean);
   const logs = [];
 
   lines.forEach(line => {
-    const tokens = line.split(/\s+/);
+    // ── 조건부 효과: "세부조건 => 세부효과" ──
+    // 화살표가 없으면 기존 동작 그대로(무조건 실행).
+    // 좌측 조건이 비어 있으면 항상 실행.
+    let effPart = line;
+    const arrow = line.match(/^([\s\S]*?)\s*(?:=>|⇒|→)\s*([\s\S]*)$/);
+    if (arrow) {
+      const condPart = arrow[1].trim();
+      effPart = arrow[2].trim();
+      if (condPart) {
+        const condChar = context.character ||
+          (context.userAlias ? findCharacterByAlias(context.userAlias) : null);
+        const condCtx = buildConditionContext(condChar, context.targetAlias || "");
+        const condResult = evaluateConditionList(condPart, condCtx);
+        if (!condResult.ok) {
+          logs.push("[조건 미충족] " + condPart);
+          return;
+        }
+      }
+    }
+    if (!effPart) return;
+
+    // ── 값 설정 효과: "변수 = 값" / "변수 == 값" ──
+    const setEff = _parseSetEffect(effPart);
+    if (setEff) {
+      logs.push(applySetEffect(setEff.variable, setEff.value, context));
+      return;
+    }
+
+    const tokens = effPart.split(/\s+/);
     const command = tokens[0];
 
     if (command === "상태템플릿부여") {
@@ -11197,6 +11310,24 @@ function _myCharView(alias) {
       };
     });
 
+  // 적용 가능한 패시브 (소유타입/소유키/해금레벨 필터 통과분)
+  var passives = [];
+  try {
+    passives = getCandidatePassivesForCharacter(character).map(function (p) {
+      return {
+        key:         String(p["key"]   || ""),
+        name:        String(p["이름"]   || p["key"] || ""),
+        category:    String(p["분류"]   || ""),
+        ownerType:   String(p["소유타입"] || ""),
+        trigger:     String(p["발동"]   || ""),
+        value:       String(p["수치"]   || ""),
+        condition:   String(p["조건"]   || ""),
+        effect:      String(p["효과"]   || ""),
+        description: String(p["설명"]   || "")
+      };
+    });
+  } catch (_e) { passives = []; }
+
   // 인벤토리 / 장비 (인벤토리 API 재사용)
   var view = _invApiView(alias);
 
@@ -11210,6 +11341,7 @@ function _myCharView(alias) {
     budget: budget, used: used, remain: remain,
     stats: stats, features: features, profs: profs,
     skills: skills,
+    passives: passives,
     items: view.items || [],
     equipment: view.equipment || []
   };
@@ -11238,4 +11370,44 @@ function _myCharUnequip(alias, slotOrInvId) {
   var r = _invApiUnequip(alias, slotOrInvId);
   if (!r.ok) return r;
   return Object.assign(_myCharView(alias), { ok: true, message: r.message });
+}
+
+// ── 세부조건/세부효과 파서 단위 테스트 (시트 쓰기 없음) ─────────────────
+// Apps Script 편집기에서 실행 → 실행 로그(View > Logs)로 결과 확인.
+function _testDetailEffects() {
+  var out = [];
+
+  // (1) "조건 => 효과" 화살표 분리
+  var arrowCases = [
+    "이면침식 <= 3 => 이면침식 = 3",
+    "현재체력비율 <= 50 => 피해감소 = 5",
+    "=> 회복보정 = 3",
+    "상태부여 자신 집중 버프 enhance 수치:3 횟수:1"
+  ];
+  arrowCases.forEach(function (line) {
+    var m = line.match(/^([\s\S]*?)\s*(?:=>|⇒|→)\s*([\s\S]*)$/);
+    if (m) out.push("[화살표] 조건={" + m[1].trim() + "} 효과={" + m[2].trim() + "}");
+    else   out.push("[화살표 없음] 효과={" + line + "}  (무조건 실행)");
+  });
+
+  // (2) 설정 표현식 파서
+  ["이면침식 = 3", "이면침식 == 3", "피해감소 = 5", "회복보정 = 3",
+   "상태부여 자신 집중", "스택설정 자신 혈인 =3"].forEach(function (eff) {
+    var s = _parseSetEffect(eff);
+    out.push("[설정파서] " + eff + " → " + (s ? (s.variable + " = " + s.value) : "null(명령으로 처리)"));
+  });
+
+  // (3) 조건 평가 (합성 컨텍스트)
+  var ctx = { vars: { "이면침식": 2, "현재체력비율": 40 }, hasTarget: false };
+  [["이면침식 <= 3", true], ["이면침식 <= 1", false],
+   ["현재체력비율 <= 50", true]].forEach(function (c) {
+    var r = evaluateConditionList(c[0], ctx);
+    out.push("[조건] " + c[0] + " → ok=" + r.ok + " (기대 " + c[1] + ")");
+  });
+
+  // (4) 잘못된/허용 안 된 변수 설정 (시트 접근 없이 메시지만)
+  out.push("[오류] " + applySetEffect("존재안함", "9", {}).split("\n")[0]);
+
+  Logger.log(out.join("\n"));
+  return out.join("\n");
 }

@@ -16,6 +16,7 @@ import ActionTable from './components/ActionTable';
 import ActionDetail from './components/ActionDetail';
 import SkillMaker from './components/SkillMaker';
 import SkillList from './components/SkillList';
+import PassiveList from './components/PassiveList';
 import ApplicationText from './components/ApplicationText';
 import SubmitApplicationPanel from './components/SubmitApplicationPanel';
 import SaveLoad from './components/SaveLoad';
@@ -117,6 +118,7 @@ export default function App() {
   const [skills, setSkills]       = useState(saved?.skills        ?? []);
   const [passives, setPassives]   = useState(saved?.passives      ?? []);
   const [editingSkill, setEditingSkill] = useState(null);
+  const [editingPassive, setEditingPassive] = useState(null);
   const [lastSaved, setLastSaved] = useState(saved?.savedAt       ?? null);
 
   const [leftTab, setLeftTab]   = useState('캐릭터');
@@ -159,6 +161,7 @@ export default function App() {
     if (Array.isArray(data.skills))   setSkills(data.skills);
     if (Array.isArray(data.passives)) setPassives(data.passives);
     setEditingSkill(null);
+    setEditingPassive(null);
   }, []);
 
   // ── reset ──
@@ -170,6 +173,7 @@ export default function App() {
     setSkills([]);
     setPassives([]);
     setEditingSkill(null);
+    setEditingPassive(null);
     localStorage.removeItem(STORAGE_KEY);
   }, []);
 
@@ -200,8 +204,23 @@ export default function App() {
     setPassives(prev => [...prev, { ...passive, id: Date.now() }]);
   };
 
+  const handleEditPassive = (passive) => {
+    setEditingPassive(passive);
+    setLeftTab('스킬');
+  };
+
+  const handleUpdatePassive = (passive) => {
+    setPassives(prev => prev.map(p => p.id === passive.id ? passive : p));
+    setEditingPassive(null);
+  };
+
+  const handleCancelPassiveEdit = () => {
+    setEditingPassive(null);
+  };
+
   const handleRemovePassive = (id) => {
     setPassives(prev => prev.filter(p => p.id !== id));
+    setEditingPassive(prev => (prev && prev.id === id ? null : prev));
   };
 
   const handleApplyPreset = useCallback((presetStats, presetAbilities, presetProfs) => {
@@ -270,8 +289,20 @@ export default function App() {
           {leftTab === '스킬' && (
             <div className="space-y-3">
               <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} editingSkill={editingSkill} />
-              <SkillMaker editingSkill={editingSkill} stats={stats} abilities={abilities} proficiencies={proficiencies} onSave={handleSaveSkill} onCancel={handleCancelEdit} passives={passives} onSavePassive={handleSavePassive} onRemovePassive={handleRemovePassive} />
+              <SkillMaker
+                editingSkill={editingSkill}
+                stats={stats}
+                abilities={abilities}
+                proficiencies={proficiencies}
+                onSave={handleSaveSkill}
+                onCancel={handleCancelEdit}
+                editingPassive={editingPassive}
+                onSavePassive={handleSavePassive}
+                onUpdatePassive={handleUpdatePassive}
+                onCancelPassiveEdit={handleCancelPassiveEdit}
+              />
               <SkillList skills={skills} onEdit={handleEditSkill} onRemove={handleRemoveSkill} />
+              <PassiveList passives={passives} onEdit={handleEditPassive} onRemove={handleRemovePassive} />
             </div>
           )}
         </div>
