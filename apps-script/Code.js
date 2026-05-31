@@ -3118,10 +3118,8 @@ function _computeSkillRollCore(character, skillRow, rank, mods, targetAlias) {
   const variables = buildFormulaVariables(character, rankValue, targetAlias);
   const calc      = safeEvalFormula(skillRow["계산식"], variables);
 
-  let result                   = Math.floor(calc.value);
-  const erosionMultiplier      = getErosionMultiplier(erosion);
-  const beforeErosionMultiplier = result;
-  result                       = Math.floor(result * erosionMultiplier);
+  let result = Math.floor(calc.value);
+  const erosionMultiplier = getErosionMultiplier(erosion);
 
   let typeBonusText = "";
   const type = String(skillRow["계열"] || "").trim();
@@ -3130,6 +3128,10 @@ function _computeSkillRollCore(character, skillRow, rank, mods, targetAlias) {
   let finalValue = applyMods(result, mods);
   const statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type, KIND_RESPONSE], targetAlias || "");
   finalValue = statusMod.value;
+
+  // 이면침식 배율은 모든 보정 완료 후 마지막에 적용
+  const beforeErosionMultiplier = finalValue;
+  finalValue = Math.floor(finalValue * erosionMultiplier);
 
   return {
     alias, type, rank, rankValue,
@@ -3292,11 +3294,7 @@ function skillUse(parts, displayName) {
   }
 
   let result = Math.floor(calc.value);
-
   const erosionMultiplier = getErosionMultiplier(erosion);
-  const beforeErosionMultiplier = result;
-
-  result = Math.floor(result * erosionMultiplier);
 
   let typeBonusText = "";
   const type = String(skill["계열"]).trim();
@@ -3315,6 +3313,7 @@ function skillUse(parts, displayName) {
     // 세부 조건 보정 적용 (곱셈 → 덧셈 순)
     if (condDetailMult !== 1) finalValue = Math.floor(finalValue * condDetailMult);
     if (condDetailBonus !== 0) finalValue += condDetailBonus;
+    // 이면침식 배율은 모든 보정 완료 후 마지막에 적용
   } catch (e) {
     return (
       "[스킬 판정 오류]\n" +
@@ -3323,6 +3322,9 @@ function skillUse(parts, displayName) {
       "오류: " + e.message
     );
   }
+
+  const beforeErosionMultiplier = finalValue;
+  finalValue = Math.floor(finalValue * erosionMultiplier);
 
   const resultText = getSkillResultText(type, finalValue);
   const rawEffectText = String(skill["효과"] || "").trim();
@@ -3366,12 +3368,12 @@ function skillUse(parts, displayName) {
     "계산식:\n```" + skill["계산식"] + "```\n\n" +
     "대입식:\n```" + calc.expression + "```\n" +
     "계산 결과: " + Math.floor(calc.value) + "\n" +
+    typeBonusText +
+    "보정: " + (mods.join(" ") || "없음") + "\n" +
     "이면침식: " + erosion + " / " + MAX_EROSION + "\n" +
     "침식단계: " + erosionStage + "\n" +
     "침식배율: ×" + erosionMultiplier + "\n" +
-    "배율 적용 결과: " + beforeErosionMultiplier + " → " + result + "\n" +
-    typeBonusText +
-    "보정: " + (mods.join(" ") || "없음") + "\n\n" +
+    "침식 전 값: " + beforeErosionMultiplier + "\n\n" +
     "최종값: " + finalValue + "\n" +
     resultText +
     healingDetailText +
@@ -10562,8 +10564,6 @@ function commonSkillUseCommand(parts, displayName) {
 
   let result = Math.floor(calc.value);
   const erosionMultiplier = getErosionMultiplier(erosion);
-  const beforeErosionMultiplier = result;
-  result = Math.floor(result * erosionMultiplier);
 
   let typeBonusText = "";
   const type = String(commonSkill["계열"] || "").trim();
@@ -10579,6 +10579,7 @@ function commonSkillUseCommand(parts, displayName) {
     finalValue = statusMod.value;
     if (condDetailMult !== 1) finalValue = Math.floor(finalValue * condDetailMult);
     if (condDetailBonus !== 0) finalValue += condDetailBonus;
+    // 이면침식 배율은 모든 보정 완료 후 마지막에 적용
   } catch (e) {
     return (
       "[공용 스킬 판정 오류]\n" +
@@ -10587,6 +10588,9 @@ function commonSkillUseCommand(parts, displayName) {
       "오류: " + e.message
     );
   }
+
+  const beforeErosionMultiplier = finalValue;
+  finalValue = Math.floor(finalValue * erosionMultiplier);
 
   const resultText = getSkillResultText(type, finalValue);
   const rawEffectText = String(commonSkill["효과"] || "").trim();
@@ -10656,12 +10660,12 @@ function commonSkillUseCommand(parts, displayName) {
     "계산식:\n```" + (commonSkill["계산식"] || "") + "```\n\n" +
     "대입식:\n```" + calc.expression + "```\n" +
     "계산 결과: " + Math.floor(calc.value) + "\n" +
+    typeBonusText +
+    "보정: " + (mods.join(" ") || "없음") + "\n" +
     "이면침식: " + erosion + " / " + MAX_EROSION + "\n" +
     "침식단계: " + erosionStage + "\n" +
     "침식배율: ×" + erosionMultiplier + "\n" +
-    "배율 적용 결과: " + beforeErosionMultiplier + " → " + result + "\n" +
-    typeBonusText +
-    "보정: " + (mods.join(" ") || "없음") + "\n\n" +
+    "침식 전 값: " + beforeErosionMultiplier + "\n\n" +
     "최종값: " + finalValue + "\n" +
     resultText +
     healingDetailText +
