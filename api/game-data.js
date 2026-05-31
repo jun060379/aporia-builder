@@ -1,5 +1,7 @@
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  // Vercel CDN 캐시: 60s fresh, 최대 5분 stale-while-revalidate
+  res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
 
   const webhookUrl    = process.env.APPS_SCRIPT_WEBHOOK_URL;
   const webhookSecret = process.env.APPS_SCRIPT_WEBHOOK_SECRET;

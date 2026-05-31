@@ -210,7 +210,17 @@ function doGet(e) {
   }
 }
 
+var GAME_DATA_CACHE_KEY = "aporia_game_data_v1";
+var GAME_DATA_CACHE_TTL = 300; // 5분
+
 function getGameData() {
+  // CacheService 캐시 시도 (콜드 실행 비용 절감)
+  try {
+    var sc = CacheService.getScriptCache();
+    var cached = sc.get(GAME_DATA_CACHE_KEY);
+    if (cached) { return JSON.parse(cached); }
+  } catch (_e) {}
+
   try {
     var charRows    = getSheetData(SHEET_BOT_DB);
     var skillRows   = getSheetData(SHEET_SKILL_DB);
@@ -320,11 +330,22 @@ function getGameData() {
       });
     } catch (_e) {}
 
-    return { ok: true, characters: characters, skills: skills, passives: passives,
-             items: items, inventory: inventory, equipment: equipment };
+    var result = { ok: true, characters: characters, skills: skills, passives: passives,
+                   items: items, inventory: inventory, equipment: equipment };
+    // 결과를 캐시에 저장 (100KB 제한 초과 시 무시)
+    try {
+      var sc = CacheService.getScriptCache();
+      sc.put(GAME_DATA_CACHE_KEY, JSON.stringify(result), GAME_DATA_CACHE_TTL);
+    } catch (_e) {}
+    return result;
   } catch (e) {
     return { ok: false, error: e.message };
   }
+}
+
+// 게임 데이터 캐시 강제 무효화 (캐릭터/스킬 등록 후 호출)
+function invalidateGameDataCache() {
+  try { CacheService.getScriptCache().remove(GAME_DATA_CACHE_KEY); } catch (_e) {}
 }
 
 function jsonResponse(obj) {
@@ -641,8 +662,16 @@ function commandListCommand() {
   ].join("\n");
 }
 
+// _getSpreadsheet()는 호출마다 IPC 비용이 든다.
+// 한 실행 컨텍스트 안에서는 한 번만 얻어서 재사용한다.
+var _ssInstance = null;
+function _getSpreadsheet() {
+  if (!_ssInstance) _ssInstance = SpreadsheetApp.getActiveSpreadsheet();
+  return _ssInstance;
+}
+
 function getSheetData(sheetName) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = _getSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
 
   if (!sheet) {
@@ -664,7 +693,7 @@ function getSheetData(sheetName) {
 }
 
 function getSheetHeaders(sheetName) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = _getSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
 
   if (!sheet) {
@@ -701,7 +730,7 @@ function findCharacterByAlias(alias) {
 // NICKNAME_DB 시트: 별명 | 닉네임 (쉼표 구분, 공백 포함 가능)
 
 function ensureNicknameSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = _getSpreadsheet();
   var sh = ss.getSheetByName(SHEET_NICKNAME_DB);
   if (sh) return sh;
   sh = ss.insertSheet(SHEET_NICKNAME_DB);
@@ -756,7 +785,7 @@ function _resolveNickname(input) {
 function _findNicknameRow(alias) {
   try {
     ensureNicknameSheet();
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ss = _getSpreadsheet();
     var sh = ss.getSheetByName(SHEET_NICKNAME_DB);
     var values = sh.getDataRange().getValues();
     var headers = values[0].map(function(h){ return String(h).trim(); });
@@ -856,7 +885,7 @@ function nicknameRemove(parts) {
 }
 
 function findCharacterRowByAlias(alias) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = _getSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_BOT_DB);
 
   if (!sheet) {
@@ -2372,7 +2401,7 @@ function makeId(prefix, sheetName) {
 }
 
 function appendRowByHeaders(sheetName, obj) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = _getSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
 
   if (!sheet) {
@@ -2488,7 +2517,7 @@ function resolvePendingAttack(id, updates) {
 }
 
 function updateRowById(sheetName, idColumn, idValue, updates) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = _getSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
 
   if (!sheet) {
@@ -4177,7 +4206,7 @@ function findAnchorById(id) {
 }
 
 function findAnchorRowById(id) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = _getSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_ANCHOR_DB);
 
   if (!sheet) {
@@ -5534,7 +5563,7 @@ function injectStatusVariables(vars, alias, prefix) {
 }
 
 function findStackRowInfo(alias, stackName) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = _getSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_STACK_DB);
 
   if (!sheet) {
@@ -5647,7 +5676,7 @@ function _pickMaxOption(opts) {
 
 // STATUS_DB에서 같은 대상/상태명의 ACTIVE 행 찾기 (가장 최근 = 가장 아래 행)
 function findActiveStatusRowInfo(targetAlias, statusName) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = _getSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_STATUS_DB);
   if (!sheet) return null;
 
@@ -7554,7 +7583,7 @@ function clearTemporaryStatuses() {
 }
 
 function clearTemporaryStacks() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = _getSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_STACK_DB);
   if (!sheet) return { cleared: 0, kept: 0 };
 
@@ -7680,7 +7709,7 @@ var PASSIVE_HEADERS = [
 ];
 
 function ensurePassiveSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = _getSpreadsheet();
   var sh = ss.getSheetByName(SHEET_PASSIVE_SKILLS);
   if (sh) return sh;
   sh = ss.insertSheet(SHEET_PASSIVE_SKILLS);
@@ -8225,7 +8254,7 @@ function passiveListCommand(parts, displayName) {
 // ── Sheet setup ──────────────────────────────────────────────────────
 
 function ensureEnemySheets() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = _getSpreadsheet();
 
   if (!ss.getSheetByName(SHEET_ENEMY_TEMPLATES)) {
     const sh = ss.insertSheet(SHEET_ENEMY_TEMPLATES);
@@ -8331,7 +8360,7 @@ function rollEnemyAction(enemy, actionName, bonus) {
 
 function applyEnemyHpChange(enemy_id, delta, isHeal) {
   ensureEnemySheets();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = _getSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_ENEMIES);
   const values = sheet.getDataRange().getValues();
   const headers = values[0].map(function(h) { return String(h).trim(); });
@@ -9623,7 +9652,7 @@ function findRowByKey(sheetName, keyCol, keyVal) {
 }
 
 function deleteRowByKey(sheetName, keyCol, keyVal) {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const ss    = _getSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error("시트를 찾을 수 없습니다: " + sheetName);
 
@@ -9642,7 +9671,7 @@ function deleteRowByKey(sheetName, keyCol, keyVal) {
 }
 
 function upsertRowByKey(sheetName, keyCol, keyVal, obj) {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const ss    = _getSpreadsheet();
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw new Error("시트를 찾을 수 없습니다: " + sheetName);
 
@@ -10247,6 +10276,9 @@ function registerPortalCharacterData(payload, outputText, application) {
     msg += "\n\n[패시브 경고]\n- " + passiveWarnings.join("\n- ");
   }
 
+  // 캐릭터/스킬 등록 후 게임 데이터 캐시 무효화
+  invalidateGameDataCache();
+
   return {
     ok: true,
     message: msg,
@@ -10714,7 +10746,7 @@ function commonSkillUseCommand(parts, displayName) {
 // =====================================================================
 
 function ensureItemSheets() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = _getSpreadsheet();
   function ensure(name, headers) {
     var sh = ss.getSheetByName(name);
     if (sh) return sh;
@@ -10947,7 +10979,7 @@ function unequipCommand(parts, displayName) {
   });
   if (!row) return "장착 중인 장비를 찾을 수 없습니다: " + target;
   ensureItemSheets();
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_EQUIPMENT_DB);
+  var sh = _getSpreadsheet().getSheetByName(SHEET_EQUIPMENT_DB);
   var data = sh.getDataRange().getValues();
   var headers = data[0].map(function(h){ return String(h).trim(); });
   var idCol = headers.indexOf("id");
@@ -11134,7 +11166,7 @@ function _invApiUnequip(alias, slotOrInvId) {
   if (!row) return { ok: false, message: "장착 중인 장비를 찾을 수 없습니다: " + target };
 
   ensureItemSheets();
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_EQUIPMENT_DB);
+  var sh = _getSpreadsheet().getSheetByName(SHEET_EQUIPMENT_DB);
   var data = sh.getDataRange().getValues();
   var headers = data[0].map(function (h) { return String(h).trim(); });
   var idCol = headers.indexOf("id");
@@ -11314,7 +11346,8 @@ function _growthInfo(character, field) {
 }
 
 function _myCharView(alias) {
-  var rowInfo = rereadCharacterRow(alias);
+  // view는 읽기 전용이므로 flush() 없이 직접 읽는다 (rereadCharacterRow는 flush 포함).
+  var rowInfo = findCharacterRowByAlias(alias);
   if (!rowInfo) return { ok: false, error: "캐릭터 행을 찾을 수 없습니다: " + alias };
   var character = rowInfo.character;
 

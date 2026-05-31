@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 // ── 상수 ──────────────────────────────────────────────────────
@@ -366,20 +366,66 @@ function CharacterCard({ char, skillCount, passiveCount, itemCount, equipCount, 
   );
 }
 
+// ── sessionStorage 캐시 (SWR 패턴) ────────────────────────────
+const CACHE_KEY = 'aporia-game-data-v1';
+const CACHE_TTL = 5 * 60 * 1000; // 5분
+
+function readCache() {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > CACHE_TTL) return null;
+    return data;
+  } catch { return null; }
+}
+
+function writeCache(data) {
+  try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data })); }
+  catch { /* 용량 초과 등 무시 */ }
+}
+
+async function fetchGameData() {
+  const r = await fetch('/api/game-data');
+  const d = await r.json();
+  if (!d.ok) throw new Error(d.error || '조회 실패');
+  return d;
+}
+
 // ── 메인 페이지 ───────────────────────────────────────────────
 export default function CharactersPage() {
-  const [data, setData]       = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState('');
-  const [search, setSearch]   = useState('');
+  const cached = readCache();
+  const [data, setData]         = useState(cached);
+  const [loading, setLoading]   = useState(!cached);   // 캐시 있으면 스피너 생략
+  const [refreshing, setRefreshing] = useState(false); // 백그라운드 갱신 표시
+  const [error, setError]       = useState('');
+  const [search, setSearch]     = useState('');
   const [selected, setSelected] = useState(null);
 
+  const doFetch = useCallback(async (background = false) => {
+    if (background) setRefreshing(true);
+    else { setLoading(true); setError(''); }
+    try {
+      const d = await fetchGameData();
+      writeCache(d);
+      setData(d);
+      setError('');
+    } catch (e) {
+      if (!background) setError(e.message || '네트워크 오류');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
   useEffect(() => {
-    fetch('/api/game-data')
-      .then(r => r.json())
-      .then(d => { if (d.ok) setData(d); else setError(d.error || '조회 실패'); })
-      .catch(e => setError(e.message || '네트워크 오류'))
-      .finally(() => setLoading(false));
+    if (cached) {
+      // 캐시 있으면 즉시 표시 후 백그라운드에서 갱신
+      doFetch(true);
+    } else {
+      doFetch(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const skillsByChar   = {};
@@ -411,9 +457,22 @@ export default function CharactersPage() {
             <span className="bg-gradient-to-r from-violet-700 to-indigo-600 bg-clip-text text-xl font-bold text-transparent">APORIA</span>
             <span className="text-slate-400 text-[13px] font-light tracking-widest">CHARACTERS</span>
           </Link>
-          <Link to="/" className="inline-flex items-center rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:from-violet-700 hover:to-indigo-700 active:scale-[0.98] transition">
-            홈
-          </Link>
+          <div className="flex items-center gap-2">
+            {refreshing && (
+              <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                <span className="w-3 h-3 rounded-full border border-violet-300 border-t-violet-600 animate-spin inline-block" />
+                갱신 중
+              </span>
+            )}
+            <button
+              onClick={() => doFetch(false)}
+              disabled={loading || refreshing}
+              className="text-[11px] px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-500 rounded-lg transition disabled:opacity-40"
+            >새로고침</button>
+            <Link to="/" className="inline-flex items-center rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:from-violet-700 hover:to-indigo-700 active:scale-[0.98] transition">
+              홈
+            </Link>
+          </div>
         </div>
       </header>
 
