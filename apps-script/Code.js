@@ -3305,10 +3305,11 @@ function skillUse(parts, displayName) {
   }
 
   let finalValue;
+  let statusMod;
 
   try {
     finalValue = applyMods(result, mods);
-    const statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type], targetAlias || "");
+    statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type], targetAlias || "");
     finalValue = statusMod.value;
     // 세부 조건 보정 적용 (곱셈 → 덧셈 순)
     if (condDetailMult !== 1) finalValue = Math.floor(finalValue * condDetailMult);
@@ -3338,7 +3339,20 @@ function skillUse(parts, displayName) {
   const { pendingId, healingDetailText, combatDetailText,
           interferenceDetailText, effectDetailText, effectSummary } = _efx;
 
+  // 판정후 트리거 패시브 (디메리트 침식 변경 등 포함)
+  var postPassiveText = "";
+  try {
+    var charAfter = findCharacterByAlias(alias);
+    if (charAfter) {
+      var ppt = firePassiveTriggerEffects(charAfter, "판정후", {
+        targetAlias: targetAlias, finalValue: finalValue, resistanceMode: RESIST_NONE
+      });
+      if (ppt) postPassiveText = ppt;
+    }
+  } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
+
   const diceText = formatDiceLogs(calc.diceLogs);
+  const statusModText = (statusMod && statusMod.text) ? statusMod.text : "";
 
   const summary =
     formatSkillSummaryBlock(
@@ -3370,6 +3384,7 @@ function skillUse(parts, displayName) {
     "계산 결과: " + Math.floor(calc.value) + "\n" +
     typeBonusText +
     "보정: " + (mods.join(" ") || "없음") + "\n" +
+    (statusModText ? statusModText + "\n" : "") +
     "이면침식: " + erosion + " / " + MAX_EROSION + "\n" +
     "침식단계: " + erosionStage + "\n" +
     "침식배율: ×" + erosionMultiplier + "\n" +
@@ -3379,7 +3394,8 @@ function skillUse(parts, displayName) {
     healingDetailText +
     combatDetailText +
     interferenceDetailText +
-    effectDetailText;
+    effectDetailText +
+    (postPassiveText ? "\n\n" + postPassiveText : "");
 
   return makeFoldedResponse(summary, detail);
 }
@@ -10573,9 +10589,10 @@ function commonSkillUseCommand(parts, displayName) {
   }
 
   let finalValue;
+  let statusMod;
   try {
     finalValue = applyMods(result, mods);
-    const statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type], effectiveTarget || "");
+    statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type], effectiveTarget || "");
     finalValue = statusMod.value;
     if (condDetailMult !== 1) finalValue = Math.floor(finalValue * condDetailMult);
     if (condDetailBonus !== 0) finalValue += condDetailBonus;
@@ -10617,7 +10634,20 @@ function commonSkillUseCommand(parts, displayName) {
   const { pendingId, healingDetailText, combatDetailText,
           interferenceDetailText, effectDetailText, effectSummary } = _efx;
 
+  // 판정후 트리거 패시브 (디메리트 침식 변경 등 포함)
+  var postPassiveText = "";
+  try {
+    var charAfter = findCharacterByAlias(alias);
+    if (charAfter) {
+      var ppt = firePassiveTriggerEffects(charAfter, "판정후", {
+        targetAlias: effectiveTarget, finalValue: finalValue, resistanceMode: RESIST_NONE
+      });
+      if (ppt) postPassiveText = ppt;
+    }
+  } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
+
   const diceText = formatDiceLogs(calc.diceLogs);
+  const statusModText = (statusMod && statusMod.text) ? statusMod.text : "";
 
   const summaryBlock = formatSkillSummaryBlock(
     skillForEffects,
@@ -10662,6 +10692,7 @@ function commonSkillUseCommand(parts, displayName) {
     "계산 결과: " + Math.floor(calc.value) + "\n" +
     typeBonusText +
     "보정: " + (mods.join(" ") || "없음") + "\n" +
+    (statusModText ? statusModText + "\n" : "") +
     "이면침식: " + erosion + " / " + MAX_EROSION + "\n" +
     "침식단계: " + erosionStage + "\n" +
     "침식배율: ×" + erosionMultiplier + "\n" +
@@ -10671,7 +10702,8 @@ function commonSkillUseCommand(parts, displayName) {
     healingDetailText +
     combatDetailText +
     interferenceDetailText +
-    effectDetailText;
+    effectDetailText +
+    (postPassiveText ? "\n\n" + postPassiveText : "");
 
   return makeFoldedResponse(summary, detail);
 }
