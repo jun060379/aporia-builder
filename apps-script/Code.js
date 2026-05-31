@@ -5826,12 +5826,10 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
   }
 
   // ─── B/C. 기존 ACTIVE 갱신 ────────────────────────────────────
-  var existingMax = _statusToNum(existing.status["최대값"]);
-  if (existingMax <= 0) existingMax = _statusToNum(existing.status["최대치"]);
-  var maxCap = optMaxNum > 0 ? optMaxNum : existingMax;  // 수치 상한 (0=무제한)
-
-  var existingMaxCount = _statusToNum(existing.status["최대횟수"]);
-  var maxCountCap = optMaxCountNum > 0 ? optMaxCountNum : existingMaxCount;  // 횟수 상한 (0=무제한)
+  // 최대(수치 상한)·최대횟수(횟수 상한)는 이번 스킬 효과에서만 참조한다.
+  // STATUS_DB에 저장된 값은 수식 변수(상태_X_최대) 참조 목적이며 캡 계산에 쓰지 않는다.
+  var maxCap = optMaxNum;       // 0 = 무제한
+  var maxCountCap = optMaxCountNum; // 0 = 무제한
 
   var prevValue = _statusToNum(existing.status["수치"]);
   var prevCountRaw = existing.status["남은횟수"];
