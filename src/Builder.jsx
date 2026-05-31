@@ -327,7 +327,7 @@ export default function App() {
             <div className="space-y-3">
               <Checklist remaining={remaining} skills={skills} />
               <SubmitApplicationPanel char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} passives={passives} />
-              <ApplicationText char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} />
+              <ApplicationText char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} passives={passives} />
             </div>
           )}
 

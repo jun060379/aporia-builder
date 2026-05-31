@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { supabase } from '../lib/supabaseClient';
 import PlaceholderPage from './PlaceholderPage.jsx';
+import EffectRowsEditor from '../components/EffectRowsEditor.jsx';
+import ConditionEditor from '../components/ConditionEditor.jsx';
 
 const STAT_NAMES    = ['근력', '민첩', '내구', '감각', '지능'];
 const FEATURE_NAMES = ['무기술', '격투술', '사격술', '기동술', '방어술', '인내', '관찰', '추적술', '은밀행동', '지식', '이면학', '화술'];
@@ -65,10 +67,56 @@ function GrowCell({ label, info, remain, busy, onGrow }) {
   );
 }
 
+function PassiveEditForm({ passive, onClose }) {
+  const [cond, setCond]   = useState(passive.condition || '');
+  const [eff, setEff]     = useState(passive.effect    || '');
+  const [copied, setCopied] = useState(false);
+
+  const text = [
+    '!패시브수정',
+    `key: ${passive.key}`,
+    `이름: ${passive.name}`,
+    `조건: ${cond}`,
+    `효과: ${eff}`,
+  ].join('\n');
+
+  const copy = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div className="mt-2 rounded-xl border border-violet-200 bg-violet-50/60 p-3 space-y-3">
+      <div className="space-y-1.5">
+        <span className="text-[11px] font-semibold text-slate-600">발동 조건</span>
+        <ConditionEditor value={cond} onChange={setCond} />
+      </div>
+      <div className="space-y-1.5">
+        <span className="text-[11px] font-semibold text-slate-600">효과</span>
+        <EffectRowsEditor value={eff} onChange={setEff} />
+      </div>
+      <div className="bg-slate-800 rounded-lg p-2.5 text-[11px] text-slate-100 font-mono whitespace-pre-wrap">{text}</div>
+      <div className="flex gap-2">
+        <button
+          onClick={copy}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+            copied ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-violet-600 hover:bg-violet-700 text-white border-violet-600'
+          }`}
+        >{copied ? '복사됨 ✓' : '수정 텍스트 복사'}</button>
+        <button onClick={onClose} className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 rounded-lg text-xs transition-colors">닫기</button>
+      </div>
+      <p className="text-[10px] text-slate-400">복사 후 운영진에게 전달하거나 빌더에서 신청하세요.</p>
+    </div>
+  );
+}
+
 function ManageView({ data, alias, onReload, onChangeAlias }) {
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [editingPassiveKey, setEditingPassiveKey] = useState(null);
 
   const remain = data.remain ?? 0;
 
@@ -256,25 +304,44 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
 
       {/* 패시브 */}
       <section>
-        <SectionTitle extra={<Link to="/builder" className="text-[11px] text-violet-600 hover:underline">빌더에서 수정 신청 →</Link>}>패시브</SectionTitle>
-        <p className="text-[10px] text-slate-400 mb-2">패시브 추가/수정은 캐릭터 빌더에서 작성 후 신청하면 관리자 승인 뒤 반영됩니다.</p>
+        <SectionTitle extra={<Link to="/builder" className="text-[11px] text-violet-600 hover:underline">빌더에서 신청 →</Link>}>패시브</SectionTitle>
+        <p className="text-[10px] text-slate-400 mb-2">수정 버튼으로 조건/효과를 편집하고 텍스트를 복사해 운영진에게 전달하세요.</p>
         {(data.passives || []).length === 0 ? (
           <p className="text-xs text-slate-400 italic">적용 중인 패시브가 없습니다.</p>
         ) : (
-          <div className="space-y-1.5">
-            {data.passives.map((p, i) => (
-              <div key={i} className="bg-slate-50 rounded-lg border border-slate-100 px-3 py-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium text-slate-700">{p.name}</span>
-                  {p.category && <span className="text-[10px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{p.category}</span>}
-                  {p.trigger && <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">{p.trigger}</span>}
-                  {p.value && <span className="text-[10px] text-slate-400 font-mono">수치 {p.value}</span>}
+          <div className="space-y-2">
+            {data.passives.map((p, i) => {
+              const rowKey = p.key || String(i);
+              const isEditing = editingPassiveKey === rowKey;
+              return (
+                <div key={rowKey} className="bg-slate-50 rounded-lg border border-slate-100 px-3 py-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-slate-700">{p.name}</span>
+                        {p.category && <span className="text-[10px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{p.category}</span>}
+                        {p.trigger && <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">{p.trigger}</span>}
+                        {p.value && <span className="text-[10px] text-slate-400 font-mono">수치 {p.value}</span>}
+                      </div>
+                      {!isEditing && p.condition && <p className="text-[10px] text-slate-400 font-mono mt-0.5 whitespace-pre-wrap break-all">조건: {p.condition}</p>}
+                      {!isEditing && p.effect && <p className="text-[10px] text-indigo-500 font-mono mt-0.5 whitespace-pre-wrap break-all">효과: {p.effect}</p>}
+                      {!isEditing && p.description && <p className="text-[10px] text-slate-400 mt-0.5">{p.description}</p>}
+                    </div>
+                    <button
+                      onClick={() => setEditingPassiveKey(isEditing ? null : rowKey)}
+                      className={`shrink-0 text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+                        isEditing
+                          ? 'bg-slate-100 hover:bg-slate-200 border-slate-200 text-slate-500'
+                          : 'bg-indigo-50 hover:bg-indigo-100 border-indigo-200 text-indigo-700'
+                      }`}
+                    >{isEditing ? '닫기' : '수정'}</button>
+                  </div>
+                  {isEditing && (
+                    <PassiveEditForm passive={p} onClose={() => setEditingPassiveKey(null)} />
+                  )}
                 </div>
-                {p.condition && <p className="text-[10px] text-slate-400 font-mono mt-0.5 whitespace-pre-wrap break-all">조건: {p.condition}</p>}
-                {p.effect && <p className="text-[10px] text-indigo-500 font-mono mt-0.5 whitespace-pre-wrap break-all">효과: {p.effect}</p>}
-                {p.description && <p className="text-[10px] text-slate-400 mt-0.5">{p.description}</p>}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

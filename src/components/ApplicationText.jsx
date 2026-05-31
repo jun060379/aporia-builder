@@ -58,7 +58,28 @@ function buildSkillText(sk) {
   ].join('\n');
 }
 
-export default function ApplicationText({ char, stats, abilities, proficiencies, skills }) {
+function buildPassiveText(p) {
+  return [
+    '!패시브등록',
+    `key: ${p.key}`,
+    `이름: ${p.이름}`,
+    `소유타입: ${p.소유타입}`,
+    `소유키: ${p.소유키}`,
+    `해금레벨: ${p.해금레벨}`,
+    `분류: ${p.분류}`,
+    `효과코드: ${p.효과코드}`,
+    `수치: ${p.수치}`,
+    `최대: ${p.최대}`,
+    `발동: ${p.발동}`,
+    `판정: ${p.판정}`,
+    `조건: ${p.조건}`,
+    `효과: ${p.효과}`,
+    `설명: ${p.설명}`,
+    `메모: ${p.메모}`,
+  ].join('\n');
+}
+
+export default function ApplicationText({ char, stats, abilities, proficiencies, skills, passives }) {
   const charText = [
     '!캐릭터신청',
     `이름: ${char.name}`,
@@ -92,8 +113,22 @@ export default function ApplicationText({ char, stats, abilities, proficiencies,
         </div>
       )}
 
-      {skills.length === 0 && (
-        <p className="text-xs text-slate-400 italic">스킬을 추가하면 스킬 신청 텍스트가 여기에 표시됩니다.</p>
+      {skills.length === 0 && (passives || []).length === 0 && (
+        <p className="text-xs text-slate-400 italic">스킬 또는 패시브를 추가하면 신청 텍스트가 여기에 표시됩니다.</p>
+      )}
+
+      {(passives || []).length > 0 && (
+        <div className="space-y-4">
+          <div className="border-t border-slate-100 pt-1" />
+          <p className="text-[10px] text-violet-400 uppercase tracking-widest font-semibold">패시브</p>
+          {(passives || []).map((p, i) => (
+            <CopyBlock
+              key={p.id ?? i}
+              title={`[패시브] ${p.이름 || '(이름 없음)'} · ${p.분류}`}
+              text={buildPassiveText(p)}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
