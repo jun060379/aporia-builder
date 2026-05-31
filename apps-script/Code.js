@@ -2769,6 +2769,7 @@ function skillApprove(parts, displayName) {
     처리메모: "승인됨"
   });
 
+  invalidateGameDataCache();
   const refreshed = refreshCharacterBudget(owner);
 
   const effectPreview = effectText
@@ -5996,11 +5997,21 @@ function checkSkillCostGate(alias, skillName, costText) {
         return {
           blocked: true,
           text: "[캐스팅 시작]\n스킬: " + skillName +
-                "\n" + caTurns + "턴 후 사용 가능합니다.\n" +
+                "\n" + caTurns + "회 판정 후 사용 가능합니다.\n" +
                 "캐스팅 상태: " + _castingStatusName(skillName) + " 부여"
         };
       }
-      // 캐스팅 상태 있음 → 발동 허용 (상태는 payCost에서 소모)
+      // 캐스팅 상태 있음 — 남은 횟수 확인
+      var caRemain = _statusToNum(caStatus.status["남은횟수"]);
+      if (caRemain > 0) {
+        // 아직 카운트다운 중 → 차단
+        return {
+          blocked: true,
+          text: "[캐스팅 중]\n스킬: " + skillName +
+                "\n남은 판정: " + caRemain + "회\n판정을 " + caRemain + "회 더 하면 사용 가능합니다."
+        };
+      }
+      // caRemain === 0 → 캐스팅 완료 → 발동 허용 (상태는 payCost에서 소모)
     }
 
     // 스택 소모 차단 확인 (부족하면 차단)
@@ -6510,6 +6521,7 @@ function applyTemplateStatusWithResistance(targetAlias, templateName, opts, cont
     횟수: statusOptions.count,
     중복: statusOptions.stackMode,
     최대: statusOptions.maxValue,
+    최대횟수: statusOptions.maxCount,
     메모: statusOptions.memo,
     저항: opts["저항"] || "",
     저항난이도: opts["저항난이도"] || "",
@@ -6646,7 +6658,7 @@ function processSkillEffects(effectText, context) {
     // 화살표가 없으면 기존 동작 그대로(무조건 실행).
     // 좌측 조건이 비어 있으면 항상 실행.
     let effPart = line;
-    const arrow = line.match(/^([\s\S]*?)\s*(?:=>|⇒|→)\s*([\s\S]*)$/);
+    const arrow = line.match(/^([\s\S]*?)\s*(?:=>|⇒|→|->)\s*([\s\S]*)$/);
     if (arrow) {
       const condPart = arrow[1].trim();
       effPart = arrow[2].trim();
@@ -7018,6 +7030,22 @@ function processStatusBeforeCheck(alias, checkTypeOrTypes) {
       }
 
       consumeStatusCount(status);
+      return;
+    }
+
+    // 시스템 분류 — 쿨타임/캐스팅 카운트다운 (차단 없음)
+    if (category === "시스템") {
+      const code = String(status["효과코드"] || "").trim();
+      if (code === "쿨타임") {
+        // 표준 consumeStatusCount — 0이 되면 EXPIRED로 만료
+        consumeStatusCount(status);
+      } else if (code === "캐스팅") {
+        // 캐스팅은 0에서 만료시키지 않고 0을 "시전 완료" 신호로 유지
+        var curCast = _statusToNum(status["남은횟수"]);
+        if (curCast > 0) {
+          updateRowById(SHEET_STATUS_DB, "id", status["id"], { 남은횟수: curCast - 1 });
+        }
+      }
       return;
     }
   });

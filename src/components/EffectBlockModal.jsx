@@ -128,6 +128,12 @@ function getModalWarnings(type, params) {
   if (type === 'stack' && (params.changeType === '증가' || params.changeType === '설정') && !params.max) {
     warns.push('최대값 설정을 권장합니다.');
   }
+  if ((type === 'template' || type === 'custom') && params.maxCount && params.count) {
+    const mc = Number(params.maxCount), c = Number(params.count);
+    if (!isNaN(mc) && !isNaN(c) && mc < c) {
+      warns.push(`최대횟수(${mc})가 횟수(${c})보다 작습니다 — 초기 횟수가 ${mc}으로 클램프됩니다.`);
+    }
+  }
   return warns;
 }
 

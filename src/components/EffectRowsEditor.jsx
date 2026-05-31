@@ -11,7 +11,7 @@ export function parseEffectRows(value) {
   const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
   if (lines.length === 0) return [{ cond: '', eff: '' }];
   return lines.map(line => {
-    const m = line.match(/^([\s\S]*?)\s*(?:=>|⇒|→)\s*([\s\S]*)$/);
+    const m = line.match(/^([\s\S]*?)\s*(?:=>|⇒|→|->)\s*([\s\S]*)$/);
     if (m) return { cond: m[1].trim(), eff: m[2].trim() };
     return { cond: '', eff: line };
   });
