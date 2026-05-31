@@ -3313,6 +3313,11 @@ function skillUse(parts, displayName) {
   const condDetailBonus = condCheck.detailBonus || 0;
   const condDetailMult  = condCheck.detailMult  || 1;
 
+  // ── 대가 게이트 (쿨타임/캐스팅/스택·상태 부족 차단) ──
+  const costText = String(skill["대가"] || "").trim();
+  const costGate = checkSkillCostGate(alias, String(skill["스킬명"]), costText);
+  if (costGate.blocked) return costGate.text;
+
   const statusResult = processStatusBeforeCheck(alias, KIND_SKILL);
 
   if (statusResult.blocked) {
@@ -3382,6 +3387,14 @@ function skillUse(parts, displayName) {
   const { pendingId, healingDetailText, combatDetailText,
           interferenceDetailText, effectDetailText, effectSummary } = _efx;
 
+  // ── 대가 지불 (코스트 실행) ──
+  var costResult = payCost(alias, String(skill["스킬명"]), costText, {
+    userAlias: alias, targetAlias: targetAlias, finalValue: finalValue
+  });
+  var costDetailText = costResult.logs.length > 0
+    ? "\n\n[대가 처리]\n" + costResult.logs.join("\n")
+    : "";
+
   // 판정후 트리거 패시브 (디메리트 침식 변경 등 포함)
   var postPassiveText = "";
   try {
@@ -3418,8 +3431,8 @@ function skillUse(parts, displayName) {
     "계열: " + skill["계열"] + "\n" +
     "랭크: " + rank + "(" + rankValue + ")\n" +
     "필요예산: " + getSkillCostByRank(rank) + "\n\n" +
-    "조건:\n" + skill["조건"] + "\n\n" +
-    "대가:\n" + skill["대가"] + "\n\n" +
+    "조건:\n" + (skill["조건"] || "없음") + "\n\n" +
+    "대가:\n" + (costText || "없음") + "\n\n" +
     "설명:\n" + skill["설명"] + "\n\n" +
     "주사위:\n" + diceText + "\n\n" +
     "계산식:\n```" + skill["계산식"] + "```\n\n" +
@@ -3438,6 +3451,7 @@ function skillUse(parts, displayName) {
     combatDetailText +
     interferenceDetailText +
     effectDetailText +
+    costDetailText +
     (postPassiveText ? "\n\n" + postPassiveText : "");
 
   return makeFoldedResponse(summary, detail);
@@ -5898,6 +5912,211 @@ function removeStatusFromCharacter(targetAlias, statusName) {
     "상태: " + statusName + "\n" +
     "해제 수: " + count
   );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 대가(코스트) 시스템
+// ══════════════════════════════════════════════════════════════════════
+//
+// 대가 문법 (한 줄에 하나, 여러 줄 가능):
+//   체력감소:N          — 자신에게 N 직접 피해 (패시브·보호막 없이)
+//   침식증가:N          — 이면침식 +N
+//   스택소모:스택명:N   — 스택 N 차감 (부족하면 차단)
+//   상태소모:상태명     — 해당 상태 제거 (없으면 차단)
+//   쿨타임:N            — 사용 후 N턴 재사용 불가 (상태 기반)
+//   캐스팅:N            — N턴 캐스팅 후 발동 (상태 기반)
+//
+// 반환: { ok: true/false, blocked: true/false, reason: string, logs: string[] }
+//   ok      = 모든 코스트 지불 성공
+//   blocked = 코스트 부족으로 스킬 차단
+//   reason  = 차단 이유 (blocked=true일 때)
+//   logs    = 지불 완료된 코스트 결과 로그
+
+var COST_COOLDOWN_PREFIX  = "쿨타임_";
+var COST_CASTING_PREFIX   = "캐스팅_";
+var COST_COOLDOWN_CAT     = "시스템";
+var COST_COOLDOWN_CODE    = "쿨타임";
+var COST_CASTING_CODE     = "캐스팅";
+
+// 쿨타임 상태명
+function _cooldownStatusName(skillName) { return COST_COOLDOWN_PREFIX + skillName; }
+// 캐스팅 상태명
+function _castingStatusName(skillName) { return COST_CASTING_PREFIX + skillName; }
+
+// 쿨타임/캐스팅 사전 차단 검사 — 스킬 조건 통과 직후, 코스트 지불 전에 호출.
+// 반환: { blocked: false } 또는 { blocked: true, text: string }
+function checkSkillCostGate(alias, skillName, costText) {
+  costText = String(costText || "").trim();
+  if (!costText) return { blocked: false };
+
+  var lines = costText.split(/[\n;]/).map(function(l){ return l.trim(); }).filter(Boolean);
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+
+    // 쿨타임 확인
+    var cdM = line.match(/^쿨타임[:：](\d+(?:\.\d+)?)$/);
+    if (cdM) {
+      var cdStatus = findActiveStatusRowInfo(alias, _cooldownStatusName(skillName));
+      if (cdStatus) {
+        return {
+          blocked: true,
+          text: "[스킬 사용 불가: 쿨타임]\n스킬: " + skillName +
+                "\n사유: 아직 재사용 대기 중입니다.\n상태: " + _cooldownStatusName(skillName)
+        };
+      }
+    }
+
+    // 캐스팅 확인 — 캐스팅 상태가 없으면 차단하고 상태 부여, 있으면 소모하고 발동 허용
+    var caM = line.match(/^캐스팅[:：](\d+(?:\.\d+)?)$/);
+    if (caM) {
+      var caStatus = findActiveStatusRowInfo(alias, _castingStatusName(skillName));
+      if (!caStatus) {
+        // 캐스팅 상태 없음 → 캐스팅 시작 (스킬 차단, 상태 부여)
+        var caTurns = Number(caM[1]);
+        addStatusToCharacter(alias, _castingStatusName(skillName), COST_COOLDOWN_CAT, COST_CASTING_CODE, {
+          value: caTurns,
+          count: caTurns,
+          stackMode: "덮어쓰기",
+          trigger: "판정시작",
+          checkType: "전체",
+          source: skillName,
+          memo: "캐스팅 중"
+        });
+        return {
+          blocked: true,
+          text: "[캐스팅 시작]\n스킬: " + skillName +
+                "\n" + caTurns + "턴 후 사용 가능합니다.\n" +
+                "캐스팅 상태: " + _castingStatusName(skillName) + " 부여"
+        };
+      }
+      // 캐스팅 상태 있음 → 발동 허용 (상태는 payCost에서 소모)
+    }
+
+    // 스택 소모 차단 확인 (부족하면 차단)
+    var stM = line.match(/^스택소모[:：]([^:：]+)[:：](\d+(?:\.\d+)?)$/);
+    if (stM) {
+      var stName  = stM[1].trim();
+      var stNeed  = Number(stM[2]);
+      var stRow   = findStackRowInfo(alias, stName);
+      var stHave  = stRow ? Number(stRow.stack["수치"] || 0) : 0;
+      if (stHave < stNeed) {
+        return {
+          blocked: true,
+          text: "[스킬 사용 불가: 스택 부족]\n스킬: " + skillName +
+                "\n스택: " + stName + " (보유 " + stHave + " / 필요 " + stNeed + ")"
+        };
+      }
+    }
+
+    // 상태 소모 차단 확인 (없으면 차단)
+    var ssM = line.match(/^상태소모[:：](.+)$/);
+    if (ssM) {
+      var ssName = ssM[1].trim();
+      var ssRow  = findActiveStatusRowInfo(alias, ssName);
+      if (!ssRow) {
+        return {
+          blocked: true,
+          text: "[스킬 사용 불가: 상태 없음]\n스킬: " + skillName +
+                "\n필요 상태: " + ssName + " (현재 없음)"
+        };
+      }
+    }
+  }
+
+  return { blocked: false };
+}
+
+// 코스트 지불 실행 — checkSkillCostGate 통과 후 호출.
+// 반환: { ok: true, logs: string[] }
+function payCost(alias, skillName, costText, context) {
+  costText = String(costText || "").trim();
+  if (!costText) return { ok: true, logs: [] };
+
+  var logs = [];
+  var lines = costText.split(/[\n;]/).map(function(l){ return l.trim(); }).filter(Boolean);
+  context = context || {};
+
+  lines.forEach(function(line) {
+
+    // 체력감소:N — 직접 HP 차감 (패시브/보호막 우회)
+    var hpM = line.match(/^체력감소[:：](.+)$/);
+    if (hpM) {
+      var hpN = Math.max(0, Math.floor(readEffectNumber(hpM[1], context, 0)));
+      var rInfo = rereadCharacterRow(alias);
+      if (rInfo) {
+        var hp = getHealthInfo(rInfo.character);
+        var after = Math.max(0, hp.currentHp - hpN);
+        setCellByHeader(rInfo, "현재체력", after);
+        logs.push("[대가] 체력감소: " + hpN + " (" + hp.currentHp + " → " + after + ")");
+      } else {
+        logs.push("[대가] 체력감소: 캐릭터를 찾을 수 없습니다.");
+      }
+      return;
+    }
+
+    // 침식증가:N
+    var erM = line.match(/^침식증가[:：](.+)$/);
+    if (erM) {
+      var erN = Math.max(0, Math.floor(readEffectNumber(erM[1], context, 0)));
+      var erInfo = rereadCharacterRow(alias);
+      if (erInfo) {
+        var before = Number(erInfo.character["이면침식"] || 0);
+        var erAfter = Math.min(MAX_EROSION, before + erN);
+        setCellByHeader(erInfo, "이면침식", erAfter);
+        logs.push("[대가] 침식증가: +" + erN + " (" + before + " → " + erAfter + ")");
+      } else {
+        logs.push("[대가] 침식증가: 캐릭터를 찾을 수 없습니다.");
+      }
+      return;
+    }
+
+    // 스택소모:스택명:N
+    var stM = line.match(/^스택소모[:：]([^:：]+)[:：](\d+(?:\.\d+)?)$/);
+    if (stM) {
+      var stName = stM[1].trim();
+      var stN    = Number(stM[2]);
+      logs.push(modifyStackValue(alias, stName, -stN, "", skillName + " 대가"));
+      return;
+    }
+
+    // 상태소모:상태명
+    var ssM = line.match(/^상태소모[:：](.+)$/);
+    if (ssM) {
+      logs.push(removeStatusFromCharacter(alias, ssM[1].trim()));
+      return;
+    }
+
+    // 쿨타임:N — 쿨타임 상태 부여
+    var cdM = line.match(/^쿨타임[:：](\d+(?:\.\d+)?)$/);
+    if (cdM) {
+      var cdN = Number(cdM[1]);
+      addStatusToCharacter(alias, _cooldownStatusName(skillName), COST_COOLDOWN_CAT, COST_COOLDOWN_CODE, {
+        value: cdN,
+        count: cdN,
+        stackMode: "덮어쓰기",
+        trigger: "판정시작",
+        checkType: "전체",
+        source: skillName,
+        memo: "쿨타임"
+      });
+      logs.push("[대가] 쿨타임 " + cdN + "턴 시작: " + _cooldownStatusName(skillName));
+      return;
+    }
+
+    // 캐스팅:N — 캐스팅 상태 소모 (게이트에서 이미 통과 확인됨)
+    var caM = line.match(/^캐스팅[:：](\d+(?:\.\d+)?)$/);
+    if (caM) {
+      removeStatusFromCharacter(alias, _castingStatusName(skillName));
+      logs.push("[대가] 캐스팅 완료: " + _castingStatusName(skillName) + " 소모");
+      return;
+    }
+
+    // 알 수 없는 대가 — 로그만 남기고 무시하지 않음 (텍스트로 표시)
+    logs.push("[대가] " + line + " (처리됨)");
+  });
+
+  return { ok: true, logs: logs };
 }
 
 function parseEffectOptions(tokens) {
@@ -10615,6 +10834,11 @@ function commonSkillUseCommand(parts, displayName) {
   const condDetailBonus     = commonCondCheck.detailBonus || 0;
   const condDetailMult      = commonCondCheck.detailMult  || 1;
 
+  // ── 대가 게이트 (공용 스킬) ──
+  const commonCostText = String(commonSkill["대가"] || "").trim();
+  const commonCostGate = checkSkillCostGate(alias, displaySkillName, commonCostText);
+  if (commonCostGate.blocked) return commonCostGate.text;
+
   const statusResult = processStatusBeforeCheck(alias, KIND_SKILL);
   if (statusResult.blocked) {
     return statusResult.text;
@@ -10728,6 +10952,14 @@ function commonSkillUseCommand(parts, displayName) {
     }
   }
 
+  // ── 대가 지불 (공용 스킬) ──
+  var commonCostResult = payCost(alias, displaySkillName, commonCostText, {
+    userAlias: alias, targetAlias: effectiveTarget, finalValue: finalValue
+  });
+  var commonCostDetailText = commonCostResult.logs.length > 0
+    ? "\n\n[대가 처리]\n" + commonCostResult.logs.join("\n")
+    : "";
+
   const summary = "[공용 스킬]\n" + alias + " - " + displaySkillName + "\n\n" + summaryBlock + targetWarning + noTargetNote;
 
   const detail =
@@ -10743,6 +10975,7 @@ function commonSkillUseCommand(parts, displayName) {
     "계열: " + (type || "-") + "\n" +
     "랭크: " + rank + "(" + rankValue + ")\n\n" +
     "조건:\n" + (commonSkill["조건"] || "-") + "\n\n" +
+    "대가:\n" + (commonCostText || "없음") + "\n\n" +
     "설명:\n" + (commonSkill["설명"] || "-") + "\n\n" +
     "주사위:\n" + diceText + "\n\n" +
     "계산식:\n```" + (commonSkill["계산식"] || "") + "```\n\n" +
@@ -10761,6 +10994,7 @@ function commonSkillUseCommand(parts, displayName) {
     combatDetailText +
     interferenceDetailText +
     effectDetailText +
+    commonCostDetailText +
     (postPassiveText ? "\n\n" + postPassiveText : "");
 
   return makeFoldedResponse(summary, detail);

@@ -14,6 +14,7 @@ import FormulaBlockModal from './FormulaBlockModal';
 import EffectBlockModal from './EffectBlockModal';
 import ConditionEditor from './ConditionEditor.jsx';
 import EffectRowsEditor from './EffectRowsEditor.jsx';
+import CostEditor from './CostEditor.jsx';
 
 // ── 스타일 상수 ─────────────────────────────────────────────────────────
 const inputCls  = "w-full min-w-0 bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
@@ -821,10 +822,10 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
         />
       </div>
 
-      <label className="flex flex-col gap-1">
+      <div className="space-y-1.5">
         <span className="text-[11px] text-slate-500 tracking-wide">대가</span>
-        <input className={inputCls} value={skill.cost} onChange={field('cost')} placeholder="사용 대가 (예: 이면침식 +1)" />
-      </label>
+        <CostEditor value={skill.cost} onChange={v => setSkill(s => ({ ...s, cost: v }))} />
+      </div>
 
       <label className="flex flex-col gap-1">
         <span className="text-[11px] text-slate-500 tracking-wide">설명</span>

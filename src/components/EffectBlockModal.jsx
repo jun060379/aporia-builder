@@ -6,6 +6,8 @@ const EFFECT_TYPES = [
   { id: 'custom',       label: '커스텀 상태 부여' },
   { id: 'statusRemove', label: '상태 해제' },
   { id: 'stack',        label: '스택 변경' },
+  { id: 'damage',       label: '피해' },
+  { id: 'heal',         label: '회복' },
   { id: 'free',         label: '자유 입력' },
 ];
 
@@ -14,6 +16,8 @@ const DESCRIPTIONS = {
   custom:       '직접 정의 상태를 부여합니다. 운영진 검수가 필요합니다.',
   statusRemove: '자신 또는 대상에게 걸린 특정 상태를 해제합니다.',
   stack:        '자신 또는 대상의 스택을 증가, 감소, 설정합니다.',
+  damage:       '자신 또는 대상에게 피해를 입힙니다. (패시브·보호막 처리 포함)',
+  heal:         '자신 또는 대상의 체력을 회복시킵니다.',
   free:         '자동 블럭으로 만들 수 없는 효과를 직접 입력합니다. 운영진 수동 검수 대상입니다.',
 };
 
@@ -98,6 +102,14 @@ function buildText(type, params) {
     let t = `스택설정 ${tgt} ${params.stackName} =${params.value}`;
     if (params.max) t += ` 최대:${params.max}`;
     return t;
+  }
+  if (type === 'damage') {
+    if (!params.amount) return '';
+    return `피해 ${params.target || '대상'} ${params.amount}`;
+  }
+  if (type === 'heal') {
+    if (!params.amount) return '';
+    return `회복 ${params.target || '자신'} ${params.amount}`;
   }
   if (type === 'free') return params.text || '';
   return '';
@@ -327,6 +339,30 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
                 )}
               </div>
               <NumTokenBar onInsert={t => setParam('value', (params.value || '') + t)} />
+            </div>
+          )}
+
+          {/* ── damage ── */}
+          {type === 'damage' && (
+            <div className="space-y-3">
+              <TargetToggle value={params.target || '대상'} onChange={v => setParam('target', v)} />
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-500">피해량</span>
+                <input className={`${inputCls} font-mono`} value={params.amount || ''} onChange={e => setParam('amount', e.target.value)} placeholder="10 또는 최종값 또는 랭크 * 2" />
+              </label>
+              <NumTokenBar onInsert={t => setParam('amount', (params.amount || '') + t)} />
+            </div>
+          )}
+
+          {/* ── heal ── */}
+          {type === 'heal' && (
+            <div className="space-y-3">
+              <TargetToggle value={params.target || '자신'} onChange={v => setParam('target', v)} />
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-500">회복량</span>
+                <input className={`${inputCls} font-mono`} value={params.amount || ''} onChange={e => setParam('amount', e.target.value)} placeholder="10 또는 최종값 또는 랭크 * 2" />
+              </label>
+              <NumTokenBar onInsert={t => setParam('amount', (params.amount || '') + t)} />
             </div>
           )}
 
