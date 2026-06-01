@@ -33,15 +33,18 @@ export default function ProficiencyEditor({ proficiencies, onChange }) {
       </div>
       <p className="text-[11px] text-slate-400 mb-3 leading-relaxed">액션 판정의 안정성과 고점을 높입니다. 숙련 수치는 액션 배율에 영향을 줍니다.</p>
       <div>
-        {PROFICIENCY_NAMES.map(name => (
-          <Stepper
-            key={name}
-            name={name}
-            value={proficiencies[name]}
-            cost={getProficiencyCost(proficiencies[name])}
-            onChange={(v) => update(name, v)}
-          />
-        ))}
+        {PROFICIENCY_NAMES.map(name => {
+          const v = Number(proficiencies[name]) || 0;
+          return (
+            <Stepper
+              key={name}
+              name={name}
+              value={v}
+              cost={getProficiencyCost(v)}
+              onChange={(nv) => update(name, nv)}
+            />
+          );
+        })}
       </div>
     </div>
   );

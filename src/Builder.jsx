@@ -111,10 +111,11 @@ function CharacterSummary({ char, stats }) {
 export default function App() {
   const saved = loadFromStorage();
 
-  const [char, setChar]           = useState(saved?.char          ?? DEFAULT_CHAR);
-  const [stats, setStats]         = useState(saved?.stats         ?? defaultStats());
-  const [abilities, setAbilities] = useState(saved?.abilities     ?? defaultAbilities());
-  const [proficiencies, setProficiencies] = useState(saved?.proficiencies ?? defaultProficiencies());
+  // 저장본에 새로 추가된 키(예: 기만숙련/협박숙련)가 없을 수 있으므로 기본값과 병합한다.
+  const [char, setChar]           = useState({ ...DEFAULT_CHAR, ...(saved?.char ?? {}) });
+  const [stats, setStats]         = useState({ ...defaultStats(), ...(saved?.stats ?? {}) });
+  const [abilities, setAbilities] = useState({ ...defaultAbilities(), ...(saved?.abilities ?? {}) });
+  const [proficiencies, setProficiencies] = useState({ ...defaultProficiencies(), ...(saved?.proficiencies ?? {}) });
   const [skills, setSkills]       = useState(saved?.skills        ?? []);
   const [passives, setPassives]   = useState(saved?.passives      ?? []);
   const [editingSkill, setEditingSkill] = useState(null);
