@@ -8,7 +8,7 @@ import ConditionEditor from '../components/ConditionEditor.jsx';
 
 const STAT_NAMES    = ['근력', '민첩', '내구', '감각', '지능'];
 const FEATURE_NAMES = ['무기술', '격투술', '사격술', '기동술', '방어술', '인내', '관찰', '추적술', '은밀행동', '지식', '이면학', '화술'];
-const PROF_NAMES    = ['참격숙련', '관통숙련', '타격숙련', '격투숙련', '사격숙련', '회피숙련', '방어숙련', '저항숙련', '조사숙련', '해석숙련', '은신숙련', '추적숙련', '설득숙련'];
+const PROF_NAMES    = ['참격숙련', '관통숙련', '타격숙련', '격투숙련', '사격숙련', '회피숙련', '방어숙련', '저항숙련', '조사숙련', '해석숙련', '은신숙련', '추적숙련', '설득숙련', '기만숙련', '협박숙련'];
 const EQUIP_SLOTS   = ['무기', '방어구', '장신구1', '장신구2'];
 
 const inputCls = 'w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors';

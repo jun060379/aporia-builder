@@ -27,7 +27,7 @@ const DEFAULT_FACTION = "무소속";
 const ENEMY_ACTION_FIELDS = [
   "참격", "관통", "타격", "격투", "사격",
   "방어", "회피", "저항",
-  "조사", "해석", "은신", "추적", "설득"
+  "조사", "해석", "은신", "추적", "설득", "기만", "협박"
 ];
 
 const ATTACK_SKILL_TYPES = ["화력"];
@@ -77,7 +77,9 @@ const PROF_FIELDS = [
   "해석숙련",
   "은신숙련",
   "추적숙련",
-  "설득숙련"
+  "설득숙련",
+  "기만숙련",
+  "협박숙련"
 ];
 
 const STAT_ORDER = ["F", "E", "D", "C", "B", "A", "S"];
@@ -578,6 +580,7 @@ function commandListCommand() {
     "  !<스탯명>    [난이도] [보정]      (단축)",
     "  !액션        <액션명> [난이도] [보정]",
     "  !<액션명>    [난이도] [보정]      (단축)",
+    "  사회 액션:  !설득 / !기만 / !협박",
     "",
     "[ 능력 ]",
     "  !화력 / !방호 / !치유 <랭크>",
@@ -2334,7 +2337,9 @@ function showMyInfo(displayName) {
     ["해석", fresh["해석숙련"]],
     ["은신", fresh["은신숙련"]],
     ["추적", fresh["추적숙련"]],
-    ["설득", fresh["설득숙련"]]
+    ["설득", fresh["설득숙련"]],
+    ["기만", fresh["기만숙련"]],
+    ["협박", fresh["협박숙련"]]
   ], 3);
 
   const hpBar = makeGaugeBar(Number(currentHp), Number(maxHp), 10);
@@ -3633,6 +3638,8 @@ function characterSubmit(utterance, displayName) {
     은신숙련: getNumberField(data, "은신숙련", 0),
     추적숙련: getNumberField(data, "추적숙련", 0),
     설득숙련: getNumberField(data, "설득숙련", 0),
+    기만숙련: getNumberField(data, "기만숙련", 0),
+    협박숙련: getNumberField(data, "협박숙련", 0),
 
     일상점: (data["일상점"] !== undefined && String(data["일상점"]).trim() !== "") ? getNumberField(data, "일상점", 0) : "",
     이면침식: getNumberField(data, "이면침식", 0),

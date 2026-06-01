@@ -14,7 +14,7 @@ export const ACTIONS = [
   {
     name: '타격',
     isDamage: true,
-    base: [{ stat: '근력', coef: 1 }, { stat: '내구', coef: 0.5 }],
+    base: [{ stat: '근력', coef: 1 }, { stat: '감각', coef: 0.5 }],
     mult: [{ key: '무기술', coef: 0.12 }, { key: '방어술', coef: 0.08 }, { key: '격투술', coef: 0.05 }, { key: '타격숙련', coef: 0.25 }],
   },
   {
@@ -76,5 +76,17 @@ export const ACTIONS = [
     isDamage: false,
     base: [{ stat: '지능', coef: 1 }, { stat: '감각', coef: 0.5 }],
     mult: [{ key: '화술', coef: 0.12 }, { key: '지식', coef: 0.08 }, { key: '관찰', coef: 0.05 }, { key: '설득숙련', coef: 0.25 }],
+  },
+  {
+    name: '기만',
+    isDamage: false,
+    base: [{ stat: '지능', coef: 1 }, { stat: '감각', coef: 0.5 }],
+    mult: [{ key: '화술', coef: 0.12 }, { key: '지식', coef: 0.08 }, { key: '관찰', coef: 0.05 }, { key: '기만숙련', coef: 0.25 }],
+  },
+  {
+    name: '협박',
+    isDamage: false,
+    base: [{ stat: '지능', coef: 1 }, { stat: '근력', coef: 0.5 }],
+    mult: [{ key: '화술', coef: 0.12 }, { key: '지식', coef: 0.08 }, { key: '관찰', coef: 0.05 }, { key: '협박숙련', coef: 0.25 }],
   },
 ];
