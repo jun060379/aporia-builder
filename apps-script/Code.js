@@ -5065,8 +5065,12 @@ function rollResponseValue(character, defaultActionName, tokens, targetAlias) {
 
 // ── TASK-08: 무대응 / 상태이상 차단 ────────────────────────────────────
 function _resolveCombatNoResponse(attack, attackValue, attackerAlias, targetAlias) {
-  const damage      = attackValue;
-  const damageResult = applyDamageToCharacter(targetAlias, damage);
+  const damage         = attackValue;
+  const hasDmgEffect   = _pendingSkillHasDamageEffect(attack);
+  // 효과에 '피해' 명령이 있으면 processSkillEffects가 직접 HP를 처리하므로 여기서는 건너뜀
+  const damageResult   = hasDmgEffect
+    ? { text: "(피해는 스킬 효과에서 처리됨)" }
+    : applyDamageToCharacter(targetAlias, damage);
   const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue);
 
   resolvePendingAttack(attack["id"], {
@@ -5095,8 +5099,11 @@ function _resolveCombatNoResponse(attack, attackValue, attackerAlias, targetAlia
 }
 
 function _resolveCombatStatusBlocked(attack, attackValue, attackerAlias, targetAlias, statusResult) {
-  const damage      = attackValue;
-  const damageResult = applyDamageToCharacter(targetAlias, damage);
+  const damage         = attackValue;
+  const hasDmgEffect   = _pendingSkillHasDamageEffect(attack);
+  const damageResult   = hasDmgEffect
+    ? { text: "(피해는 스킬 효과에서 처리됨)" }
+    : applyDamageToCharacter(targetAlias, damage);
   const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue);
 
   resolvePendingAttack(attack["id"], {
@@ -5137,11 +5144,17 @@ function _resolveCombatDefend(attack, character, rest, selfAlias, attackValue, a
   const defenseValue    = response.value;
   const damage          = Math.max(0, attackValue - defenseValue);
   const defenseSuccess  = damage <= 0;
-  const damageResult    = damage > 0 ? applyDamageToCharacter(targetAlias, damage) : { text: "피해 없음." };
+  const hasDmgEffect    = !defenseSuccess && _pendingSkillHasDamageEffect(attack);
+  // 효과에 '피해' 있으면 피해는 processSkillEffects가 처리, 방어 감소값을 finalValue로 전달
+  const damageResult    = defenseSuccess
+    ? { text: "피해 없음." }
+    : hasDmgEffect
+      ? { text: "(피해는 스킬 효과에서 처리됨)" }
+      : applyDamageToCharacter(targetAlias, damage);
 
   const attackEffectText = defenseSuccess
     ? (getSkillFromPendingAttack(attack) ? "\n\n[스킬 효과 무효]\n방어에 성공하여 공격 스킬의 효과가 발동하지 않습니다." : "")
-    : processPendingAttackSkillEffects(attack, RESIST_NORMAL, attackValue);
+    : processPendingAttackSkillEffects(attack, RESIST_NORMAL, damage);
 
   const defenseSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, RESIST_NONE);
   const defenseSkillBlock = defenseSkillEffectText
@@ -5195,7 +5208,12 @@ function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, at
   const evadeValue  = response.value;
   const success     = evadeValue >= attackValue;
   const damage      = success ? 0 : attackValue;
-  const damageResult = damage > 0 ? applyDamageToCharacter(targetAlias, damage) : { text: "피해 없음." };
+  const hasDmgEffect = !success && _pendingSkillHasDamageEffect(attack);
+  const damageResult = success
+    ? { text: "피해 없음." }
+    : hasDmgEffect
+      ? { text: "(피해는 스킬 효과에서 처리됨)" }
+      : applyDamageToCharacter(targetAlias, damage);
 
   const attackEffectText = success
     ? (getSkillFromPendingAttack(attack) ? "\n\n[스킬 효과 무효]\n회피에 성공하여 공격 스킬의 효과가 발동하지 않습니다." : "")
@@ -5317,7 +5335,10 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
   {
     const threshold = Math.ceil(attackValue * 1.5);
     const damage      = attackValue;
-    const damageResult = applyDamageToCharacter(targetAlias, damage);
+    const hasDmgEffect = _pendingSkillHasDamageEffect(attack);
+    const damageResult = hasDmgEffect
+      ? { text: "(피해는 스킬 효과에서 처리됨)" }
+      : applyDamageToCharacter(targetAlias, damage);
     const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue);
 
     const shortReason = counterValue >= attackValue
@@ -6397,7 +6418,42 @@ function getSkillFromPendingAttack(attack) {
     return null;
   }
 
-  return findApprovedSkill(attackerAlias, skillName);
+  // 개인 스킬 먼저 검색
+  const personalSkill = findApprovedSkill(attackerAlias, skillName);
+  if (personalSkill) return personalSkill;
+
+  // 공용 스킬 폴백 (개인 스킬에 없는 경우)
+  const commonSkill = findCommonSkill(skillName);
+  if (commonSkill) {
+    return {
+      "스킬명": String(commonSkill["이름"] || skillName),
+      "계통":   String(commonSkill["계통"] || ""),
+      "계열":   String(commonSkill["계열"] || ""),
+      "랭크":   String(commonSkill["랭크"] || ""),
+      "계산식": String(commonSkill["계산식"] || ""),
+      "효과":   String(commonSkill["효과"] || ""),
+      "조건":   String(commonSkill["조건"] || ""),
+      "대가":   String(commonSkill["대가"] || ""),
+      "설명":   String(commonSkill["설명"] || ""),
+      "소유자": attackerAlias
+    };
+  }
+  return null;
+}
+
+// 스킬 효과 텍스트에 '피해' 명령이 포함되어 있는지 확인.
+// 있으면 방어 핸들러의 기본 HP 차감을 건너뛰고 processSkillEffects가 직접 처리.
+function _pendingSkillHasDamageEffect(attack) {
+  var skill = getSkillFromPendingAttack(attack);
+  if (!skill) return false;
+  var effectText = String(skill["효과"] || "").trim();
+  if (!effectText) return false;
+  return effectText.split(/[\n;]/).some(function(line) {
+    line = line.trim();
+    var arrowM = line.match(/^[\s\S]*?(?:=>|⇒|→|->)\s*([\s\S]*)$/);
+    var effPart = arrowM ? arrowM[1].trim() : line;
+    return /^\s*피해\s+\S/.test(effPart);
+  });
 }
 
 function processPendingAttackSkillEffects(attack, resistanceMode, finalValueForEffect) {
@@ -6945,7 +7001,7 @@ function processSkillEffects(effectText, context) {
       }
 
       const targetAlias = resolveEffectTarget(tokens[1], context);
-      const amount = Math.max(0, Math.floor(readEffectNumber(tokens[2], context, 0)));
+      const rawAmount = Math.floor(readEffectNumber(tokens[2], context, 0));
 
       if (!targetAlias) {
         logs.push(
@@ -6956,7 +7012,12 @@ function processSkillEffects(effectText, context) {
         return;
       }
 
-      logs.push(applyDamageToRef(targetAlias, amount).text || "");
+      if (rawAmount < 0) {
+        // 음수 피해 → 회복으로 처리
+        logs.push(applyHealingToRef(targetAlias, -rawAmount).text || "");
+      } else {
+        logs.push(applyDamageToRef(targetAlias, rawAmount).text || "");
+      }
       return;
     }
 
