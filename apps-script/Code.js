@@ -1252,7 +1252,11 @@ function setCellByHeader(rowInfo, headerName, value) {
   if (columnIndex < 0) return false;
 
   rowInfo.sheet.getRange(rowInfo.rowIndex, columnIndex + 1).setValue(value);
-  rowInfo.character[headerName] = value;
+  // rowInfo의 데이터 객체 캐시 갱신 — character/stack/status 중 존재하는 것.
+  // (캐릭터 행은 .character, 스택 행은 .stack, 상태 행은 .status를 가진다)
+  if (rowInfo.character) rowInfo.character[headerName] = value;
+  if (rowInfo.stack)     rowInfo.stack[headerName]     = value;
+  if (rowInfo.status)    rowInfo.status[headerName]    = value;
   // 이 시트의 실행-내 캐시 무효화 (다음 읽기에서 최신값 반영)
   invalidateSheetCache(rowInfo.sheet.getName());
   return true;
