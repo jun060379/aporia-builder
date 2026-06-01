@@ -5065,13 +5065,12 @@ function rollResponseValue(character, defaultActionName, tokens, targetAlias) {
 
 // ── TASK-08: 무대응 / 상태이상 차단 ────────────────────────────────────
 function _resolveCombatNoResponse(attack, attackValue, attackerAlias, targetAlias) {
-  const damage         = attackValue;
-  const hasDmgEffect   = _pendingSkillHasDamageEffect(attack);
-  // 효과에 '피해' 명령이 있으면 processSkillEffects가 직접 HP를 처리하므로 여기서는 건너뜀
-  const damageResult   = hasDmgEffect
-    ? { text: "(피해는 스킬 효과에서 처리됨)" }
-    : applyDamageToCharacter(targetAlias, damage);
-  const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue);
+  // 효과 먼저 실행(피해 보정 누적) → 기본 피해 + 보정을 한 번에 적용
+  const foldState = { amount: 0 };
+  const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue, foldState);
+  const damage = Math.max(0, attackValue + foldState.amount);
+  const damageResult = applyDamageToCharacter(targetAlias, damage);
+  const foldNote = foldState.amount !== 0 ? "\n피해 보정: " + formatSigned(foldState.amount) : "";
 
   resolvePendingAttack(attack["id"], {
     대응종류: "무대응", 대응값: 0, 최종피해: damage,
@@ -5081,7 +5080,7 @@ function _resolveCombatNoResponse(attack, attackValue, attackerAlias, targetAlia
   const summary =
     "[무대응]\n" +
     "공격번호: " + attack["id"] + "\n" +
-    "공격값: " + attackValue + "\n" +
+    "공격값: " + attackValue + foldNote + "\n" +
     "최종피해: " + damage + "\n" +
     compactDamageText(damageResult) +
     (attackEffectText ? "\n효과: 저항 자동 실패 / 강제 적용" : "");
@@ -5091,7 +5090,7 @@ function _resolveCombatNoResponse(attack, attackValue, attackerAlias, targetAlia
     "공격번호: " + attack["id"] + "\n" +
     "공격자: " + attackerAlias + "\n" +
     "대상: " + targetAlias + "\n" +
-    "공격값: " + attackValue + "\n" +
+    "공격값: " + attackValue + foldNote + "\n" +
     "최종피해: " + damage + "\n\n" +
     damageResult.text + attackEffectText;
 
@@ -5099,12 +5098,11 @@ function _resolveCombatNoResponse(attack, attackValue, attackerAlias, targetAlia
 }
 
 function _resolveCombatStatusBlocked(attack, attackValue, attackerAlias, targetAlias, statusResult) {
-  const damage         = attackValue;
-  const hasDmgEffect   = _pendingSkillHasDamageEffect(attack);
-  const damageResult   = hasDmgEffect
-    ? { text: "(피해는 스킬 효과에서 처리됨)" }
-    : applyDamageToCharacter(targetAlias, damage);
-  const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue);
+  const foldState = { amount: 0 };
+  const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue, foldState);
+  const damage = Math.max(0, attackValue + foldState.amount);
+  const damageResult = applyDamageToCharacter(targetAlias, damage);
+  const foldNote = foldState.amount !== 0 ? "\n피해 보정: " + formatSigned(foldState.amount) : "";
 
   resolvePendingAttack(attack["id"], {
     대응종류: "상태이상으로 대응불가", 대응값: 0, 최종피해: damage,
@@ -5115,6 +5113,7 @@ function _resolveCombatStatusBlocked(attack, attackValue, attackerAlias, targetA
     "[대응 불가]\n" +
     "상태이상으로 대응하지 못했습니다.\n" +
     "공격번호: " + attack["id"] + "\n" +
+    "공격값: " + attackValue + foldNote + "\n" +
     "최종피해: " + damage + "\n" +
     compactDamageText(damageResult) +
     (attackEffectText ? "\n효과: 저항 자동 실패 / 강제 적용" : "");
@@ -5142,19 +5141,23 @@ function _resolveCombatDefend(attack, character, rest, selfAlias, attackValue, a
   }
 
   const defenseValue    = response.value;
-  const damage          = Math.max(0, attackValue - defenseValue);
-  const defenseSuccess  = damage <= 0;
-  const hasDmgEffect    = !defenseSuccess && _pendingSkillHasDamageEffect(attack);
-  // 효과에 '피해' 있으면 피해는 processSkillEffects가 처리, 방어 감소값을 finalValue로 전달
-  const damageResult    = defenseSuccess
-    ? { text: "피해 없음." }
-    : hasDmgEffect
-      ? { text: "(피해는 스킬 효과에서 처리됨)" }
-      : applyDamageToCharacter(targetAlias, damage);
+  const baseDamage      = Math.max(0, attackValue - defenseValue);
+  const defenseSuccess  = baseDamage <= 0;
 
-  const attackEffectText = defenseSuccess
-    ? (getSkillFromPendingAttack(attack) ? "\n\n[스킬 효과 무효]\n방어에 성공하여 공격 스킬의 효과가 발동하지 않습니다." : "")
-    : processPendingAttackSkillEffects(attack, RESIST_NORMAL, damage);
+  let damage, damageResult, attackEffectText, foldNote = "";
+  if (defenseSuccess) {
+    damage = 0;
+    damageResult = { text: "피해 없음." };
+    attackEffectText = getSkillFromPendingAttack(attack)
+      ? "\n\n[스킬 효과 무효]\n방어에 성공하여 공격 스킬의 효과가 발동하지 않습니다." : "";
+  } else {
+    // 효과 먼저 실행(피해 보정 누적) → 방어후 기본 피해 + 보정을 한 번에 적용
+    const foldState = { amount: 0 };
+    attackEffectText = processPendingAttackSkillEffects(attack, RESIST_NORMAL, attackValue, foldState);
+    damage = Math.max(0, baseDamage + foldState.amount);
+    damageResult = applyDamageToCharacter(targetAlias, damage);
+    if (foldState.amount !== 0) foldNote = "\n피해 보정: " + formatSigned(foldState.amount);
+  }
 
   const defenseSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, RESIST_NONE);
   const defenseSkillBlock = defenseSkillEffectText
@@ -5175,7 +5178,7 @@ function _resolveCombatDefend(attack, character, rest, selfAlias, attackValue, a
     "[방어 대응]\n" + statusSummaryLine +
     "공격번호: " + attack["id"] + "\n" + methodLine +
     "공격값: " + attackValue + "\n" +
-    "방어값: " + defenseValue + "\n" +
+    "방어값: " + defenseValue + foldNote + "\n" +
     "결과: " + (defenseSuccess ? "방어 성공" : "방어 실패") + "\n" +
     "최종피해: " + damage + "\n" +
     compactDamageText(damageResult) +
@@ -5188,7 +5191,7 @@ function _resolveCombatDefend(attack, character, rest, selfAlias, attackValue, a
     "공격번호: " + attack["id"] + "\n" +
     "공격자: " + attackerAlias + "\n" +
     "대상: " + targetAlias + "\n" +
-    "공격값: " + attackValue + "\n\n" +
+    "공격값: " + attackValue + foldNote + "\n\n" +
     response.detailText + "\n\n" +
     "결과: " + (defenseSuccess ? "방어 성공" : "방어 실패") + "\n" +
     "최종피해: " + damage + "\n\n" +
@@ -5207,17 +5210,20 @@ function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, at
 
   const evadeValue  = response.value;
   const success     = evadeValue >= attackValue;
-  const damage      = success ? 0 : attackValue;
-  const hasDmgEffect = !success && _pendingSkillHasDamageEffect(attack);
-  const damageResult = success
-    ? { text: "피해 없음." }
-    : hasDmgEffect
-      ? { text: "(피해는 스킬 효과에서 처리됨)" }
-      : applyDamageToCharacter(targetAlias, damage);
 
-  const attackEffectText = success
-    ? (getSkillFromPendingAttack(attack) ? "\n\n[스킬 효과 무효]\n회피에 성공하여 공격 스킬의 효과가 발동하지 않습니다." : "")
-    : processPendingAttackSkillEffects(attack, RESIST_NORMAL, attackValue);
+  let damage, damageResult, attackEffectText, foldNote = "";
+  if (success) {
+    damage = 0;
+    damageResult = { text: "피해 없음." };
+    attackEffectText = getSkillFromPendingAttack(attack)
+      ? "\n\n[스킬 효과 무효]\n회피에 성공하여 공격 스킬의 효과가 발동하지 않습니다." : "";
+  } else {
+    const foldState = { amount: 0 };
+    attackEffectText = processPendingAttackSkillEffects(attack, RESIST_NORMAL, attackValue, foldState);
+    damage = Math.max(0, attackValue + foldState.amount);
+    damageResult = applyDamageToCharacter(targetAlias, damage);
+    if (foldState.amount !== 0) foldNote = "\n피해 보정: " + formatSigned(foldState.amount);
+  }
 
   const evadeSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, RESIST_NONE);
   const evadeSkillBlock = evadeSkillEffectText
@@ -5238,7 +5244,7 @@ function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, at
     "[회피 대응]\n" + statusSummaryLine +
     "공격번호: " + attack["id"] + "\n" + methodLine +
     "공격값: " + attackValue + "\n" +
-    "회피값: " + evadeValue + "\n" +
+    "회피값: " + evadeValue + foldNote + "\n" +
     "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
     "최종피해: " + damage + "\n" +
     compactDamageText(damageResult) +
@@ -5252,7 +5258,7 @@ function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, at
     "공격번호: " + attack["id"] + "\n" +
     "공격자: " + attackerAlias + "\n" +
     "대상: " + targetAlias + "\n" +
-    "공격값: " + attackValue + "\n\n" +
+    "공격값: " + attackValue + foldNote + "\n\n" +
     response.detailText + "\n\n" +
     "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
     "최종피해: " + damage + "\n\n" +
@@ -5334,12 +5340,11 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
   // ── 맞대응 실패 (1.5배 미달 전부 — 동률 포함) ──
   {
     const threshold = Math.ceil(attackValue * 1.5);
-    const damage      = attackValue;
-    const hasDmgEffect = _pendingSkillHasDamageEffect(attack);
-    const damageResult = hasDmgEffect
-      ? { text: "(피해는 스킬 효과에서 처리됨)" }
-      : applyDamageToCharacter(targetAlias, damage);
-    const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue);
+    const foldState = { amount: 0 };
+    const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue, foldState);
+    const damage = Math.max(0, attackValue + foldState.amount);
+    const damageResult = applyDamageToCharacter(targetAlias, damage);
+    const foldNote = foldState.amount !== 0 ? "\n피해 보정: " + formatSigned(foldState.amount) : "";
 
     const shortReason = counterValue >= attackValue
       ? "맞대응값 " + counterValue + "이 기준(" + threshold + ")에 미달"
@@ -5353,7 +5358,7 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
     const summary =
       "[맞대응]\n" + statusSummaryLine +
       "공격번호: " + attack["id"] + "\n" +
-      "공격값: " + attackValue + " (성공 기준: " + threshold + ")\n" +
+      "공격값: " + attackValue + " (성공 기준: " + threshold + ")" + foldNote + "\n" +
       "맞대응값: " + counterValue + "\n" +
       "결과: 맞대응 실패\n최종피해: " + damage + "\n" +
       compactDamageText(damageResult) +
@@ -6441,22 +6446,7 @@ function getSkillFromPendingAttack(attack) {
   return null;
 }
 
-// 스킬 효과 텍스트에 '피해' 명령이 포함되어 있는지 확인.
-// 있으면 방어 핸들러의 기본 HP 차감을 건너뛰고 processSkillEffects가 직접 처리.
-function _pendingSkillHasDamageEffect(attack) {
-  var skill = getSkillFromPendingAttack(attack);
-  if (!skill) return false;
-  var effectText = String(skill["효과"] || "").trim();
-  if (!effectText) return false;
-  return effectText.split(/[\n;]/).some(function(line) {
-    line = line.trim();
-    var arrowM = line.match(/^[\s\S]*?(?:=>|⇒|→|->)\s*([\s\S]*)$/);
-    var effPart = arrowM ? arrowM[1].trim() : line;
-    return /^\s*피해\s+\S/.test(effPart);
-  });
-}
-
-function processPendingAttackSkillEffects(attack, resistanceMode, finalValueForEffect) {
+function processPendingAttackSkillEffects(attack, resistanceMode, finalValueForEffect, foldState) {
   const skill = getSkillFromPendingAttack(attack);
 
   if (!skill) {
@@ -6471,7 +6461,8 @@ function processPendingAttackSkillEffects(attack, resistanceMode, finalValueForE
             targetAlias:    String(attack["대상"]   || "").trim(),
             finalValue:     Math.floor(Number(finalValueForEffect) || 0),
             skillName:      String(_enemySkill["name"] || _enemySkill["skill_key"] || ""),
-            resistanceMode: resistanceMode
+            resistanceMode: resistanceMode,
+            foldState:      foldState || null
           });
         }
       }
@@ -6491,6 +6482,7 @@ function processPendingAttackSkillEffects(attack, resistanceMode, finalValueForE
 
   try {
     return processSkillEffects(effectText, {
+      foldState: foldState || null,
       userAlias: attackerAlias,
       targetAlias: targetAlias,
       finalValue: finalValue,
@@ -7012,12 +7004,17 @@ function processSkillEffects(effectText, context) {
         return;
       }
 
-      if (rawAmount < 0) {
-        // 음수 피해 → 회복으로 처리
-        logs.push(applyHealingToRef(targetAlias, -rawAmount).text || "");
-      } else {
-        logs.push(applyDamageToRef(targetAlias, rawAmount).text || "");
+      // 합산 모드: 공격 대상에 대한 피해는 기본 피해(공격값/방어후 값)에 합산되어
+      // 한 번에 적용된다. 명중판정/피해판정이 분리되지 않은 룰 보완용 —
+      // 음수 보정으로 "명중 높고 피해 낮은 공격" 등을 구현할 수 있다.
+      if (context.foldState && targetAlias === context.targetAlias) {
+        context.foldState.amount += rawAmount;
+        logs.push("[피해 보정] " + formatSigned(rawAmount) + " (기본 피해에 합산)");
+        return;
       }
+
+      // 직접 모드(비-공격 효과 등): 음수는 0으로 간주(회복 아님).
+      logs.push(applyDamageToRef(targetAlias, Math.max(0, rawAmount)).text || "");
       return;
     }
 
