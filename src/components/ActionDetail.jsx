@@ -19,7 +19,7 @@ const ACTION_CATEGORIES = [
   { label: '피해 액션', accent: 'rose',   names: ['참격', '관통', '타격', '격투', '사격'] },
   { label: '대응 액션', accent: 'indigo', names: ['방어', '회피', '저항'] },
   { label: '탐색 액션', accent: 'teal',   names: ['조사', '해석', '은신', '추적'] },
-  { label: '사회 액션', accent: 'violet', names: ['설득'] },
+  { label: '사회 액션', accent: 'violet', names: ['설득', '기만', '협박'] },
 ];
 
 const ACCENT = {
