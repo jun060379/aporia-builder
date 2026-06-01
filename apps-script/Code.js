@@ -1416,7 +1416,9 @@ function _parsePassiveSuChi(raw, vars) {
     var formulaPart = s.slice(1).trim();
     try {
       var res = safeEvalFormula(formulaPart || "1", vars || {});
-      var v = res && res.value !== undefined ? res.value : Number(res);
+      // 배율은 소수(×1.5 등)가 그대로 필요하므로 정수화 전 rawValue 사용
+      var v = res && res.rawValue !== undefined ? res.rawValue
+            : (res && res.value !== undefined ? res.value : Number(res));
       return { mode: 'mult', value: isNaN(v) ? 1 : v };
     } catch (_e) {
       return { mode: 'mult', value: 1 };
@@ -2985,6 +2987,7 @@ function safeEvalFormula(formula, variables) {
 
   return {
     value: Math.floor(result),
+    rawValue: result,           // 정수화 전 원본값 (배율 등 소수가 필요한 경우 사용)
     expression: expr,
     diceLogs: diceExpanded.diceLogs || []
   };
