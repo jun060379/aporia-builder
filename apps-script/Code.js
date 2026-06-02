@@ -1872,7 +1872,7 @@ function statCheck(parts, displayName) {
     statusPrefix +
     "[스탯 판정]\n" +
     character["이름"] + " - " + statName + "\n\n" +
-    (statusMod.text ? "\n상태보정: " + formatSigned(statusMod.delta) + "\n" : "") +
+    _statusModSummaryLine(statusMod) +
     "최종값: " + finalValue + "\n" +
     "난이도: " + difficulty + "\n" +
     "차이: " + formatSigned(judged.diff) + "\n" +
@@ -1886,7 +1886,7 @@ function statCheck(parts, displayName) {
     statName + " " + statGrade + "(" + statValue + ")\n" +
     "기본값: " + base + "\n" +
     "보정: " + (mods.join(" ") || "없음") + "\n\n" +
-    (statusMod.text ? "\n상태보정: " + formatSigned(statusMod.delta) + "\n" : "") +
+    _statusModSummaryLine(statusMod) +
     (statusMod.text ? "\n\n" + statusMod.text + "\n" : "") +
     (_statEquipMod && _statEquipMod.text ? "\n\n" + _statEquipMod.text + "\n" : "") +
     "최종값: " + finalValue + "\n" +
@@ -4202,6 +4202,16 @@ function formatSigned(value) {
   return String(value);
 }
 
+// 판정 요약에 표시할 상태보정 한 줄. 배율(×N)과 덧셈(+N)을 함께 표기.
+function _statusModSummaryLine(statusMod) {
+  if (!statusMod || !statusMod.text) return "";
+  var parts = [];
+  if (statusMod.mult && statusMod.mult !== 1) parts.push("×" + statusMod.mult);
+  if (statusMod.delta) parts.push(formatSigned(statusMod.delta));
+  if (parts.length === 0) return "";
+  return "\n상태보정: " + parts.join(" ") + "\n";
+}
+
 function isDamageAction(actionName) {
   return DAMAGE_ACTIONS.includes(String(actionName || "").trim());
 }
@@ -5737,6 +5747,18 @@ function _statusToNum(v) {
   return isFinite(n) ? n : 0;
 }
 
+// 곱셈 보정 마커 판별/파싱.
+// 효과 수치가 "*N" / "×N" 형태이면 덧셈이 아니라 곱셈 배율로 취급한다.
+function _isMultValue(v) {
+  return /^\s*[*×＊]/.test(String(v == null ? "" : v));
+}
+function _multFactor(v) {
+  var s = String(v == null ? "" : v).trim();
+  if (!_isMultValue(s)) return 1;
+  var n = Number(s.replace(/^[*×＊]\s*/, ""));
+  return isFinite(n) ? n : 1;
+}
+
 // 옵션 maxValue 후보(최대/최대값/최대치/최대수치) 중 첫 유효값 반환. 없으면 "".
 function _pickMaxOption(opts) {
   if (!opts) return "";
@@ -5823,11 +5845,12 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
   // ─── A. 신규 행 ───────────────────────────────────────────────
   if (!existing) {
     var id = makeStatusId();
-    var initValue = _statusToNum(options.value);
+    var initIsMult = _isMultValue(options.value);
+    var initValue = initIsMult ? ("*" + _multFactor(options.value)) : _statusToNum(options.value);
     var initCount = (options.count === undefined || options.count === null || options.count === "")
       ? "" : _statusToNum(options.count);
-    // 수치 상한: 최대 적용
-    if (optMaxNum > 0 && initValue > optMaxNum) initValue = optMaxNum;
+    // 수치 상한: 최대 적용 (곱셈 배율 마커에는 적용하지 않음)
+    if (!initIsMult && optMaxNum > 0 && initValue > optMaxNum) initValue = optMaxNum;
     // 횟수 상한: 최대횟수 적용
     if (optMaxCountNum > 0 && initCount !== "" && initCount > optMaxCountNum) initCount = optMaxCountNum;
 
@@ -5876,7 +5899,8 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
   var maxCap = optMaxNum;       // 0 = 무제한
   var maxCountCap = optMaxCountNum; // 0 = 무제한
 
-  var prevValue = _statusToNum(existing.status["수치"]);
+  var prevValueRaw = existing.status["수치"];
+  var prevValue = _statusToNum(prevValueRaw);
   var prevCountRaw = existing.status["남은횟수"];
   var prevCount = _statusToNum(prevCountRaw);
   var prevCountBlank = (prevCountRaw === undefined || prevCountRaw === null || String(prevCountRaw).trim() === "");
@@ -5888,12 +5912,23 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
 
   var newValue;
   var isOverwrite = _isOverwriteStackMode(stackMode);
-  if (isOverwrite) {
+  var addIsMult = _isMultValue(options.value);
+  var prevIsMult = _isMultValue(prevValueRaw);
+  if (addIsMult || prevIsMult) {
+    // 곱셈 보정 마커: 덮어쓰기/기존이 덧셈이면 새 배율로 교체, 누적이면 배율을 곱한다.
+    var newFactor = addIsMult ? _multFactor(options.value) : 1;
+    if (isOverwrite || !prevIsMult) {
+      newValue = "*" + newFactor;
+    } else {
+      newValue = "*" + (Math.round(_multFactor(prevValueRaw) * newFactor * 1e6) / 1e6);
+    }
+  } else if (isOverwrite) {
     newValue = addValue;
+    if (maxCap > 0 && newValue > maxCap) newValue = maxCap;
   } else {
     newValue = prevValue + addValue;
+    if (maxCap > 0 && newValue > maxCap) newValue = maxCap;
   }
-  if (maxCap > 0 && newValue > maxCap) newValue = maxCap;
 
   // newCount: 미지정 시 기존값 보존. 지정 시 모드별 처리.
   var newCount;        // 최종 셀에 쓸 값 (공란 가능)
@@ -5938,7 +5973,8 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
     body += "수치: " + newValue + "\n" +
             "남은횟수: " + newCountForLog;
   } else {
-    body += "수치: " + prevValue + " → " + newValue + "\n" +
+    var prevValueForLog = (prevIsMult || addIsMult) ? (prevIsMult ? ("*" + _multFactor(prevValueRaw)) : prevValue) : prevValue;
+    body += "수치: " + prevValueForLog + " → " + newValue + "\n" +
             "남은횟수: " + (prevCountBlank ? "-" : prevCount) + " → " + newCountForLog;
   }
   if (maxCap > 0)      body += "\n최대수치: " + maxCap;
@@ -6319,6 +6355,34 @@ function parseEffectOptions(tokens) {
   return options;
 }
 
+// 효과 수치 옵션 평가.
+//  - "*수식" / "×수식" → 곱셈 보정 마커 문자열 "*<배율>" 반환 (소수 유지).
+//  - 그 외(숫자/계수식, '-' 포함 가능) → readEffectNumber로 숫자 평가.
+function _evalEffectValue(raw, context) {
+  var s = String(raw == null ? "" : raw).trim();
+  if (s === "") return 0;
+  if (_isMultValue(s)) {
+    var body = s.replace(/^[*×＊]\s*/, "");
+    var vars = (context && context.vars) ? context.vars : {};
+    if (context && context.finalValue != null) {
+      vars = Object.assign({}, vars, { 최종값: context.finalValue });
+    }
+    try {
+      var res = safeEvalFormula(body || "1", vars);
+      // 배율은 소수(×2.2 등)가 그대로 필요하므로 정수화 전 rawValue 사용
+      var f = (res && res.rawValue !== undefined) ? res.rawValue
+            : (res && res.value !== undefined ? res.value : Number(res));
+      if (!isFinite(f)) f = 1;
+      // 부동소수 잡음 제거
+      f = Math.round(f * 1e6) / 1e6;
+      return "*" + f;
+    } catch (_e) {
+      return "*1";
+    }
+  }
+  return readEffectNumber(s, context, 0);
+}
+
 // 옵션 숫자 값 평가 — 빈 값은 ""(무제한/미지정) 유지, 숫자/계수식은 정수로 평가.
 function _evalOptNum(raw, context) {
   var s = String(raw == null ? "" : raw).trim();
@@ -6548,7 +6612,7 @@ function buildStatusOptionsFromTemplate(template, opts, context) {
   context = context || {};
 
   return {
-    value: readEffectNumber(pickOption(opts, "수치", template["수치"]), context, 0),
+    value: _evalEffectValue(pickOption(opts, "수치", template["수치"]), context),
     chance: readEffectNumber(pickOption(opts, "확률", template["확률"]), context, 100),
     accum: readEffectNumber(
       pickOption(opts, "누적", pickOption(opts, "누적확률", template["누적확률"])),
@@ -6644,7 +6708,7 @@ function applyStatusWithResistance(targetAlias, statusName, category, effectCode
   }
 
   logs.push(addStatusToCharacter(targetAlias, statusName, category, effectCode, {
-    value: readEffectNumber(opts["수치"], context, 0),
+    value: _evalEffectValue(opts["수치"], context),
     chance: readEffectNumber(opts["확률"], context, 100),
     accum: readEffectNumber(opts["누적"], context, 0),
     increase: readEffectNumber(opts["증가"], context, 0),
@@ -7874,6 +7938,7 @@ function statusMatchesAnyCheckType(status, checkTypes) {
 function getStatusValueModifier(alias, checkTypes) {
   const rows = getActiveStatusRows(alias);
   let delta = 0;
+  let mult = 1;
   const logs = [];
 
   rows.forEach(status => {
@@ -7885,10 +7950,7 @@ function getStatusValueModifier(alias, checkTypes) {
     if (trigger && trigger !== "판정시작" && trigger !== "판정계산전" && trigger !== "판정계산후" && trigger !== "전체") return;
     if (!statusMatchesAnyCheckType(status, checkTypes)) return;
 
-    const rawValue = Math.floor(Number(status["수치"] || 0));
-    if (rawValue === 0) return;
-
-    let modValue = rawValue;
+    const rawCell = status["수치"];
 
     const isDebuff =
       code === "weaken" ||
@@ -7917,6 +7979,25 @@ function getStatusValueModifier(alias, checkTypes) {
     // 쇠약강화 전용 분류이거나 효과코드/카테고리가 버프/디버프면 처리
     if (category !== "쇠약강화" && !isBuff && !isDebuff) return;
 
+    // 곱셈 보정 마커("*N")는 덧셈이 아니라 판정값 배율로 적용한다.
+    if (_isMultValue(rawCell)) {
+      const factor = _multFactor(rawCell);
+      if (factor === 1) return;
+      mult *= factor;
+      logs.push(
+        "[상태 보정: " + name + "]\n" +
+        "대상판정: " + (status["대상판정"] || "전체") + "\n" +
+        "보정: ×" + factor
+      );
+      consumeStatusCount(status);
+      return;
+    }
+
+    const rawValue = Math.floor(Number(rawCell || 0));
+    if (rawValue === 0) return;
+
+    let modValue = rawValue;
+
     if (isDebuff) {
       modValue = -Math.abs(rawValue);
     } else if (isBuff) {
@@ -7936,6 +8017,7 @@ function getStatusValueModifier(alias, checkTypes) {
 
   return {
     delta: delta,
+    mult: mult,
     text: logs.join("\n\n")
   };
 }
@@ -7961,7 +8043,10 @@ function applyStatusModifierToValue(alias, value, checkTypes, targetAlias) {
 
   const before = Math.floor(Number(value) || 0);
   const totalDelta = modifier.delta + passiveDelta;
-  const after = Math.floor(before * passiveMult) + totalDelta;
+  const statusMult = modifier.mult || 1;
+  const totalMult = passiveMult * statusMult;
+  // 곱셈(상태/패시브 배율) → 덧셈(보정) 순으로 적용.
+  const after = Math.floor(before * totalMult) + totalDelta;
 
   var combinedText = modifier.text || "";
   if (passiveText) combinedText = combinedText ? (combinedText + "\n\n" + passiveText) : passiveText;
@@ -7969,6 +8054,7 @@ function applyStatusModifierToValue(alias, value, checkTypes, targetAlias) {
   return {
     value: after,
     delta: totalDelta,
+    mult: totalMult,
     text: combinedText,
     before: before,
     after: after
