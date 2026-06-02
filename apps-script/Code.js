@@ -2727,7 +2727,12 @@ function skillApprove(parts, displayName) {
   const skillCost = getSkillCostByRank(pending["랭크"]);
   const afterUsed = budgetInfo.used + skillCost;
 
-  if (afterUsed > budgetInfo.budget) {
+  // 포털(웹 빌더) 자동 승인 경로는 예산 검사를 생략한다.
+  // 빌드 단계에서 이미 빌드 레벨 예산으로 검증됐고, 등록 시 경험치=0(Lv1)으로
+  // 재검사하면 Lv1 예산을 넘는 정상 빌드의 스킬이 부당하게 거부되기 때문이다.
+  const _isPortal = String(displayName || "").trim() === "aporia-portal";
+
+  if (!_isPortal && afterUsed > budgetInfo.budget) {
     return (
       "[스킬 승인 실패]\n" +
       "성장예산을 초과합니다.\n\n" +
