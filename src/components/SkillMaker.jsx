@@ -10,6 +10,7 @@ import {
 import { STAT_NAMES } from '../data/stats';
 import { ABILITY_NAMES } from '../data/abilities';
 import { PROFICIENCY_NAMES } from '../data/proficiencies';
+import { ACTIONS } from '../data/actions';
 import FormulaBlockModal from './FormulaBlockModal';
 import EffectBlockModal from './EffectBlockModal';
 import ConditionEditor from './ConditionEditor.jsx';
@@ -39,13 +40,38 @@ const OPERATORS = [
   { op: ')',  label: ')',  tip: '묶음 끝' },
 ];
 
-const QUICK_COMBOS = [
-  { label: '기본 공격식',       formula: 'd20 + 랭크 + 근력' },
-  { label: '민첩 공격식',       formula: 'd20 + 랭크 + 민첩' },
-  { label: '감각 공격식',       formula: 'd20 + 랭크 + 감각' },
-  { label: '지능 판정식',       formula: 'd20 + 랭크 + 지능' },
-  { label: '스택 강화식',       formula: 'd20 + 랭크 + 스택_이름 * 2' },
-  { label: '대상 상태 강화식',  formula: 'd20 + 랭크 + 대상상태_상태_수치 * 2' },
+// 랭크별 기초부 계수 [주스탯계수, 부스탯계수]. (F는 미지정 → E 기준 사용)
+const PRESET_RANK_COEF = {
+  F:  [1,   0.5 ],
+  E:  [1,   0.5 ],
+  D:  [1.3, 0.65],
+  C:  [1.6, 0.8 ],
+  B:  [1.9, 0.95],
+  A:  [2.2, 1.1 ],
+  S:  [2.5, 1.25],
+  U:  [2.9, 1.4 ],
+  EX: [3.2, 1.55],
+};
+
+// 액션의 스탯/기능/숙련 구조 + 선택한 랭크의 기초부 계수로
+// "1d20 + 랭크 + ( 기초부 ) * ( 배율부 )" 형태의 계산식을 생성한다.
+//   기초부 = 주스탯*주계수 + 부스탯*부계수   (랭크별 계수)
+//   배율부 = 주기능*0.12 + 부기능*0.08 + 관련기능*0.05 + 관련숙련*0.25
+function buildActionPresetFormula(action, rank) {
+  const [c1, c2] = PRESET_RANK_COEF[rank] || PRESET_RANK_COEF.E;
+  const b = action.base || [];
+  const baseParts = [];
+  if (b[0]) baseParts.push(`${b[0].stat} * ${c1}`);
+  if (b[1]) baseParts.push(`${b[1].stat} * ${c2}`);
+  const basePart = baseParts.join(' + ');
+  const multPart = (action.mult || []).map(m => `${m.key} * ${m.coef}`).join(' + ');
+  return `1d20 + 랭크 + ( ${basePart} ) * ( ${multPart} )`;
+}
+
+// 액션 기반이 아닌 특수 템플릿 (스택/대상상태 참조)
+const SPECIAL_COMBOS = [
+  { label: '스택 강화식',      formula: '1d20 + 랭크 + 스택_이름 * 2' },
+  { label: '대상 상태 강화식', formula: '1d20 + 랭크 + 대상상태_상태_수치 * 2' },
 ];
 
 const FORMULA_CATEGORIES = [
@@ -763,9 +789,22 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
         </div>
 
         <div className="space-y-1.5">
-          <p className="text-[10px] text-slate-400 tracking-widest uppercase">빠른 조합</p>
+          <p className="text-[10px] text-slate-400 tracking-widest uppercase">빠른 조합 (액션 기반)</p>
           <div className="flex flex-wrap gap-1">
-            {QUICK_COMBOS.map(({ label, formula }) => (
+            {ACTIONS.map((action) => (
+              <button
+                key={action.name}
+                onClick={() => setSkill(s => ({ ...s, formula: buildActionPresetFormula(action, s.rank) }))}
+                title={buildActionPresetFormula(action, skill.rank)}
+                className="px-2 py-1 bg-white hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 text-slate-500 hover:text-indigo-700 rounded-lg text-xs transition-colors"
+              >
+                {action.name}식
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-400 tracking-widest uppercase pt-1">특수 템플릿</p>
+          <div className="flex flex-wrap gap-1">
+            {SPECIAL_COMBOS.map(({ label, formula }) => (
               <button
                 key={label}
                 onClick={() => setSkill(s => ({ ...s, formula }))}
@@ -776,7 +815,7 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
               </button>
             ))}
           </div>
-          <p className="text-[10px] text-slate-400 italic">누르면 현재 계산식이 교체됩니다.</p>
+          <p className="text-[10px] text-slate-400 italic">누르면 현재 계산식이 교체됩니다. 액션 기반 식은 현재 선택한 <strong>랭크</strong> 기준 계수가 반영됩니다.</p>
         </div>
 
         <FormulaPreview formula={skill.formula} stats={stats} rank={skill.rank} abilities={abilities} proficiencies={proficiencies} />
