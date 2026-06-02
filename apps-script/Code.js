@@ -6286,32 +6286,39 @@ function castingProgressCommand(parts, displayName) {
 
 function parseEffectOptions(tokens) {
   const options = {};
-  // 쉼표로 끝난 값의 키 — 다음 토큰이 key:value 형식이 아니면 해당 값에 이어붙인다.
-  // 예: "판정:타격," "방어," "저항" → 판정: "타격, 방어, 저항"
-  let continuationKey = null;
+  // 옵션 키는 "한글/영문 식별자 + : (또는 ：)" 로 시작하는 토큰만 인정한다.
+  // 그 외 토큰(계수식의 '(', 숫자, 연산자 *, ×, +, 변수명, 콤마 항목 등)은
+  // 직전 옵션 값에 공백으로 이어붙인다 → 공백이 포함된 계수식 수치를 보존.
+  //   예: 수치:(민첩 + 근력 × 0.5) × (1 + 무기술 × 0.12 ...) * 0.55
+  //       판정:타격, 방어, 저항
+  const keyRe = /^([가-힣A-Za-z][가-힣A-Za-z0-9_]*)[:：]([\s\S]*)$/;
+  let currentKey = null;
 
   tokens.forEach(token => {
     token = String(token || "").trim();
     if (!token) return;
 
-    const match = token.match(/^(.+?)[:：](.+)$/);
-    if (match) {
-      const key = match[1].trim();
-      const value = match[2].trim();
-      options[key] = value;
-      continuationKey = value.endsWith(",") ? key : null;
-      return;
+    const m = token.match(keyRe);
+    if (m) {
+      currentKey = m[1].trim();
+      options[currentKey] = m[2];
+    } else if (currentKey) {
+      options[currentKey] = (options[currentKey] + " " + token).trim();
     }
-
-    // key:value 패턴이 아닌 토큰 — 이전 값이 쉼표로 끝났으면 이어붙임
-    if (continuationKey && options[continuationKey] !== undefined) {
-      options[continuationKey] = options[continuationKey] + " " + token;
-      if (!token.endsWith(",")) continuationKey = null;
-    }
-    // 그 외는 무시 (기존 동작과 동일)
+    // currentKey 없고 키도 아니면 무시 (위치 인자는 이미 slice로 제거됨)
   });
 
   return options;
+}
+
+// 옵션 숫자 값 평가 — 빈 값은 ""(무제한/미지정) 유지, 숫자/계수식은 정수로 평가.
+function _evalOptNum(raw, context) {
+  var s = String(raw == null ? "" : raw).trim();
+  if (s === "") return "";
+  var n = Number(s);
+  if (!isNaN(n)) return Math.floor(n);
+  var v = readEffectNumber(s, context, NaN);
+  return isNaN(Number(v)) ? "" : Math.floor(Number(v));
 }
 
 function resolveEffectTarget(token, context) {
@@ -6636,10 +6643,10 @@ function applyStatusWithResistance(targetAlias, statusName, category, effectCode
     maxChance: readEffectNumber(opts["최대확률"], context, 100),
     trigger: opts["발동"] || "판정시작",
     checkType: opts["판정"] || "전체",
-    count: opts["횟수"] || "",
+    count: _evalOptNum(opts["횟수"], context),
     stackMode: opts["중복"] || "허용",
-    maxValue: _pickMaxOption(opts),
-    maxCount: _pickMaxCountOption(opts),
+    maxValue: _evalOptNum(_pickMaxOption(opts), context),
+    maxCount: _evalOptNum(_pickMaxCountOption(opts), context),
     source: context.skillName || "",
     memo: opts["메모"] || ""
   }));
@@ -6804,6 +6811,22 @@ function processSkillEffects(effectText, context) {
   }
 
   context = context || {};
+
+  // 효과 옵션의 계수식(수치:(민첩 + 근력 * 0.5) ... 등) 평가를 위해
+  // 시전자(userAlias)의 스탯/기능/숙련/스택/상태 변수를 미리 준비한다.
+  if (!context.vars && context.userAlias) {
+    try {
+      var _caster = context.character || findCharacterByAlias(context.userAlias);
+      if (_caster) {
+        var _rankVal = 0;
+        try {
+          var _rk = context.skill && (context.skill["랭크"] || context.skill["rank"]);
+          if (_rk) _rankVal = rankToValue(_rk);
+        } catch (_e) {}
+        context.vars = buildFormulaVariables(_caster, _rankVal, context.targetAlias || "");
+      }
+    } catch (_e) { /* 변수 준비 실패 시 빈 vars로 진행 */ }
+  }
 
   let resistanceMode = String(context.resistanceMode || "").trim();
 
