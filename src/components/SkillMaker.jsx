@@ -100,6 +100,16 @@ const PASSIVE_TRIGGERS = [
 ];
 const PASSIVE_CHECK_TYPES = ['전체', '스탯', '액션', '이능', '스킬', '대응', '저항'];
 
+// 판정 유형은 넓은 범주(액션/스탯 등)뿐 아니라 세부 판정명(참격/근력/화력 등)도
+// 콤마로 지정할 수 있다. 백엔드 매칭이 checkTypes에 세부명을 포함하므로
+// 예) 판정:참격 → !참격 액션에만 보정 적용.
+const JUDGMENT_GROUPS = [
+  { label: '범주', items: PASSIVE_CHECK_TYPES },
+  { label: '스탯', items: STAT_NAMES },
+  { label: '액션', items: ACTIONS.map(a => a.name) },
+  { label: '이능', items: ['화력', '방호', '치유', '재생', '간섭', '강화'] },
+];
+
 // 카테고리별 설명 + 자동 기본값 설정
 const PASSIVE_CATEGORY_INFO = [
   {
@@ -509,16 +519,39 @@ function PassiveForm({ editingPassive, onSavePassive, onUpdatePassive, onCancelE
 
         {/* 판정 유형 */}
         {catInfo.showCheck && (
-          <label className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1.5">
             <span className="text-[11px] text-slate-500">
-              {row.분류 === '판정보정' ? '적용할 판정 유형 (전체=모든 판정에 적용)' :
+              {row.분류 === '판정보정' ? '적용할 판정 유형 (전체=모든 판정 / 세부명 가능, 콤마 구분)' :
                row.분류 === '저항'     ? '판정 유형 (저항 고정 권장)' :
-                                         '판정 유형 필터'}
+                                         '판정 유형 필터 (콤마 구분)'}
             </span>
-            <select className={selectCls} value={row.판정} onChange={field('판정')}>
-              {PASSIVE_CHECK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </label>
+            <input
+              className={`${inputCls} font-mono`}
+              value={row.판정}
+              onChange={field('판정')}
+              placeholder="예: 전체 / 참격 / 근력 / 참격,관통 / 액션"
+            />
+            <div className="space-y-1">
+              {JUDGMENT_GROUPS.map(grp => (
+                <div key={grp.label} className="flex flex-wrap gap-1 items-center">
+                  <span className="text-[10px] text-slate-400 w-7 shrink-0">{grp.label}</span>
+                  {grp.items.map(it => (
+                    <button
+                      key={it}
+                      type="button"
+                      onClick={() => setRow(r => {
+                        if (it === '전체') return { ...r, 판정: '전체' };
+                        const cur = String(r.판정 || '').split(/[,，]/).map(s => s.trim()).filter(Boolean).filter(x => x !== '전체');
+                        if (!cur.includes(it)) cur.push(it);
+                        return { ...r, 판정: cur.join(',') };
+                      })}
+                      className="text-[10px] px-1.5 py-0.5 bg-white hover:bg-violet-50 text-slate-500 hover:text-violet-700 border border-slate-200 hover:border-violet-300 rounded transition-colors"
+                    >{it}</button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* 효과코드 — 기타일 때만 직접 편집 */}
