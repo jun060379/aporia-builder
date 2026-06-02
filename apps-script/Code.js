@@ -4235,13 +4235,14 @@ function _formatJudgeModDetail(statusMod, equipMod) {
   if (hasMath) {
     var v = (statusMod.before != null) ? Math.floor(Number(statusMod.before) || 0) : 0;
     var steps = ["적용 전: " + v];
-    if (mult !== 1) {
-      v = Math.floor(v * mult);
-      steps.push("상태·패시브 배율: ×" + mult + " → " + v);
-    }
+    // 적용 순서: (적용 전 + 정수보정) × 곱셈버프합, 그 뒤 장비 보정.
     if (delta) {
       v = v + delta;
       steps.push("상태·패시브 보정: " + formatSigned(delta) + " → " + v);
+    }
+    if (mult !== 1) {
+      v = Math.floor(v * mult);
+      steps.push("곱셈버프 합산: ×" + mult + " → " + v);
     }
     if (equipDelta) {
       v = v + equipDelta;
@@ -7984,7 +7985,9 @@ function statusMatchesAnyCheckType(status, checkTypes) {
 function getStatusValueModifier(alias, checkTypes) {
   const rows = getActiveStatusRows(alias);
   let delta = 0;
-  let mult = 1;
+  // 곱셈 버프는 곱이 아니라 합산한다: 여러 배율을 모아 합(multSum)과 개수(multCount)로 반환.
+  let multSum = 0;
+  let multCount = 0;
   const logs = [];
 
   rows.forEach(status => {
@@ -8025,11 +8028,12 @@ function getStatusValueModifier(alias, checkTypes) {
     // 쇠약강화 전용 분류이거나 효과코드/카테고리가 버프/디버프면 처리
     if (category !== "쇠약강화" && !isBuff && !isDebuff) return;
 
-    // 곱셈 보정 마커("*N")는 덧셈이 아니라 판정값 배율로 적용한다.
+    // 곱셈 보정 마커("*N")는 덧셈이 아니라 판정값 배율로 적용 — 단, 배율끼리는 합산한다.
     if (_isMultValue(rawCell)) {
       const factor = _multFactor(rawCell);
       if (factor === 1) return;
-      mult *= factor;
+      multSum += factor;
+      multCount++;
       logs.push(
         "[상태 보정: " + name + "]\n" +
         "대상판정: " + (status["대상판정"] || "전체") + "\n" +
@@ -8063,7 +8067,8 @@ function getStatusValueModifier(alias, checkTypes) {
 
   return {
     delta: delta,
-    mult: mult,
+    multSum: multSum,
+    multCount: multCount,
     text: logs.join("\n\n")
   };
 }
@@ -8072,16 +8077,18 @@ function applyStatusModifierToValue(alias, value, checkTypes, targetAlias) {
   const modifier = getStatusValueModifier(alias, checkTypes);
 
   // 패시브(분류=판정보정) 보정도 합산.
-  var passiveDelta = 0;
-  var passiveMult  = 1;
-  var passiveText  = "";
+  var passiveDelta     = 0;
+  var passiveMultSum   = 0;
+  var passiveMultCount = 0;
+  var passiveText      = "";
   try {
     var character = findCharacterByAlias(alias);
     if (character) {
       var pm = getPassiveValueModifier(character, checkTypes, String(targetAlias || ""));
-      passiveDelta = pm.delta || 0;
-      passiveMult  = pm.mult  || 1;
-      passiveText  = pm.text  || "";
+      passiveDelta     = pm.delta     || 0;
+      passiveMultSum   = pm.multSum   || 0;
+      passiveMultCount = pm.multCount || 0;
+      passiveText      = pm.text      || "";
     }
   } catch (e) {
     // 패시브 시트 없거나 오류 → 무시.
@@ -8089,10 +8096,16 @@ function applyStatusModifierToValue(alias, value, checkTypes, targetAlias) {
 
   const before = Math.floor(Number(value) || 0);
   const totalDelta = modifier.delta + passiveDelta;
-  const statusMult = modifier.mult || 1;
-  const totalMult = passiveMult * statusMult;
-  // 곱셈(상태/패시브 배율) → 덧셈(보정) 순으로 적용.
-  const after = Math.floor(before * totalMult) + totalDelta;
+  // 곱셈 버프(상태+패시브)는 서로 곱하지 않고 배율을 합산한다.
+  // 버프가 하나도 없으면 ×1. 예: ×1.5 + ×2.2 → ×3.7
+  const multCount = (modifier.multCount || 0) + passiveMultCount;
+  // 합산 시 부동소수 잡음 제거 (예: 1.5 + 2.2 = 3.7000000000000002 → 3.7)
+  const combinedMult = multCount > 0
+    ? (Math.round(((modifier.multSum || 0) + passiveMultSum) * 1e6) / 1e6)
+    : 1;
+  // 정수보정(+N)을 먼저 더한 뒤 곱셈 배율을 적용: (기본 + 정수보정) × 곱버프합.
+  // 이면침식 등 추가 배율은 호출부에서 이 결과에 다시 곱한다.
+  const after = Math.floor((before + totalDelta) * combinedMult);
 
   var combinedText = modifier.text || "";
   if (passiveText) combinedText = combinedText ? (combinedText + "\n\n" + passiveText) : passiveText;
@@ -8100,7 +8113,7 @@ function applyStatusModifierToValue(alias, value, checkTypes, targetAlias) {
   return {
     value: after,
     delta: totalDelta,
-    mult: totalMult,
+    mult: combinedMult,
     text: combinedText,
     before: before,
     after: after
@@ -8700,11 +8713,13 @@ function _passiveJudgmentMatches(passive, checkTypes) {
 // 분류=판정보정 또는 효과코드=판정보정 인 패시브를 처리.
 // 세부 조건 보너스도 반영.
 function getPassiveValueModifier(character, checkTypes, targetAlias) {
-  if (!character) return { delta: 0, text: "" };
+  if (!character) return { delta: 0, multSum: 0, multCount: 0, text: "" };
   var passives = getCandidatePassivesForCharacter(character);
   var ctx = buildConditionContext(character, String(targetAlias || ""));
   var delta = 0;
-  var mult  = 1;
+  // 곱셈 버프는 곱이 아니라 합산 (상태 버프와 동일 규칙).
+  var multSum   = 0;
+  var multCount = 0;
   var lines = [];
 
   passives.forEach(function (p) {
@@ -8727,7 +8742,7 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
     var name   = p["이름"] || p["key"];
     if (parsed.mode === 'mult') {
       var factor = parsed.value * dMult;
-      if (factor !== 1) { mult *= factor; lines.push("[패시브: " + name + "]\n판정 배율: ×" + factor); }
+      if (factor !== 1) { multSum += factor; multCount++; lines.push("[패시브: " + name + "]\n판정 배율: ×" + factor); }
       if (dBonus) { delta += dBonus; }
     } else {
       var v = Math.floor(parsed.value * dMult) + dBonus;
@@ -8737,7 +8752,7 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
     }
   });
 
-  return { delta: delta, mult: mult, text: lines.join("\n\n") };
+  return { delta: delta, multSum: multSum, multCount: multCount, text: lines.join("\n\n") };
 }
 
 // 트리거 기반 패시브 효과 실행. 1차 구현: 효과 필드가 있으면 processSkillEffects로 처리.
