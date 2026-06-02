@@ -4235,14 +4235,14 @@ function _formatJudgeModDetail(statusMod, equipMod) {
   if (hasMath) {
     var v = (statusMod.before != null) ? Math.floor(Number(statusMod.before) || 0) : 0;
     var steps = ["적용 전: " + v];
-    // 적용 순서: (적용 전 + 정수보정) × 곱셈버프합, 그 뒤 장비 보정.
-    if (delta) {
-      v = v + delta;
-      steps.push("상태·패시브 보정: " + formatSigned(delta) + " → " + v);
-    }
+    // 적용 순서: 적용 전 × 곱셈버프합 + 정수보정, 그 뒤 장비 보정.
     if (mult !== 1) {
       v = Math.floor(v * mult);
       steps.push("곱셈버프 합산: ×" + mult + " → " + v);
+    }
+    if (delta) {
+      v = v + delta;
+      steps.push("상태·패시브 보정: " + formatSigned(delta) + " → " + v);
     }
     if (equipDelta) {
       v = v + equipDelta;
@@ -8096,16 +8096,16 @@ function applyStatusModifierToValue(alias, value, checkTypes, targetAlias) {
 
   const before = Math.floor(Number(value) || 0);
   const totalDelta = modifier.delta + passiveDelta;
-  // 곱셈 버프(상태+패시브)는 서로 곱하지 않고 배율을 합산한다.
-  // 버프가 하나도 없으면 ×1. 예: ×1.5 + ×2.2 → ×3.7
+  // 곱셈 버프(상태+패시브)는 서로 곱하지 않고 (배율-1)을 합산한다.
+  //   배율 = 1 + Σ(곱버프ᵢ - 1)   예: ×1.5 + ×2.2 → 1 + 0.5 + 1.2 = ×2.7
+  //   버프가 하나도 없으면 ×1.
   const multCount = (modifier.multCount || 0) + passiveMultCount;
-  // 합산 시 부동소수 잡음 제거 (예: 1.5 + 2.2 = 3.7000000000000002 → 3.7)
-  const combinedMult = multCount > 0
-    ? (Math.round(((modifier.multSum || 0) + passiveMultSum) * 1e6) / 1e6)
-    : 1;
-  // 정수보정(+N)을 먼저 더한 뒤 곱셈 배율을 적용: (기본 + 정수보정) × 곱버프합.
-  // 이면침식 등 추가 배율은 호출부에서 이 결과에 다시 곱한다.
-  const after = Math.floor((before + totalDelta) * combinedMult);
+  const multSum   = (modifier.multSum  || 0) + passiveMultSum;
+  // 합산 시 부동소수 잡음 제거 (예: 1 + 0.5 + 1.2 = 2.7000000000000002 → 2.7)
+  const combinedMult = Math.round((1 + (multSum - multCount)) * 1e6) / 1e6;
+  // 정수보정(+N)은 곱셈 바깥에 더한다: 결과값 × 곱버프배율 + 정수보정합.
+  // 이면침식 등 추가 배율은 호출부에서 이 결과(+장비)에 다시 곱한다.
+  const after = Math.floor(before * combinedMult) + totalDelta;
 
   var combinedText = modifier.text || "";
   if (passiveText) combinedText = combinedText ? (combinedText + "\n\n" + passiveText) : passiveText;
