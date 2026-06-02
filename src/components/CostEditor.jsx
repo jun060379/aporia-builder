@@ -12,7 +12,8 @@ const inputCls = "w-full min-w-0 bg-white border border-slate-200 text-slate-900
 //   캐스팅:N         — N턴 후 발동 (캐스팅 상태 없으면 차단)
 
 const COST_PRESETS = [
-  { label: '체력감소',   tpl: '체력감소:',   placeholder: '예: 5 또는 최종값/2' },
+  { label: '체력감소',   tpl: '체력감소:',   placeholder: '예: 5 또는 10% 또는 최종값/2' },
+  { label: '체력감소%',  tpl: '체력감소:10%', placeholder: '예: 10% (최대체력 기준)' },
   { label: '침식증가',   tpl: '침식증가:',   placeholder: '예: 1' },
   { label: '스택소모',   tpl: '스택소모:혈인:1', placeholder: '스택소모:스택명:수량' },
   { label: '상태소모',   tpl: '상태소모:',   placeholder: '예: 집중' },
@@ -23,6 +24,7 @@ const COST_PRESETS = [
 const COST_HELP = `대가 문법 (한 줄에 하나)
 ──────────────────────────────
 체력감소:N        — 자신 HP를 N 직접 차감
+체력감소:N%       — 최대 체력의 N% 만큼 차감
 침식증가:N        — 이면침식 +N
 스택소모:스택명:N  — 스택 N 차감 (부족하면 스킬 차단)
 상태소모:상태명   — 상태 해제 (없으면 스킬 차단)

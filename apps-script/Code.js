@@ -5975,6 +5975,7 @@ function removeStatusFromCharacter(targetAlias, statusName) {
 //
 // 대가 문법 (한 줄에 하나, 여러 줄 가능):
 //   체력감소:N          — 자신에게 N 직접 피해 (패시브·보호막 없이)
+//   체력감소:N%         — 최대 체력의 N% 만큼 차감
 //   침식증가:N          — 이면침식 +N
 //   스택소모:스택명:N   — 스택 N 차감 (부족하면 차단)
 //   상태소모:상태명     — 해당 상태 제거 (없으면 차단)
@@ -6119,18 +6120,25 @@ function payCost(alias, skillName, costText, context) {
   lines.forEach(function(line) {
 
     // 체력감소:N — 직접 HP 차감 (패시브/보호막 우회)
+    // 체력감소:N% — 최대 체력의 N% 만큼 차감
     var hpM = line.match(/^체력감소[:：](.+)$/);
     if (hpM) {
-      var hpN = Math.max(0, Math.floor(readEffectNumber(hpM[1], context, 0)));
       var rInfo = rereadCharacterRow(alias);
-      if (rInfo) {
-        var hp = getHealthInfo(rInfo.character);
-        var after = Math.max(0, hp.currentHp - hpN);
-        setCellByHeader(rInfo, "현재체력", after);
-        logs.push("[대가] 체력감소: " + hpN + " (" + hp.currentHp + " → " + after + ")");
+      if (!rInfo) { logs.push("[대가] 체력감소: 캐릭터를 찾을 수 없습니다."); return; }
+      var hp = getHealthInfo(rInfo.character);
+      var rawHp = String(hpM[1]).trim();
+      var pctM = rawHp.match(/^([\s\S]+?)\s*%$/);
+      var hpN;
+      if (pctM) {
+        var pct = readEffectNumber(pctM[1].trim(), context, 0);
+        hpN = Math.max(0, Math.floor(hp.maxHp * pct / 100));
       } else {
-        logs.push("[대가] 체력감소: 캐릭터를 찾을 수 없습니다.");
+        hpN = Math.max(0, Math.floor(readEffectNumber(rawHp, context, 0)));
       }
+      var after = Math.max(0, hp.currentHp - hpN);
+      setCellByHeader(rInfo, "현재체력", after);
+      logs.push("[대가] 체력감소: " + hpN + (pctM ? " (최대체력 " + rawHp + ")" : "") +
+                " (" + hp.currentHp + " → " + after + ")");
       return;
     }
 
