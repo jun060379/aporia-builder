@@ -1886,9 +1886,8 @@ function statCheck(parts, displayName) {
     statName + " " + statGrade + "(" + statValue + ")\n" +
     "기본값: " + base + "\n" +
     "보정: " + (mods.join(" ") || "없음") + "\n\n" +
-    _statusModSummaryLine(statusMod) +
-    (statusMod.text ? "\n\n" + statusMod.text + "\n" : "") +
-    (_statEquipMod && _statEquipMod.text ? "\n\n" + _statEquipMod.text + "\n" : "") +
+    (_formatJudgeModDetail(statusMod, _statEquipMod)
+      ? _formatJudgeModDetail(statusMod, _statEquipMod) + "\n\n" : "") +
     "최종값: " + finalValue + "\n" +
     "난이도: " + difficulty + "\n" +
     "차이: " + formatSigned(judged.diff) + "\n" +
@@ -2140,8 +2139,9 @@ function actionCheck(parts, displayName) {
     "최종 계수: " + finalCoef + "\n\n" +
     "주사위: " + diceCount + "d" + ACTION_DICE_SIDES + "\n" +
     "결과: " + rolls.join(", ") + "\n" +
+    (_formatJudgeModDetail(statusMod, _actEquipMod)
+      ? _formatJudgeModDetail(statusMod, _actEquipMod) + "\n\n" : "") +
     "합계: " + sum +
-    (_actEquipMod && _actEquipMod.text ? "\n\n" + _actEquipMod.text : "") +
     judgeSummary +
     combatText;
 
@@ -2264,10 +2264,10 @@ function powerCheck(parts, type, displayName) {
     "난수: " + dice + "\n" +
     "랭크: " + rank + "(" + rankValue + ")\n" +
     typeBonusText +
-    (statusMod.text ? "\n\n" + statusMod.text + "\n" : "") +
-    (_powEquipMod && _powEquipMod.text ? "\n\n" + _powEquipMod.text + "\n" : "") +
     "기본값: " + base + "\n" +
     "보정: " + (mods.join(" ") || "없음") + "\n\n" +
+    (_formatJudgeModDetail(statusMod, _powEquipMod)
+      ? _formatJudgeModDetail(statusMod, _powEquipMod) + "\n\n" : "") +
     "최종값: " + finalValue + "\n" +
     resultText +
     healingText +
@@ -3437,7 +3437,10 @@ function skillUse(parts, displayName) {
   } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
 
   const diceText = formatDiceLogs(calc.diceLogs);
-  const statusModText = (statusMod && statusMod.text) ? statusMod.text : "";
+  const statusModDetail = _formatJudgeModDetail(statusMod, null);
+  const condModLines =
+    (condDetailMult !== 1 ? "세부조건 배율: ×" + condDetailMult + "\n" : "") +
+    (condDetailBonus !== 0 ? "세부조건 보정: " + formatSigned(condDetailBonus) + "\n" : "");
 
   const summary =
     formatSkillSummaryBlock(
@@ -3469,7 +3472,8 @@ function skillUse(parts, displayName) {
     "계산 결과: " + Math.floor(calc.value) + "\n" +
     typeBonusText +
     "보정: " + (mods.join(" ") || "없음") + "\n" +
-    (statusModText ? statusModText + "\n" : "") +
+    (statusModDetail ? statusModDetail + "\n" : "") +
+    condModLines +
     "이면침식: " + erosion + " / " + MAX_EROSION + "\n" +
     "침식단계: " + erosionStage + "\n" +
     "침식배율: ×" + erosionMultiplier + "\n" +
@@ -4210,6 +4214,48 @@ function _statusModSummaryLine(statusMod) {
   if (statusMod.delta) parts.push(formatSigned(statusMod.delta));
   if (parts.length === 0) return "";
   return "\n상태보정: " + parts.join(" ") + "\n";
+}
+
+// 판정 세부: 상태/패시브/장비 보정의 적용 과정을 수치와 함께 단계별로 표기.
+// statusMod: applyStatusModifierToValue 반환값({before, mult, delta, after, text}).
+// equipMod : getEquipmentModifier 반환값({delta, text}) — 없으면 생략.
+// 반환: "[보정 적용]" 단계별 계산 + 출처별 상세 블록. 보정이 전혀 없으면 "".
+function _formatJudgeModDetail(statusMod, equipMod) {
+  statusMod = statusMod || {};
+  var mult  = statusMod.mult  || 1;
+  var delta = statusMod.delta || 0;
+  var equipDelta = (equipMod && equipMod.delta) || 0;
+
+  var hasMath = (mult !== 1) || !!delta || !!equipDelta;
+  var hasText = !!statusMod.text || !!(equipMod && equipMod.text);
+  if (!hasMath && !hasText) return "";
+
+  var out = "";
+
+  if (hasMath) {
+    var v = (statusMod.before != null) ? Math.floor(Number(statusMod.before) || 0) : 0;
+    var steps = ["적용 전: " + v];
+    if (mult !== 1) {
+      v = Math.floor(v * mult);
+      steps.push("상태·패시브 배율: ×" + mult + " → " + v);
+    }
+    if (delta) {
+      v = v + delta;
+      steps.push("상태·패시브 보정: " + formatSigned(delta) + " → " + v);
+    }
+    if (equipDelta) {
+      v = v + equipDelta;
+      steps.push("장비 보정: " + formatSigned(equipDelta) + " → " + v);
+    }
+    out += "[보정 적용]\n" + steps.join("\n");
+  }
+
+  var sources = [];
+  if (statusMod.text) sources.push(statusMod.text);
+  if (equipMod && equipMod.text) sources.push(equipMod.text);
+  if (sources.length) out += (out ? "\n\n" : "") + sources.join("\n\n");
+
+  return out;
 }
 
 function isDamageAction(actionName) {
@@ -11264,7 +11310,10 @@ function commonSkillUseCommand(parts, displayName) {
   } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
 
   const diceText = formatDiceLogs(calc.diceLogs);
-  const statusModText = (statusMod && statusMod.text) ? statusMod.text : "";
+  const statusModDetail = _formatJudgeModDetail(statusMod, null);
+  const condModLines =
+    (condDetailMult !== 1 ? "세부조건 배율: ×" + condDetailMult + "\n" : "") +
+    (condDetailBonus !== 0 ? "세부조건 보정: " + formatSigned(condDetailBonus) + "\n" : "");
 
   const summaryBlock = formatSkillSummaryBlock(
     skillForEffects,
@@ -11318,7 +11367,8 @@ function commonSkillUseCommand(parts, displayName) {
     "계산 결과: " + Math.floor(calc.value) + "\n" +
     typeBonusText +
     "보정: " + (mods.join(" ") || "없음") + "\n" +
-    (statusModText ? statusModText + "\n" : "") +
+    (statusModDetail ? statusModDetail + "\n" : "") +
+    condModLines +
     "이면침식: " + erosion + " / " + MAX_EROSION + "\n" +
     "침식단계: " + erosionStage + "\n" +
     "침식배율: ×" + erosionMultiplier + "\n" +
