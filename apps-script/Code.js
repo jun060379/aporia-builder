@@ -1914,10 +1914,23 @@ function formatDiceLogs(diceLogs) {
 function applyMods(value, mods) {
   let result = Number(value);
 
-  mods.forEach(mod => {
-    mod = String(mod).trim();
-    if (!mod) return;
+  // 연산자와 숫자가 공백으로 분리돼 들어온 경우(예: "+", "99") 병합.
+  // "+ 99" 처럼 띄어 써도 "+99"와 동일하게 처리.
+  const list = [];
+  (mods || []).forEach(m => {
+    const s = String(m == null ? "" : m).trim();
+    if (!s) return;
+    if (/^[+\-*×x]$/.test(s) && list.length === 0) { list.push(s); return; } // 선두 단독 연산자
+    if (/^[+\-*×x]$/.test(s)) { list.push(s); return; }
+    // 직전이 단독 연산자면 병합
+    if (list.length > 0 && /^[+\-*×x]$/.test(list[list.length - 1]) && /^\d/.test(s)) {
+      list[list.length - 1] = list[list.length - 1] + s;
+    } else {
+      list.push(s);
+    }
+  });
 
+  list.forEach(mod => {
     if (mod.startsWith("+")) {
       result += Number(mod.slice(1));
     } else if (mod.startsWith("-")) {
