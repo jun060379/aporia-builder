@@ -7,9 +7,21 @@ const EFFECT_TYPES = [
   { id: 'statusRemove', label: '상태 해제' },
   { id: 'stack',        label: '스택 변경' },
   { id: 'random',       label: '랜덤 지정' },
+  { id: 'set',          label: '설정/보정' },
   { id: 'damage',       label: '피해' },
   { id: 'heal',         label: '회복' },
   { id: 'free',         label: '자유 입력' },
+];
+
+// 설정/보정 효과 변수
+const SET_VARS = [
+  { v: '판정보정', ph: '판정값 보정 (음수 가능)', mod: true },
+  { v: '피해보정', ph: '받는 피해 (음수=경감)',   mod: true },
+  { v: '피해감소', ph: '받는 피해 감소 (양수=경감)', mod: true },
+  { v: '회복보정', ph: '회복량 보정 (음수 가능)', mod: true },
+  { v: '이면침식', ph: '이면침식 값으로 설정',     mod: false },
+  { v: '현재체력', ph: '현재 체력으로 설정',       mod: false },
+  { v: '일상점',   ph: '일상점 값으로 설정',       mod: false },
 ];
 
 const DESCRIPTIONS = {
@@ -18,6 +30,7 @@ const DESCRIPTIONS = {
   statusRemove: '자신 또는 대상에게 걸린 특정 상태를 해제합니다.',
   stack:        '자신 또는 대상의 스택을 증가, 감소, 설정합니다.',
   random:       '목록 중 무작위 1개를 골라 "접두어_선택" 상태를 부여합니다. 같은 접두어의 다른 상태는 제거됩니다. (매 턴 액션 지정 등)',
+  set:          '값을 설정하거나 보정을 겁니다. 이면침식/현재체력/일상점은 DB 값 설정, 판정/피해/회복 보정은 장면 동안 임시 보정 상태로 적용됩니다.',
   damage:       '자신 또는 대상에게 피해를 입힙니다. (패시브·보호막 처리 포함)',
   heal:         '자신 또는 대상의 체력을 회복시킵니다.',
   free:         '자동 블럭으로 만들 수 없는 효과를 직접 입력합니다. 운영진 수동 검수 대상입니다.',
@@ -54,7 +67,20 @@ const TEMPLATE_NAMES = ['출혈', '구속', '보호막', '취약', '쇠약', '�
 const CUSTOM_CATEGORIES = ['지속피해', '행동방해', '보호', '약화', '강화', '기타'];
 const EFFECT_CODES = ['bleed', 'bind', 'shield', 'vulnerable', 'weaken', 'buff', '직접입력'];
 
+// 조건이 있으면 "조건 => 효과"로 감싸 반환.
 function buildText(type, params) {
+  const body = buildEffectBody(type, params);
+  if (!body) return '';
+  const cond = (params.condition || '').trim();
+  return cond ? `${cond} => ${body}` : body;
+}
+
+function buildEffectBody(type, params) {
+  if (type === 'set') {
+    const v = params.setVar || '판정보정';
+    if (params.value === undefined || String(params.value).trim() === '') return '';
+    return `${v} = ${String(params.value).trim()}`;
+  }
   if (type === 'template') {
     const name = params.templateName === '직접입력' ? (params.customTemplateName || '') : (params.templateName || '');
     if (!name) return '';
@@ -438,6 +464,31 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
             </div>
           )}
 
+          {/* ── set / 보정 ── */}
+          {type === 'set' && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <span className="text-[11px] text-slate-500">설정/보정 대상</span>
+                <div className="flex flex-wrap gap-1">
+                  {SET_VARS.map(sv => (
+                    <BtnSel key={sv.v} active={(params.setVar || '판정보정') === sv.v} onClick={() => setParam('setVar', sv.v)}>{sv.v}</BtnSel>
+                  ))}
+                </div>
+              </div>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-500">값</span>
+                <input className={`${inputCls} font-mono`} value={params.value || ''} onChange={e => setParam('value', e.target.value)}
+                  placeholder={(SET_VARS.find(s => s.v === (params.setVar || '판정보정')) || {}).ph || ''} />
+              </label>
+              <NumTokenBar onInsert={t => setParam('value', (params.value || '') + t)} />
+              <p className="text-[10px] text-slate-400 leading-snug">
+                {['판정보정','피해보정','피해감소','회복보정'].includes(params.setVar || '판정보정')
+                  ? '장면 동안 임시 보정 상태로 적용됩니다(덮어쓰기). 자신 기준. *N 으로 배율도 가능.'
+                  : 'DB 값을 직접 설정합니다(자신 기준).'}
+              </p>
+            </div>
+          )}
+
           {/* ── free ── */}
           {type === 'free' && (
             <label className="flex flex-col gap-1">
@@ -447,6 +498,15 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
                 value={params.text || ''} onChange={e => setParam('text', e.target.value)}
                 placeholder="효과를 직접 입력하세요"
               />
+            </label>
+          )}
+
+          {/* ── 공통: 발동 조건 (조건 => 효과) ── */}
+          {type !== 'free' && (
+            <label className="flex flex-col gap-1 border-t border-slate-100 pt-3">
+              <span className="text-[11px] text-slate-500">발동 조건 (선택) — 충족 시에만 이 효과 실행</span>
+              <input className={`${inputCls} font-mono`} value={params.condition || ''} onChange={e => setParam('condition', e.target.value)}
+                placeholder="예: 스택_각인 >= 6  ·  사용액션 == 상태접미_지정  (비우면 항상)" />
             </label>
           )}
 

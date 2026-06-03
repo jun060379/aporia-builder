@@ -28,6 +28,7 @@ const EFFECT_TYPE_LABEL = {
   statusRemove: '상태 해제',
   stack:        '스택 변경',
   random:       '랜덤 지정',
+  set:          '설정/보정',
   damage:       '피해',
   heal:         '회복',
   free:         '자유 입력',

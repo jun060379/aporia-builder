@@ -1304,15 +1304,17 @@ function applyHealingToCharacter(alias, healAmount) {
 
   // 회복보정 패시브 적용
   const passiveHealResult = _applyPassiveHealingModifier(alias, baseHeal);
-  const heal = passiveHealResult.amount;
+  // 회복보정 상태(임시 보정) 적용
+  const statusHealResult = _applyStatusHealingModifier(alias, passiveHealResult.amount);
+  const heal = statusHealResult.amount;
 
   const before = hp.currentHp;
   const after  = clampHp(before + heal, hp.maxHp);
 
   setCellByHeader(fresh, "현재체력", after);
 
-  const passiveBlock = passiveHealResult.logs.length > 0
-    ? "\n\n" + passiveHealResult.logs.join("\n\n")
+  const passiveBlock = (passiveHealResult.logs.length > 0 || statusHealResult.logs.length > 0)
+    ? "\n\n" + passiveHealResult.logs.concat(statusHealResult.logs).join("\n\n")
     : "";
 
   return {
@@ -1542,6 +1544,59 @@ function _applyPassiveHealingModifier(alias, amount) {
   return { amount, logs };
 }
 
+// 상태 기반 피해보정 (분류 또는 효과코드 = 피해보정). 수치 음수=경감, *N=배율.
+// 설정효과(피해보정/피해감소 = N)나 상태부여로 걸린 임시 보정에 사용. 지속(횟수 미소모).
+function _applyStatusDamageModifier(alias, damage) {
+  const logs = [];
+  try {
+    const rows = getActiveStatusRows(alias);
+    let addDelta = 0;
+    let multFactor = 1;
+    rows.forEach(function (s) {
+      const cat  = String(s["분류"]   || "").trim();
+      const code = String(s["효과코드"] || "").trim();
+      if (cat !== "피해보정" && code !== "피해보정") return;
+      const raw = s["수치"];
+      const nm = s["상태명"] || "피해보정";
+      if (_isMultValue(raw)) {
+        const f = _multFactor(raw);
+        if (f !== 1) { multFactor *= f; logs.push("[상태: " + nm + "]\n피해 배율: ×" + f); }
+      } else {
+        const v = Math.floor(Number(raw) || 0);
+        if (v) { addDelta += v; logs.push("[상태: " + nm + "]\n피해 보정: " + formatSigned(v)); }
+      }
+    });
+    damage = Math.max(0, Math.floor(damage * multFactor) + addDelta);
+  } catch (_e) { /* 무시 */ }
+  return { damage, logs };
+}
+
+// 상태 기반 회복보정 (분류 또는 효과코드 = 회복보정).
+function _applyStatusHealingModifier(alias, amount) {
+  const logs = [];
+  try {
+    const rows = getActiveStatusRows(alias);
+    let addDelta = 0;
+    let multFactor = 1;
+    rows.forEach(function (s) {
+      const cat  = String(s["분류"]   || "").trim();
+      const code = String(s["효과코드"] || "").trim();
+      if (cat !== "회복보정" && code !== "회복보정") return;
+      const raw = s["수치"];
+      const nm = s["상태명"] || "회복보정";
+      if (_isMultValue(raw)) {
+        const f = _multFactor(raw);
+        if (f !== 1) { multFactor *= f; logs.push("[상태: " + nm + "]\n회복 배율: ×" + f); }
+      } else {
+        const v = Math.floor(Number(raw) || 0);
+        if (v) { addDelta += v; logs.push("[상태: " + nm + "]\n회복 보정: " + formatSigned(v)); }
+      }
+    });
+    amount = Math.max(0, Math.floor(amount * multFactor) + addDelta);
+  } catch (_e) { /* 무시 */ }
+  return { amount, logs };
+}
+
 function processPreDamageStatuses(alias, damageAmount) {
   const rows   = getActiveStatusRows(alias);
   let damage   = Math.max(0, Math.floor(Number(damageAmount) || 0));
@@ -1554,6 +1609,10 @@ function processPreDamageStatuses(alias, damageAmount) {
   const passiveDmgResult = _applyPassiveDamageModifier(alias, damage);
   damage                 = passiveDmgResult.damage;
 
+  // 2-1. 피해보정 상태 (임시 보정 — 설정효과/상태부여로 걸린 것)
+  const statusDmgResult = _applyStatusDamageModifier(alias, damage);
+  damage                = statusDmgResult.damage;
+
   // 3. 보호막 (피해 흡수)
   const shieldResult  = _applyShieldEffects(rows, damage);
   damage              = shieldResult.damage;
@@ -1562,7 +1621,7 @@ function processPreDamageStatuses(alias, damageAmount) {
   const equipDmgResult = _applyEquipmentDamageModifier(alias, damage);
   damage               = equipDmgResult.damage;
 
-  const logs = [...vulnResult.logs, ...passiveDmgResult.logs, ...shieldResult.logs, ...equipDmgResult.logs];
+  const logs = [...vulnResult.logs, ...passiveDmgResult.logs, ...statusDmgResult.logs, ...shieldResult.logs, ...equipDmgResult.logs];
   const debugLogs = passiveDmgResult.debugLogs || [];
   return { damage, text: logs.join("\n\n"), debugText: debugLogs.join("\n") };
 }
@@ -6934,7 +6993,11 @@ function applySetEffect(variable, valueExpr, context) {
   }
   num = Math.floor(Number(num));
 
-  // ── 모디파이어 개념 변수: 로그/반환만 ──
+  // ── 모디파이어 개념 변수: 임시 상태로 실제 적용 ──
+  //   판정보정 → 강화/약화 상태(getStatusValueModifier가 판정에 반영)
+  //   피해보정/피해감소 → 분류=피해보정 상태(processPreDamageStatuses가 반영)
+  //   회복보정 → 분류=회복보정 상태(applyHealingToCharacter가 반영)
+  //   지속: 횟수 미지정(장면 동안, !fin까지) · 중복: 덮어쓰기("= 값" 의미)
   var MODIFIER_LABEL = {
     "피해감소": "받는 피해 감소",
     "피해보정": "피해 보정",
@@ -6942,7 +7005,28 @@ function applySetEffect(variable, valueExpr, context) {
     "판정보정": "판정 보정"
   };
   if (MODIFIER_LABEL.hasOwnProperty(v)) {
-    return "[보정] " + MODIFIER_LABEL[v] + " = " + num;
+    if (!alias) return "[설정 실패]\n변수: " + v + "\n대상 캐릭터를 확인할 수 없습니다.";
+    // 적용 대상: 옵션 대상이 있으면 그쪽, 없으면 자신.
+    var modTarget = String(context.targetAlias || "").trim();
+    modTarget = (modTarget && modTarget !== "자신") ? modTarget : alias;
+
+    if (v === "판정보정") {
+      return addStatusToCharacter(modTarget, "판정보정", num >= 0 ? "강화" : "약화",
+        num >= 0 ? "buff" : "debuff",
+        { value: num, trigger: "판정시작", checkType: "전체", stackMode: "덮어쓰기",
+          source: context.skillName || "판정보정", memo: "" });
+    }
+    if (v === "피해보정" || v === "피해감소") {
+      // 피해감소는 양수=경감 → 내부적으로 음수 보정으로 저장. 피해보정은 그대로(음수=경감).
+      var dv = (v === "피해감소") ? -Math.abs(num) : num;
+      return addStatusToCharacter(modTarget, v, "피해보정", "피해보정",
+        { value: dv, trigger: "피해직전", checkType: "전체", stackMode: "덮어쓰기",
+          source: context.skillName || v, memo: "" });
+    }
+    // 회복보정
+    return addStatusToCharacter(modTarget, "회복보정", "회복보정", "회복보정",
+      { value: num, trigger: "회복시", checkType: "전체", stackMode: "덮어쓰기",
+        source: context.skillName || "회복보정", memo: "" });
   }
 
   // ── DB 직접 기록 변수 ──
