@@ -201,13 +201,20 @@ const COLOR_MAP = {
 function buildPassivePreview(row, catInfo) {
   const name  = row.이름 || '(이름 없음)';
   const cond  = row.조건 ? '조건 충족 시 ' : '';
-  const v     = Number(row.수치);
-  const sign  = v > 0 ? '+' : '';
+  // 곱셈 배율 마커(*N) 지원: 덧셈이면 +N, 곱셈이면 ×N으로 표기.
+  const raw   = String(row.수치 || '').trim();
+  const isMult = /^[*×]/.test(raw);
+  const v     = Number(raw.replace(/^[*×]\s*/, ''));
+  const amt = (() => {
+    if (!raw) return '?';
+    if (isMult) return `×${isNaN(v) ? raw.replace(/^[*×]\s*/, '') : v}`;
+    return `${v > 0 ? '+' : ''}${isNaN(v) ? raw : v}`;
+  })();
   switch (catInfo?.value) {
-    case '판정보정':  return `"${name}": ${cond}${row.판정 || '모든'} 판정에 ${sign}${v || '?'} 보정`;
-    case '피해보정':  return `"${name}": ${cond}받는 피해 ${sign}${v || '?'}`;
-    case '회복보정':  return `"${name}": ${cond}체력 회복량 ${sign}${v || '?'}`;
-    case '저항':      return `"${name}": ${cond}저항 판정에 ${sign}${v || '?'}`;
+    case '판정보정':  return `"${name}": ${cond}${row.판정 || '모든'} 판정에 ${amt} 보정`;
+    case '피해보정':  return `"${name}": ${cond}받는 피해 ${amt}`;
+    case '회복보정':  return `"${name}": ${cond}체력 회복량 ${amt}`;
+    case '저항':      return `"${name}": ${cond}저항 판정에 ${amt}`;
     case '트리거효과':return `"${name}": ${row.발동 || '?'} 시점에 효과 자동 발동`;
     default:          return `"${name}"`;
   }
@@ -373,6 +380,13 @@ function PassiveForm({ editingPassive, onSavePassive, onUpdatePassive, onCancelE
   const preview = buildPassivePreview(row, catInfo);
   const colors  = COLOR_MAP[catInfo.color] || COLOR_MAP.slate;
 
+  // 발동 트리거의 "base:인자" 분해 (특정 액션/스킬/공격명 필터)
+  const TRIGGER_ARG_BASES = ['판정후', '액션사용후', '스킬사용후', '가해후'];
+  const _trigCi  = row.발동.indexOf(':');
+  const trigBase = _trigCi >= 0 ? row.발동.slice(0, _trigCi) : row.발동;
+  const trigArg  = _trigCi >= 0 ? row.발동.slice(_trigCi + 1) : '';
+  const trigSupportsArg = TRIGGER_ARG_BASES.includes(trigBase);
+
   return (
     <div className="space-y-4">
 
@@ -503,19 +517,51 @@ function PassiveForm({ editingPassive, onSavePassive, onUpdatePassive, onCancelE
                     {op}
                   </button>
                 ))}
+                <button type="button"
+                  onClick={() => setRow(r => ({ ...r, 수치: '*' + (r.수치 || '').replace(/^\s*[*×]\s*/, '') }))}
+                  className="text-[10px] px-1.5 py-0.5 bg-fuchsia-50 hover:bg-fuchsia-100 text-fuchsia-600 border border-fuchsia-200 rounded font-mono transition-colors"
+                  title="값 맨 앞에 * 를 붙여 곱셈 배율로 만듭니다"
+                >*배율</button>
               </div>
+              <p className="text-[10px] text-slate-400 leading-snug">
+                맨 앞에 <code className="bg-slate-100 px-1 rounded">*</code> 를 붙이면 덧셈이 아니라 <strong>곱셈 배율</strong>입니다.
+                예: <code className="bg-slate-100 px-1 rounded">*1.5</code> = ×1.5.
+                {row.분류 === '판정보정' && ' 곱셈 배율이 여러 개면 1+Σ(배율-1)로 합산됩니다 (×1.5+×2.2 → ×2.7).'}
+              </p>
             </div>
           </div>
         )}
 
         {/* 발동 시점 (트리거효과/기타만 표시) */}
         {catInfo.showTrigger && (
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-slate-500">발동 시점</span>
-            <select className={selectCls} value={row.발동} onChange={field('발동')}>
-              {PASSIVE_TRIGGERS.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-slate-500">발동 시점</span>
+              <select className={selectCls} value={trigBase}
+                onChange={e => setRow(r => ({ ...r, 발동: e.target.value }))}>
+                {PASSIVE_TRIGGERS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
+            {trigSupportsArg && (
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-500">특정 대상 (선택)</span>
+                <input
+                  className={`${inputCls} font-mono`}
+                  value={trigArg}
+                  onChange={e => {
+                    const a = e.target.value.trim();
+                    setRow(r => ({ ...r, 발동: a ? trigBase + ':' + a : trigBase }));
+                  }}
+                  placeholder={
+                    trigBase === '액션사용후' ? '예: 은신 (비우면 모든 액션)' :
+                    trigBase === '스킬사용후' ? '예: 월광참 (비우면 모든 스킬)' :
+                    trigBase === '가해후'     ? '예: 화력 A (비우면 모든 공격)' :
+                                                '스킬명 (비우면 전체)'
+                  }
+                />
+              </label>
+            )}
+          </div>
         )}
 
         {/* 판정 유형 */}
