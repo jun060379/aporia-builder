@@ -447,9 +447,10 @@ function PassiveForm({ editingPassive, onSavePassive, onUpdatePassive, onCancelE
                     setRow(r => ({ ...r, 발동: a ? trigBase + ':' + a : trigBase }));
                   }}
                   placeholder={
-                    trigBase === '액션사용후' ? '예: 은신 (비우면 모든 액션)' :
+                    trigBase === '액션사용후' ? '예: 참격,타격 (콤마로 여러 개, 비우면 전체)' :
                     trigBase === '스킬사용후' ? '예: 월광참 (비우면 모든 스킬)' :
-                    trigBase === '가해후'     ? '예: 화력 A (비우면 모든 공격)' :
+                    trigBase === '가해후'     ? '예: 참격,타격 (콤마로 여러 개, 비우면 전체)' :
+                    trigBase === '공격해결후' ? '예: 참격,타격 (콤마로 여러 개, 비우면 전체)' :
                                                 '스킬명 (비우면 전체)'
                   }
                 />

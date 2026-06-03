@@ -9068,7 +9068,8 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
 //  - "항상"/"전체" → 모든 시점에 발동
 //  - 정확히 같은 트리거 → 발동
 //  - "트리거:인자" 형태(예: "액션사용후:은신") → base가 일치하고 인자가
-//    현재 사용한 액션/스킬명(triggerArg)과 같을 때만 발동
+//    현재 사용한 액션/스킬명(triggerArg)과 같을 때 발동.
+//    인자는 콤마로 여러 개 지정 가능(OR): "액션사용후:참격,타격" → 참격 또는 타격.
 function _passiveTriggerMatches(pTrigger, trigger, triggerArg) {
   pTrigger = String(pTrigger || "").trim();
   if (!pTrigger) return false;
@@ -9080,7 +9081,11 @@ function _passiveTriggerMatches(pTrigger, trigger, triggerArg) {
   if (ci > 0) {
     var base = pTrigger.slice(0, ci).trim();
     var arg  = pTrigger.slice(ci + 1).trim();
-    if (base === trigger && arg && String(triggerArg || "").trim() === arg) return true;
+    if (base === trigger && arg) {
+      var ta = String(triggerArg || "").trim();
+      var argList = arg.split(/[,，、]/).map(function (s) { return s.trim(); }).filter(Boolean);
+      if (argList.indexOf(ta) >= 0) return true;
+    }
   }
   return false;
 }
