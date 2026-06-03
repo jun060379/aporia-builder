@@ -1758,20 +1758,29 @@ function applyDamageToCharacter(alias, damageAmount, opts) {
     }
   } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
 
-  // 가해후 패시브 트리거 (피해를 입힌 공격자 쪽) — 실제 피해 > 0 이고 자기 자신이 아닐 때만.
+  // 공격 해결 시 공격자 쪽 트리거 (자기 자신 제외).
+  //  - 공격해결후: 피해 0 포함 항상 1회 (성공/실패 판정용)
+  //  - 가해후    : 실제 피해 > 0 일 때만 (기존 동작 유지)
   var passiveDealtText = "";
   var attackerAlias = String(opts.attackerAlias || "").trim();
-  if (attackerAlias && damage > 0 && !_DEALT_TRIGGER_ACTIVE && attackerAlias !== String(alias).trim()) {
+  if (attackerAlias && !_DEALT_TRIGGER_ACTIVE && attackerAlias !== String(alias).trim()) {
     _DEALT_TRIGGER_ACTIVE = true;
     try {
       var dealerChar = findCharacterByAlias(attackerAlias);
       if (dealerChar) {
-        passiveDealtText = firePassiveTriggerEffects(dealerChar, "가해후", {
-          targetAlias: alias,
-          finalValue: damage,
-          triggerArg: String(opts.sourceName || "").trim(),
-          resistanceMode: RESIST_NONE
+        var _argName = String(opts.sourceName || "").trim();
+        var _parts = [];
+        var _resolvedText = firePassiveTriggerEffects(dealerChar, "공격해결후", {
+          targetAlias: alias, finalValue: damage, triggerArg: _argName, resistanceMode: RESIST_NONE
         });
+        if (_resolvedText) _parts.push(_resolvedText);
+        if (damage > 0) {
+          var _dealtText = firePassiveTriggerEffects(dealerChar, "가해후", {
+            targetAlias: alias, finalValue: damage, triggerArg: _argName, resistanceMode: RESIST_NONE
+          });
+          if (_dealtText) _parts.push(_dealtText);
+        }
+        passiveDealtText = _parts.join("\n\n");
       }
     } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
     finally { _DEALT_TRIGGER_ACTIVE = false; }
@@ -1792,7 +1801,7 @@ function applyDamageToCharacter(alias, damageAmount, opts) {
   const passivePreBlock  = passivePreText  ? "\n\n" + passivePreText  : "";
   const passivePostBlock = passivePostText ? "\n\n" + passivePostText : "";
   const passiveDealtBlock = passiveDealtText
-    ? "\n\n[가해후 패시브: " + attackerAlias + "]\n" + passiveDealtText
+    ? "\n\n[공격 후 패시브: " + attackerAlias + "]\n" + passiveDealtText
     : "";
 
   const mainText =
@@ -7198,8 +7207,10 @@ function processSkillEffects(effectText, context) {
         const condChar = context.character ||
           (context.userAlias ? findCharacterByAlias(context.userAlias) : null);
         const condCtx = buildConditionContext(condChar, context.targetAlias || "");
-        // 방금 사용한 액션/스킬명을 줄 조건에 노출 (예: 사용액션 == 상태접미_지정)
+        // 방금 사용한 액션/스킬명, 판정 최종값을 줄 조건에 노출
+        // (예: 사용액션 == 상태접미_지정, 최종값 >= 1)
         if (context.usedAction !== undefined) condCtx.vars["사용액션"] = String(context.usedAction || "");
+        if (context.finalValue !== undefined) condCtx.vars["최종값"] = Number(context.finalValue) || 0;
         const condResult = evaluateConditionList(condPart, condCtx);
         if (!condResult.ok) {
           logs.push("[조건 미충족] " + condPart);
@@ -9350,21 +9361,27 @@ function applyDamageToRef(ref, damage, opts) {
       ? "\n\n[에너미 전투불능]\n" + label + "의 체력이 0이 되었습니다."
       : "";
 
-    // 가해후 패시브 트리거 — 에너미에게 피해를 입힌 공격자(PC)가 대상.
+    // 공격 해결 시 공격자(PC) 쪽 트리거 — 공격해결후(피해 0 포함) + 가해후(피해>0).
     var dealtBlock = "";
     var attackerAlias = String(opts.attackerAlias || "").trim();
-    if (attackerAlias && damage > 0 && !_DEALT_TRIGGER_ACTIVE) {
+    if (attackerAlias && !_DEALT_TRIGGER_ACTIVE) {
       _DEALT_TRIGGER_ACTIVE = true;
       try {
         var dealerChar = findCharacterByAlias(attackerAlias);
         if (dealerChar) {
-          var dealtText = firePassiveTriggerEffects(dealerChar, "가해후", {
-            targetAlias: label,
-            finalValue: damage,
-            triggerArg: String(opts.sourceName || "").trim(),
-            resistanceMode: RESIST_NONE
+          var _argName = String(opts.sourceName || "").trim();
+          var _parts = [];
+          var _resolvedText = firePassiveTriggerEffects(dealerChar, "공격해결후", {
+            targetAlias: label, finalValue: damage, triggerArg: _argName, resistanceMode: RESIST_NONE
           });
-          if (dealtText) dealtBlock = "\n\n[가해후 패시브: " + attackerAlias + "]\n" + dealtText;
+          if (_resolvedText) _parts.push(_resolvedText);
+          if (damage > 0) {
+            var dealtText = firePassiveTriggerEffects(dealerChar, "가해후", {
+              targetAlias: label, finalValue: damage, triggerArg: _argName, resistanceMode: RESIST_NONE
+            });
+            if (dealtText) _parts.push(dealtText);
+          }
+          if (_parts.length) dealtBlock = "\n\n[공격 후 패시브: " + attackerAlias + "]\n" + _parts.join("\n\n");
         }
       } catch (_e) { /* 무시 */ }
       finally { _DEALT_TRIGGER_ACTIVE = false; }

@@ -60,7 +60,7 @@ const PASSIVE_OWNER_TYPES = [
 const PASSIVE_TRIGGERS = [
   '항상', '판정계산전', '판정시작', '판정후',
   '액션사용후', '스킬사용후',
-  '피해직전', '피해후', '가해후', '회복시', '세션종료', '수동'
+  '피해직전', '피해후', '가해후', '공격해결후', '회복시', '세션종료', '수동'
 ];
 const PASSIVE_CHECK_TYPES = ['전체', '스탯', '액션', '이능', '스킬', '대응', '저항'];
 
@@ -275,7 +275,7 @@ function PassiveForm({ editingPassive, onSavePassive, onUpdatePassive, onCancelE
   const colors  = COLOR_MAP[catInfo.color] || COLOR_MAP.slate;
 
   // 발동 트리거의 "base:인자" 분해 (특정 액션/스킬/공격명 필터)
-  const TRIGGER_ARG_BASES = ['판정후', '액션사용후', '스킬사용후', '가해후'];
+  const TRIGGER_ARG_BASES = ['판정후', '액션사용후', '스킬사용후', '가해후', '공격해결후'];
   const _trigCi  = row.발동.indexOf(':');
   const trigBase = _trigCi >= 0 ? row.발동.slice(0, _trigCi) : row.발동;
   const trigArg  = _trigCi >= 0 ? row.발동.slice(_trigCi + 1) : '';
