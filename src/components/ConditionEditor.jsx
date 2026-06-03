@@ -21,6 +21,8 @@ const REQUIRED_BLOCKS = [
   { label: '내 상태 수치 비교',      template: '상태_출혈_수치 >= 5' },
   { label: '대상 상태 수치 비교',    template: '대상상태_표식_수치 > 0' },
   { label: '내 스택 수치 비교',      template: '스택_혈인 >= 3' },
+  { label: '사용액션=지정 일치',     template: '사용액션 == 상태접미_지정' },
+  { label: '사용액션=지정 불일치',   template: '사용액션 != 상태접미_지정' },
   { label: '자유 텍스트(수동확인)', template: '예: 대상이 어둠 속에 있을 때' },
 ];
 
@@ -58,6 +60,13 @@ const HELP_TEXT = `조건 문법
 
 비교 연산자: >= <= > < == !=
 대상 변수에는 "대상" 접두어 사용.
+
+문자열 변수 (액션사용후/스킬사용후 트리거에서):
+  사용액션        ← 방금 사용한 액션·스킬명
+  상태접미_지정   ← 현재 "지정_OO" 상태의 OO 부분
+  예) 사용액션 == 상태접미_지정   (지정된 액션을 썼는지)
+  우변에 액션명을 직접 써도 됨: 사용액션 == 참격
+
 인식되지 않는 줄은 수동 확인 항목으로 표시됩니다.`;
 
 export default function ConditionEditor({ value, onChange, placeholder, helpInline = false }) {

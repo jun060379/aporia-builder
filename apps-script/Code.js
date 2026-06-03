@@ -5699,6 +5699,14 @@ function injectStatusVariables(vars, alias, prefix) {
 
     if (!grouped[name]) grouped[name] = [];
     grouped[name].push(r);
+
+    // "접두어_접미" 형태 상태명이면 접미 부분을 문자열 변수로 노출.
+    //   예: 활성 상태 "지정_참격" → 상태접미_지정 = "참격"
+    //   조건에서 사용액션 == 상태접미_지정 같은 비교에 사용.
+    const us = name.indexOf("_");
+    if (us > 0 && us < name.length - 1) {
+      vars[p + "상태접미_" + name.slice(0, us)] = name.slice(us + 1);
+    }
   });
 
   Object.keys(grouped).forEach(name => {
@@ -7079,6 +7087,59 @@ function processSkillEffects(effectText, context) {
         resistanceMode
       ));
 
+      return;
+    }
+
+    // 랜덤상태부여 <대상> <접두어> <항목1,항목2,...> [옵션...]
+    //  목록 중 하나를 무작위 선택해 "<접두어>_<선택>" 상태를 부여하고,
+    //  같은 접두어의 다른 상태는 제거(항상 1개만 활성). 조건에서 상태접미_<접두어>로 참조.
+    //  옵션: 수치(주면 강화 버프로 부여, 대상판정=선택 액션), 발동, 판정, 횟수, 최대, 문구, 메모.
+    if (command === "랜덤상태부여") {
+      if (tokens.length < 4) {
+        throw new Error("랜덤상태부여 효과 형식 오류: " + line);
+      }
+
+      const targetAlias = resolveEffectTarget(tokens[1], context);
+      const prefix = tokens[2];
+      const opts = parseEffectOptions(tokens.slice(4));
+      const items = String(tokens[3] || "").split(/[,，、]/).map(function (s) { return s.trim(); }).filter(Boolean);
+
+      if (!targetAlias) {
+        logs.push("[효과 무효]\n효과: 랜덤상태부여 " + prefix + "\n이유: 대상이 지정되지 않았습니다.");
+        return;
+      }
+      if (!items.length) {
+        logs.push("[효과 무효]\n효과: 랜덤상태부여 " + prefix + "\n이유: 선택 목록이 비어 있습니다.");
+        return;
+      }
+
+      // 같은 접두어의 기존 상태 모두 제거 (항상 1개만 활성 보장)
+      items.forEach(function (it) {
+        try { removeStatusFromCharacter(targetAlias, prefix + "_" + it); } catch (_e) {}
+      });
+
+      const pick = items[Math.floor(Math.random() * items.length)];
+      const hasVal = opts["수치"] !== undefined && String(opts["수치"]).trim() !== "";
+
+      logs.push(addStatusToCharacter(
+        targetAlias,
+        prefix + "_" + pick,
+        opts["분류"] || (hasVal ? "강화" : "지정"),
+        opts["효과코드"] || (hasVal ? "buff" : "표식"),
+        {
+          value: _evalEffectValue(opts["수치"], context),
+          chance: 100,
+          trigger: opts["발동"] || "판정시작",
+          checkType: opts["판정"] || pick,   // 기본: 지정된 항목(액션)에만 적용
+          count: _evalOptNum(opts["횟수"], context),
+          stackMode: opts["중복"] || "덮어쓰기",
+          maxValue: _evalOptNum(_pickMaxOption(opts), context),
+          source: context.skillName || "랜덤지정",
+          memo: opts["메모"] || ""
+        }
+      ));
+
+      logs.push("[랜덤 지정] " + (opts["문구"] || ("이번 턴 지정: " + pick)));
       return;
     }
 
@@ -8611,7 +8672,10 @@ function evaluateRecognizedCondition(rawCond, ctx) {
     }
     // 변수가 vars에 없으면 0으로 간주 (상태_X_존재처럼 자동 fallback).
     var lhs = (varName in vars) ? vars[varName] : 0;
-    return { recognized: true, ok: _compareNumeric(lhs, cmp.op, cmp.value), message: cond };
+    // 우변도 변수명이면 치환 (예: 사용액션 == 상태접미_지정). 변수가 아니면 리터럴.
+    // 문자열 비교는 _compareNumeric이 NaN일 때 String 비교로 자동 처리.
+    var rhs = (cmp.value in vars) ? vars[cmp.value] : cmp.value;
+    return { recognized: true, ok: _compareNumeric(lhs, cmp.op, rhs), message: cond };
   }
 
   return { recognized: false, ok: true, message: cond };
@@ -8833,6 +8897,8 @@ function firePassiveTriggerEffects(character, trigger, ctxOpts) {
   var triggerArg = ctxOpts.triggerArg || "";
   var passives = getCandidatePassivesForCharacter(character);
   var ctx = buildConditionContext(character, targetAlias);
+  // 조건에서 방금 사용한 액션/스킬명을 참조할 수 있게 노출 (예: 사용액션 == 상태접미_지정)
+  ctx.vars["사용액션"] = String(triggerArg || "");
   var alias = String(character["별명"] || "").trim();
   var logs = [];
 

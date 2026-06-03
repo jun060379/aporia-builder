@@ -33,6 +33,7 @@ const COND_PRESETS = [
   '이면침식 <= 3', '이면침식 >= 6',
   '현재체력비율 <= 50', '현재체력비율 >= 80',
   '상태:집중', '스택_혈인 >= 3', '레벨 >= 6',
+  '사용액션 == 상태접미_지정', '사용액션 != 상태접미_지정',
 ];
 
 const EFFECT_SET_PRESETS = [
@@ -42,6 +43,7 @@ const EFFECT_SET_PRESETS = [
   { label: '피해감소',     tpl: '피해감소 = ' },
   { label: '회복보정',     tpl: '회복보정 = ' },
   { label: '판정보정',     tpl: '판정보정 = ' },
+  { label: '랜덤지정',     tpl: '랜덤상태부여 자신 지정 참격,관통,타격,사격,격투' },
 ];
 
 export default function EffectRowsEditor({ value, onChange }) {
@@ -152,6 +154,8 @@ export default function EffectRowsEditor({ value, onChange }) {
         <p>조건 연산자: <code>&lt;= &gt;= &lt; &gt; == !=</code> · 설정 효과: <code>변수 = 값</code> (또는 <code>==</code>)</p>
         <p>설정 가능 변수: 이면침식 · 현재체력 · 일상점 · 피해감소 · 회복보정 · 판정보정</p>
         <p>기존 효과(<code>상태부여</code>·<code>스택증가</code> 등)도 그대로 입력 가능. 조건을 비우면 항상 실행됩니다.</p>
+        <p className="mt-1"><code>랜덤상태부여 자신 지정 참격,관통,타격,사격,격투</code> — 목록 중 무작위 1개로 <code>지정_OO</code> 상태 부여(나머지 제거). 수치 옵션 주면 해당 액션 판정 버프도 함께.</p>
+        <p>조건에서 <code>사용액션</code>(방금 쓴 액션·스킬명) · <code>상태접미_지정</code>(현재 지정된 항목)을 비교 가능. 예: <code>사용액션 == 상태접미_지정</code></p>
       </div>
 
       {modalRow !== null && (
