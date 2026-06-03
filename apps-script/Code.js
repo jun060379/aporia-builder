@@ -1830,6 +1830,9 @@ function applyDamageToCharacter(alias, damageAmount, opts) {
     modifierText: preDamage.text,
     text: mainText,
     detailText: detailText,
+    // 공격 후 패시브(랜덤지정 메시지 등) — 요약에도 노출하기 위해 분리 제공.
+    dealtText: passiveDealtText,
+    attackerAlias: attackerAlias,
   };
 }
 
@@ -7677,22 +7680,26 @@ function compactDamageText(damageResult) {
     return "";
   }
 
+  var base = "";
   if (damageResult.before !== undefined && damageResult.after !== undefined) {
-    return (
+    base =
       "체력: " +
       damageResult.before +
       " → " +
       damageResult.after +
       " / " +
-      damageResult.maxHp
-    );
+      damageResult.maxHp;
+  } else if (damageResult.text) {
+    base = String(damageResult.text).split("\n")[0];
   }
 
-  if (damageResult.text) {
-    return String(damageResult.text).split("\n")[0];
+  // 공격 후 패시브(랜덤지정 메시지·스택 변경 등)를 요약(상세 밖)에도 노출 →
+  // 상세를 펼치지 못하는 공격자도 채널에서 바로 확인 가능.
+  if (damageResult.dealtText) {
+    base += "\n\n[공격 후 패시브: " + (damageResult.attackerAlias || "") + "]\n" + damageResult.dealtText;
   }
 
-  return "";
+  return base;
 }
 
 function compactEffectText(effectText, fallbackText) {
