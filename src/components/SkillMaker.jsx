@@ -27,6 +27,9 @@ const EFFECT_TYPE_LABEL = {
   custom:       '커스텀 상태 부여',
   statusRemove: '상태 해제',
   stack:        '스택 변경',
+  random:       '랜덤 지정',
+  damage:       '피해',
+  heal:         '회복',
   free:         '자유 입력',
 };
 

@@ -6,6 +6,7 @@ const EFFECT_TYPES = [
   { id: 'custom',       label: '커스텀 상태 부여' },
   { id: 'statusRemove', label: '상태 해제' },
   { id: 'stack',        label: '스택 변경' },
+  { id: 'random',       label: '랜덤 지정' },
   { id: 'damage',       label: '피해' },
   { id: 'heal',         label: '회복' },
   { id: 'free',         label: '자유 입력' },
@@ -16,6 +17,7 @@ const DESCRIPTIONS = {
   custom:       '직접 정의 상태를 부여합니다. 운영진 검수가 필요합니다.',
   statusRemove: '자신 또는 대상에게 걸린 특정 상태를 해제합니다.',
   stack:        '자신 또는 대상의 스택을 증가, 감소, 설정합니다.',
+  random:       '목록 중 무작위 1개를 골라 "접두어_선택" 상태를 부여합니다. 같은 접두어의 다른 상태는 제거됩니다. (매 턴 액션 지정 등)',
   damage:       '자신 또는 대상에게 피해를 입힙니다. (패시브·보호막 처리 포함)',
   heal:         '자신 또는 대상의 체력을 회복시킵니다.',
   free:         '자동 블럭으로 만들 수 없는 효과를 직접 입력합니다. 운영진 수동 검수 대상입니다.',
@@ -103,6 +105,16 @@ function buildText(type, params) {
     if (params.changeType === '감소') return `스택감소 ${tgt} ${params.stackName} -${params.value}`;
     let t = `스택설정 ${tgt} ${params.stackName} =${params.value}`;
     if (params.max) t += ` 최대:${params.max}`;
+    return t;
+  }
+  if (type === 'random') {
+    const prefix = (params.prefix || '지정').trim();
+    const list = (params.list || '').split(/[,，、]/).map(s => s.trim()).filter(Boolean);
+    if (!list.length) return '';
+    let t = `랜덤상태부여 ${params.target || '자신'} ${prefix} ${list.join(',')}`;
+    if (params.value)   t += ` 수치:${params.value}`;
+    if (params.judgment)t += ` 판정:${params.judgment}`;
+    if (params.message) t += ` 문구:${params.message}`;
     return t;
   }
   if (type === 'damage') {
@@ -359,6 +371,46 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
                 )}
               </div>
               <NumTokenBar onInsert={t => setParam('value', (params.value || '') + t)} />
+            </div>
+          )}
+
+          {/* ── random ── */}
+          {type === 'random' && (
+            <div className="space-y-3">
+              <TargetToggle value={params.target || '자신'} onChange={v => setParam('target', v)} />
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">접두어 (상태명 앞부분)</span>
+                  <input className={inputCls} value={params.prefix || ''} onChange={e => setParam('prefix', e.target.value)} placeholder="지정" />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">판정 (수치 줄 때 적용 대상)</span>
+                  <input className={`${inputCls} font-mono`} value={params.judgment || ''} onChange={e => setParam('judgment', e.target.value)} placeholder="비우면 선택 항목" />
+                </label>
+              </div>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-500">후보 목록 (콤마 구분)</span>
+                <input className={`${inputCls} font-mono`} value={params.list || ''} onChange={e => setParam('list', e.target.value)} placeholder="참격,관통,타격,사격,격투" />
+                <div className="flex flex-wrap gap-1">
+                  {['참격,관통,타격,사격,격투'].map(p => (
+                    <button key={p} type="button" onClick={() => setParam('list', p)}
+                      className="text-[10px] px-1.5 py-0.5 bg-slate-100 hover:bg-violet-100 text-slate-500 hover:text-violet-700 border border-slate-200 rounded font-mono transition-colors">{p}</button>
+                  ))}
+                </div>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">수치 (선택, 지정 액션 버프)</span>
+                  <input className={`${inputCls} font-mono`} value={params.value || ''} onChange={e => setParam('value', e.target.value)} placeholder="없으면 표식만" />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">안내 문구 (선택)</span>
+                  <input className={inputCls} value={params.message || ''} onChange={e => setParam('message', e.target.value)} placeholder="이번 턴 지정: …" />
+                </label>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-snug">
+                조건에서 <code className="bg-slate-100 px-1 rounded">사용액션 == 상태접미_{(params.prefix || '지정')}</code> 으로 일치 판정.
+              </p>
             </div>
           )}
 
