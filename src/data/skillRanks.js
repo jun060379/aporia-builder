@@ -40,6 +40,7 @@ export function defaultSkill() {
     formula: '',
     효과: '',           // 줄=효과(한 줄 = "조건 => 효과") 문자열. 신규 표준.
     effects: [],        // 레거시(블럭카드) — 로드 시 효과 문자열로 마이그레이션.
+    meta: null,         // 빌더 전용: 쉬운 모드(아키타입) 선택값. 직렬화엔 안 나감.
     condition: '',
     cost: '',
     description: '',

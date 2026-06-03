@@ -14,6 +14,8 @@ import FormulaBlockModal from './FormulaBlockModal';
 import ConditionEditor from './ConditionEditor.jsx';
 import EffectRowsEditor from './EffectRowsEditor.jsx';
 import CostEditor from './CostEditor.jsx';
+import { SKILL_ARCHETYPES, getArchetype, generateFromArchetype, buildActionPresetFormula } from '../data/skillArchetypes';
+import { buildSkillSummary } from '../utils/skillSummary';
 
 // ── 스타일 상수 ─────────────────────────────────────────────────────────
 const inputCls  = "w-full min-w-0 bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
@@ -28,34 +30,6 @@ const OPERATORS = [
   { op: '(',  label: '(',  tip: '묶음 시작' },
   { op: ')',  label: ')',  tip: '묶음 끝' },
 ];
-
-// 랭크별 기초부 계수 [주스탯계수, 부스탯계수]. (F는 미지정 → E 기준 사용)
-const PRESET_RANK_COEF = {
-  F:  [1,   0.5 ],
-  E:  [1,   0.5 ],
-  D:  [1.3, 0.65],
-  C:  [1.6, 0.8 ],
-  B:  [1.9, 0.95],
-  A:  [2.2, 1.1 ],
-  S:  [2.5, 1.25],
-  U:  [2.9, 1.4 ],
-  EX: [3.2, 1.55],
-};
-
-// 액션의 스탯/기능/숙련 구조 + 선택한 랭크의 기초부 계수로
-// "1d20 + 랭크 + ( 기초부 ) * ( 배율부 )" 형태의 계산식을 생성한다.
-//   기초부 = 주스탯*주계수 + 부스탯*부계수   (랭크별 계수)
-//   배율부 = 주기능*0.12 + 부기능*0.08 + 관련기능*0.05 + 관련숙련*0.25
-function buildActionPresetFormula(action, rank) {
-  const [c1, c2] = PRESET_RANK_COEF[rank] || PRESET_RANK_COEF.E;
-  const b = action.base || [];
-  const baseParts = [];
-  if (b[0]) baseParts.push(`${b[0].stat} * ${c1}`);
-  if (b[1]) baseParts.push(`${b[1].stat} * ${c2}`);
-  const basePart = baseParts.join(' + ');
-  const multPart = (action.mult || []).map(m => `${m.key} * ${m.coef}`).join(' + ');
-  return `1d20 + 랭크 + ( ${basePart} ) * ( ${multPart} )`;
-}
 
 // 액션 기반이 아닌 특수 템플릿 (스택/대상상태 참조)
 const SPECIAL_COMBOS = [
@@ -615,18 +589,59 @@ function PassiveForm({ editingPassive, onSavePassive, onUpdatePassive, onCancelE
   );
 }
 // ── SkillForm — 기존 스킬 작성 폼 ──────────────────────────────────────
+// 쉬운 모드 아키타입 필드 입력 렌더러.
+function ArchField({ field: f, meta, onChange }) {
+  if (f.when && !f.when(meta || {})) return null;
+  const val = (meta || {})[f.key] ?? '';
+  if (f.type === 'bool') {
+    return (
+      <label className="flex items-center gap-2 text-[11px] text-slate-600">
+        <input type="checkbox" checked={!!val} onChange={e => onChange(f.key, e.target.checked)} />
+        {f.label}
+      </label>
+    );
+  }
+  if (f.type === 'select') {
+    const labelFor = (o) => f.optionLabels ? (f.optionLabels.find(x => x.value === o)?.label || o) : o;
+    return (
+      <label className="flex flex-col gap-1">
+        <span className="text-[11px] text-slate-500">{f.label}</span>
+        <select className={selectCls} value={val} onChange={e => onChange(f.key, e.target.value)}>
+          {f.options.map(o => <option key={o} value={o}>{labelFor(o)}</option>)}
+        </select>
+      </label>
+    );
+  }
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-[11px] text-slate-500">{f.label}</span>
+      <input className={`${inputCls} font-mono`} value={val} onChange={e => onChange(f.key, e.target.value)} placeholder="" />
+    </label>
+  );
+}
+
 function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCancel }) {
   // 효과는 줄=효과 문자열(skill.효과). 레거시 effects[]가 있으면 로드 시 변환.
   const initSkill = (src) => {
     const s = src || defaultSkill();
-    return { ...s, 효과: s.효과 || effectsToText(s.effects) };
+    return { ...s, 효과: s.효과 || effectsToText(s.effects), meta: s.meta || null };
+  };
+  // 모드: meta(아키타입)이 있으면 쉬운, 없으면(레거시·자유) 고급. 새 스킬은 쉬운.
+  const initMode = (src) => {
+    if (!src) return 'easy';
+    const a = getArchetype(src.meta?.archetype);
+    return (a && !a.freeform) ? 'easy' : 'advanced';
   };
   const [skill, setSkill] = useState(() => initSkill(editingSkill));
+  const [mode, setMode] = useState(() => initMode(editingSkill));
   const [formulaModalOpen, setFormulaModalOpen] = useState(false);
   const [formulaCat, setFormulaCat] = useState('기본');
+  const [showTokens, setShowTokens] = useState(false); // 고급: 토큰/연산자 펼치기
 
   useEffect(() => {
     setSkill(initSkill(editingSkill));
+    setMode(initMode(editingSkill));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingSkill]);
 
   const field = (key) => (e) => setSkill(s => ({ ...s, [key]: e.target.value }));
@@ -644,10 +659,40 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
     setSkill(s => ({ ...s, formula: s.formula + ` ${op} ` }));
   };
 
+  // 아키타입 선택 → meta 초기화 + formula/효과 자동 생성. (freeform이면 고급 모드로)
+  const applyArchetype = (archId) => {
+    const arch = getArchetype(archId);
+    if (!arch || arch.freeform) { setSkill(s => ({ ...s, meta: null })); setMode('advanced'); return; }
+    setSkill(s => {
+      const meta = { archetype: archId, ...(arch.defaults || {}) };
+      const gen = generateFromArchetype(meta, s.rank);
+      return { ...s, meta, ...(gen ? { formula: gen.formula, 효과: gen.효과 } : {}) };
+    });
+  };
+  // 쉬운 모드 필드/랭크 변경 → meta 갱신 + 재생성.
+  const setMetaField = (key, val) => setSkill(s => {
+    const meta = { ...(s.meta || {}), [key]: val };
+    const gen = generateFromArchetype(meta, s.rank);
+    return { ...s, meta, ...(gen ? { formula: gen.formula, 효과: gen.효과 } : {}) };
+  });
+  const setRank = (rank) => setSkill(s => {
+    const gen = (mode === 'easy' && s.meta) ? generateFromArchetype(s.meta, rank) : null;
+    return { ...s, rank, ...(gen ? { formula: gen.formula, 효과: gen.효과 } : {}) };
+  });
+
   const tokenErrors    = validateFormula(skill.formula);
   const structureWarns = validateFormulaStructure(skill.formula);
   const needsTarget    = hasTargetReference(skill.formula);
   const allFormulaIssues = [...tokenErrors, ...structureWarns];
+
+  const summary = buildSkillSummary(skill, { stats, abilities, proficiencies });
+  const currentArch = getArchetype(skill.meta?.archetype);
+
+  // 저장: 레거시 effects 제거. 고급 모드에서 저장하면 meta 비움(수동 편집 확정).
+  const handleSave = () => {
+    const { effects, ...rest } = skill;
+    onSave(mode === 'advanced' ? { ...rest, meta: null } : rest);
+  };
 
   return (
     <div className="space-y-4">
@@ -657,6 +702,25 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
         <span className="text-[11px] text-slate-500 tracking-wide">스킬 이름</span>
         <input className={inputCls} value={skill.name} onChange={field('name')} placeholder="스킬 이름" />
       </label>
+
+      {/* ── 평문 요약 카드 ── */}
+      <div className="rounded-xl border border-violet-100 bg-violet-50/50 p-3">
+        <p className="text-[10px] font-semibold text-violet-500 uppercase tracking-widest mb-1">요약</p>
+        <p className="text-sm text-slate-800 leading-relaxed">{summary}</p>
+      </div>
+
+      {/* ── 모드 토글 ── */}
+      <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
+        {[{ id: 'easy', label: '쉬운 (아키타입)' }, { id: 'advanced', label: '고급 (직접 편집)' }].map(m => (
+          <button
+            key={m.id}
+            onClick={() => setMode(m.id)}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              mode === m.id ? 'bg-white text-violet-700 shadow-sm border border-slate-200/60' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >{m.label}</button>
+        ))}
+      </div>
 
       {/* 계통 / 계열 */}
       <div className="grid grid-cols-2 gap-2">
@@ -681,7 +745,7 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
           {SKILL_RANKS.map(({ rank, value }) => (
             <button
               key={rank}
-              onClick={() => setSkill(s => ({ ...s, rank }))}
+              onClick={() => setRank(rank)}
               className={`px-2 py-0.5 rounded-lg text-xs font-bold border transition-all ${
                 skill.rank === rank
                   ? 'bg-amber-400 text-white border-amber-400 shadow-sm shadow-amber-200/50'
@@ -694,7 +758,50 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
         </div>
       </div>
 
-      {/* ── 계산식 ── */}
+      {/* ── 쉬운 모드: 아키타입 위저드 ── */}
+      {mode === 'easy' && (
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <span className="text-[11px] font-semibold text-slate-600">어떤 스킬인가요?</span>
+            <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+              {SKILL_ARCHETYPES.map(a => {
+                const active = (skill.meta?.archetype || '') === a.id;
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => applyArchetype(a.id)}
+                    title={a.desc}
+                    className={`flex flex-col items-center gap-0.5 p-2 rounded-xl border transition-all ${
+                      active ? 'border-violet-400 bg-violet-100 ring-2 ring-violet-300' : 'border-slate-200 bg-slate-50 hover:border-violet-300'
+                    }`}
+                  >
+                    <span className="text-base leading-none">{a.icon}</span>
+                    <span className="text-[11px] font-semibold text-slate-700">{a.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {currentArch && <p className="text-[10px] text-slate-400 leading-snug">{currentArch.desc}</p>}
+          </div>
+
+          {currentArch && !currentArch.freeform && (
+            <div className="space-y-3 bg-slate-50 rounded-xl border border-slate-200 p-4">
+              <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">세부 설정</span>
+              <div className="grid grid-cols-2 gap-2">
+                {currentArch.fields.map(f => (
+                  <ArchField key={f.key} field={f} meta={skill.meta} onChange={setMetaField} />
+                ))}
+              </div>
+              <FormulaPreview formula={skill.formula} stats={stats} rank={skill.rank} abilities={abilities} proficiencies={proficiencies} />
+              <p className="text-[10px] text-slate-400 italic">계산식·효과는 자동 생성된 기본값입니다. 세밀하게 고치려면 위 <strong>고급</strong> 모드로 전환하세요.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 고급 모드: 계산식 직접 편집 ── */}
+      {mode === 'advanced' && (
       <div className="space-y-3 bg-slate-50 rounded-xl border border-slate-200 p-4">
         <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">계산식</span>
 
@@ -714,6 +821,17 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
           <p className="text-xs text-amber-600">⚠ 이 계산식은 대상 지정이 필요합니다. 사용 예: !스킬 스킬명 대상:대상별명</p>
         )}
 
+        <FormulaPreview formula={skill.formula} stats={stats} rank={skill.rank} abilities={abilities} proficiencies={proficiencies} />
+
+        <button
+          type="button"
+          onClick={() => setShowTokens(v => !v)}
+          className="text-[11px] px-2.5 py-1 bg-white border border-slate-200 text-slate-500 hover:text-violet-700 hover:border-violet-300 rounded-lg transition-colors"
+        >
+          {showTokens ? '입력 도구 접기 ▲' : '입력 도구 펼치기 (토큰·연산자·액션식) ▼'}
+        </button>
+
+        {showTokens && (<>
         <div className="space-y-2">
           <p className="text-[10px] text-slate-400 tracking-widest uppercase">빠른 삽입</p>
           <div className="flex flex-wrap gap-1">
@@ -799,18 +917,20 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
           </div>
           <p className="text-[10px] text-slate-400 italic">누르면 현재 계산식이 교체됩니다. 액션 기반 식은 현재 선택한 <strong>랭크</strong> 기준 계수가 반영됩니다.</p>
         </div>
-
-        <FormulaPreview formula={skill.formula} stats={stats} rank={skill.rank} abilities={abilities} proficiencies={proficiencies} />
+        </>)}
       </div>
+      )}
 
-      {/* ── 효과 (줄=효과) ── */}
-      <div className="space-y-1">
-        <span className="text-[11px] text-slate-500 tracking-wide">효과</span>
-        <EffectRowsEditor
-          value={skill.효과}
-          onChange={(v) => setSkill((s) => ({ ...s, 효과: v }))}
-        />
-      </div>
+      {/* ── 효과 (줄=효과) — 고급 모드에서 직접 편집 ── */}
+      {mode === 'advanced' && (
+        <div className="space-y-1">
+          <span className="text-[11px] text-slate-500 tracking-wide">효과</span>
+          <EffectRowsEditor
+            value={skill.효과}
+            onChange={(v) => setSkill((s) => ({ ...s, 효과: v }))}
+          />
+        </div>
+      )}
 
       {/* 조건 */}
       <div className="space-y-1">
@@ -839,7 +959,7 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
       {/* 저장 */}
       <div className="flex gap-2 pt-1">
         <button
-          onClick={() => { const { effects, ...rest } = skill; onSave(rest); }}
+          onClick={handleSave}
           className="flex-1 py-2 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl text-sm transition-colors shadow-sm shadow-violet-200"
         >
           {editingSkill ? '스킬 수정' : '스킬 추가'}

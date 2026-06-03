@@ -94,11 +94,22 @@ export default function EffectRowsEditor({ value, onChange }) {
     commit(next.length ? next : [{ cond: '', eff: '' }]);
   };
 
+  // 블럭 모달이 만든 텍스트("조건 => 효과" 또는 효과만)를 행으로 분해.
+  const splitBlockText = (text) => {
+    const m = String(text || '').match(/^([\s\S]*?)\s*(?:=>|⇒|→|->)\s*([\s\S]*)$/);
+    return m ? { cond: m[1].trim(), eff: m[2].trim() } : { cond: '', eff: String(text || '').trim() };
+  };
+
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[11px] font-semibold text-slate-600">세부조건 → 세부효과</span>
         <span className="text-[10px] text-slate-400">한 줄당 조건 1개 + 효과 1개</span>
+        <button
+          type="button"
+          onClick={() => setModalRow('new')}
+          className="ml-auto text-[10px] bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-2 py-1 transition-colors shadow-sm shadow-indigo-200"
+        >＋ 블럭으로 효과 추가</button>
       </div>
 
       <div className="space-y-2">
@@ -206,7 +217,14 @@ export default function EffectRowsEditor({ value, onChange }) {
           initialType="template"
           initialParams={{}}
           onInsert={(type, params, text) => {
-            patchRow(modalRow, { eff: text });
+            if (modalRow === 'new') {
+              // 빈 첫 행이면 채우고, 아니면 새 행 추가.
+              const parsed = splitBlockText(text);
+              const onlyEmpty = rows.length === 1 && !rows[0].cond && !rows[0].eff;
+              commit(onlyEmpty ? [parsed] : [...rows, parsed]);
+            } else {
+              patchRow(modalRow, { eff: text });
+            }
             setModalRow(null);
           }}
           onClose={() => setModalRow(null)}
