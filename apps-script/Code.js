@@ -3361,6 +3361,9 @@ function _computeSkillRollCore(character, skillRow, rank, mods, targetAlias) {
   let finalValue = applyMods(result, mods);
   const statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type, KIND_RESPONSE], targetAlias || "");
   finalValue = statusMod.value;
+  // 장비 계열 보정: 스킬의 계열(type)에 맞는 계열보정 장비를 합산.
+  const equipMod = getEquipmentModifier(alias, [KIND_SKILL, type]);
+  finalValue += equipMod.delta;
 
   // 이면침식 배율은 모든 보정 완료 후 마지막에 적용
   const beforeErosionMultiplier = finalValue;
@@ -3372,7 +3375,7 @@ function _computeSkillRollCore(character, skillRow, rank, mods, targetAlias) {
     expression: calc.expression,
     baseValue: Math.floor(calc.value),
     beforeErosionMultiplier, erosion, erosionMultiplier,
-    typeBonusText, mods, statusMod, finalValue
+    typeBonusText, mods, statusMod, equipMod, finalValue
   };
 }
 
@@ -3554,6 +3557,7 @@ function skillUse(parts, displayName) {
 
   let finalValue;
   let statusMod;
+  let equipMod = { delta: 0, text: "" };
 
   try {
     finalValue = applyMods(result, mods);
@@ -3562,6 +3566,9 @@ function skillUse(parts, displayName) {
     // 세부 조건 보정 적용 (곱셈 → 덧셈 순)
     if (condDetailMult !== 1) finalValue = Math.floor(finalValue * condDetailMult);
     if (condDetailBonus !== 0) finalValue += condDetailBonus;
+    // 장비 계열 보정: 스킬 계열(type)에 맞는 계열보정 장비 합산.
+    equipMod = getEquipmentModifier(alias, [KIND_SKILL, type]);
+    finalValue += equipMod.delta;
     // 이면침식 배율은 모든 보정 완료 후 마지막에 적용
   } catch (e) {
     return (
@@ -3614,7 +3621,7 @@ function skillUse(parts, displayName) {
   } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
 
   const diceText = formatDiceLogs(calc.diceLogs);
-  const statusModDetail = _formatJudgeModDetail(statusMod, null);
+  const statusModDetail = _formatJudgeModDetail(statusMod, equipMod);
   const condModLines =
     (condDetailMult !== 1 ? "세부조건 배율: ×" + condDetailMult + "\n" : "") +
     (condDetailBonus !== 0 ? "세부조건 보정: " + formatSigned(condDetailBonus) + "\n" : "");
@@ -11600,12 +11607,16 @@ function commonSkillUseCommand(parts, displayName) {
 
   let finalValue;
   let statusMod;
+  let equipMod = { delta: 0, text: "" };
   try {
     finalValue = applyMods(result, mods);
     statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type], effectiveTarget || "");
     finalValue = statusMod.value;
     if (condDetailMult !== 1) finalValue = Math.floor(finalValue * condDetailMult);
     if (condDetailBonus !== 0) finalValue += condDetailBonus;
+    // 장비 계열 보정: 공용 스킬 계열(type)에 맞는 계열보정 장비 합산.
+    equipMod = getEquipmentModifier(alias, [KIND_SKILL, type]);
+    finalValue += equipMod.delta;
     // 이면침식 배율은 모든 보정 완료 후 마지막에 적용
   } catch (e) {
     return (
@@ -11662,7 +11673,7 @@ function commonSkillUseCommand(parts, displayName) {
   } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
 
   const diceText = formatDiceLogs(calc.diceLogs);
-  const statusModDetail = _formatJudgeModDetail(statusMod, null);
+  const statusModDetail = _formatJudgeModDetail(statusMod, equipMod);
   const condModLines =
     (condDetailMult !== 1 ? "세부조건 배율: ×" + condDetailMult + "\n" : "") +
     (condDetailBonus !== 0 ? "세부조건 보정: " + formatSigned(condDetailBonus) + "\n" : "");
