@@ -5335,6 +5335,33 @@ function rollResponseValue(character, defaultActionName, tokens, targetAlias) {
   };
 }
 
+// 공격자 쪽 공격해결후(+가해후) 트리거 발동 후 로그 텍스트 반환(래퍼 없음).
+// 피해 0(회피/방어 성공)이어도 공격해결후는 발동해야 하므로, applyDamage를 타지
+// 않는 경로(방어/회피 성공 등)에서 직접 호출한다. 공격자가 PC가 아니면 "".
+function _fireAttackerResolvedText(attackerAlias, argName, damage, targetAlias) {
+  attackerAlias = String(attackerAlias || "").trim();
+  if (!attackerAlias || _DEALT_TRIGGER_ACTIVE) return "";
+  var dealer = findCharacterByAlias(attackerAlias);
+  if (!dealer) return "";
+  _DEALT_TRIGGER_ACTIVE = true;
+  try {
+    var dmg = Math.max(0, Number(damage) || 0);
+    var argN = String(argName || "").trim();
+    var parts = [];
+    var resolved = firePassiveTriggerEffects(dealer, "공격해결후", {
+      targetAlias: targetAlias || "", finalValue: dmg, triggerArg: argN, resistanceMode: RESIST_NONE
+    });
+    if (resolved) parts.push(resolved);
+    if (dmg > 0) {
+      var dealt = firePassiveTriggerEffects(dealer, "가해후", {
+        targetAlias: targetAlias || "", finalValue: dmg, triggerArg: argN, resistanceMode: RESIST_NONE
+      });
+      if (dealt) parts.push(dealt);
+    }
+    return parts.join("\n\n");
+  } finally { _DEALT_TRIGGER_ACTIVE = false; }
+}
+
 // ── TASK-08: 무대응 / 상태이상 차단 ────────────────────────────────────
 function _resolveCombatNoResponse(attack, attackValue, attackerAlias, targetAlias) {
   // 효과 먼저 실행(피해 보정 누적) → 기본 피해 + 보정을 한 번에 적용
@@ -5419,7 +5446,11 @@ function _resolveCombatDefend(attack, character, rest, selfAlias, attackValue, a
   let damage, damageResult, attackEffectText, foldNote = "";
   if (defenseSuccess) {
     damage = 0;
-    damageResult = { text: "피해 없음." };
+    // 피해 0이어도 공격자 공격해결후 발동(스택 감소 등). applyDamage는 안 탐.
+    // dealtText로 넘기면 compactDamageText가 요약에 노출.
+    damageResult = { text: "피해 없음.",
+                     dealtText: _fireAttackerResolvedText(attackerAlias, String(attack["공격명"] || ""), 0, targetAlias),
+                     attackerAlias: attackerAlias };
     attackEffectText = getSkillFromPendingAttack(attack)
       ? "\n\n[스킬 효과 무효]\n방어에 성공하여 공격 스킬의 효과가 발동하지 않습니다." : "";
   } else {
@@ -5486,7 +5517,9 @@ function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, at
   let damage, damageResult, attackEffectText, foldNote = "";
   if (success) {
     damage = 0;
-    damageResult = { text: "피해 없음." };
+    damageResult = { text: "피해 없음.",
+                     dealtText: _fireAttackerResolvedText(attackerAlias, String(attack["공격명"] || ""), 0, targetAlias),
+                     attackerAlias: attackerAlias };
     attackEffectText = getSkillFromPendingAttack(attack)
       ? "\n\n[스킬 효과 무효]\n회피에 성공하여 공격 스킬의 효과가 발동하지 않습니다." : "";
   } else {
@@ -5572,6 +5605,9 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
     const threshold = Math.ceil(attackValue * 1.5);
     const damage      = counterValue;
     const damageResult = applyDamageToRef(attackerAlias, damage, { attackerAlias: selfAlias });
+    // 공격자의 공격은 맞대응당해 피해 0 → 공격자 쪽 공격해결후 발동(실패 처리).
+    const _atkResolved = _fireAttackerResolvedText(attackerAlias, String(attack["공격명"] || ""), 0, targetAlias);
+    const _atkResolvedBlock = _atkResolved ? "\n\n[공격 후 패시브: " + attackerAlias + "]\n" + _atkResolved : "";
 
     let counterEffectText = "";
     if (response.kind === "스킬" && response.skill) {
@@ -5595,7 +5631,8 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
       "결과: 맞대응 성공\n" + "반격피해: " + damage + "\n" +
       compactDamageText(damageResult) +
       (attackEffectInvalidText ? "\n공격 효과: 무효" : "") +
-      (counterEffectText ? "\n맞대응 효과: 강제 적용 / 상세보기" : "");
+      (counterEffectText ? "\n맞대응 효과: 강제 적용 / 상세보기" : "") +
+      _atkResolvedBlock;
 
     const detail =
       statusDetailPrefix +
