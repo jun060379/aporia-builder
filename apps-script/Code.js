@@ -9874,6 +9874,37 @@ function enemyAttack(parts, displayName, utterance) {
 // ── Command: !에너미대응 ─────────────────────────────────────────────
 
 // ── TASK-14: 에너미 대응 모드별 헬퍼 ──────────────────────────────────
+// 적이 PC 공격에 대응 완료한 뒤, 공격자(PC) 쪽 트리거 발동.
+//  - 공격해결후: 피해 0 포함 항상 (성공/실패 판정 + 다음 지령 등)
+//  - 가해후    : 실제 피해 > 0 일 때만
+// 적 피해는 applyEnemyHpChange로 직접 처리돼 applyDamageToRef를 안 타므로, 여기서 별도 발동.
+// triggerArg=공격명(=액션명), finalValue=최종피해. 공격자가 PC가 아니면 스킵.
+function _fireAttackerResolvedOnEnemy(attack, damage) {
+  try {
+    var attackerAlias = String((attack && attack["공격자"]) || "").trim();
+    if (!attackerAlias || _DEALT_TRIGGER_ACTIVE) return "";
+    var dealer = findCharacterByAlias(attackerAlias);
+    if (!dealer) return "";
+    _DEALT_TRIGGER_ACTIVE = true;
+    try {
+      var argName = String(attack["공격명"] || "").trim();
+      var dmg = Math.max(0, Number(damage) || 0);
+      var parts = [];
+      var resolved = firePassiveTriggerEffects(dealer, "공격해결후", {
+        targetAlias: "", finalValue: dmg, triggerArg: argName, resistanceMode: RESIST_NONE
+      });
+      if (resolved) parts.push(resolved);
+      if (dmg > 0) {
+        var dealt = firePassiveTriggerEffects(dealer, "가해후", {
+          targetAlias: "", finalValue: dmg, triggerArg: argName, resistanceMode: RESIST_NONE
+        });
+        if (dealt) parts.push(dealt);
+      }
+      return parts.length ? "\n\n[공격 후 패시브: " + attackerAlias + "]\n" + parts.join("\n\n") : "";
+    } finally { _DEALT_TRIGGER_ACTIVE = false; }
+  } catch (_e) { return ""; }
+}
+
 function _resolveEnemyNoResponse(enemy, attack, attackValue) {
   const result    = applyEnemyHpChange(enemy["enemy_id"], attackValue, false);
   const effectOut = applyPendingAttackEffectIfHit(attack, attackValue, enemy["enemy_id"]);
@@ -9882,7 +9913,8 @@ function _resolveEnemyNoResponse(enemy, attack, attackValue) {
     "[에너미 무대응]\n" +
     "공격번호: " + attack["id"] + "\n공격값: " + attackValue + "\n최종피해: " + attackValue + "\n" +
     "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
-    (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut
+    (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut +
+    _fireAttackerResolvedOnEnemy(attack, attackValue)
   );
 }
 
@@ -9905,7 +9937,8 @@ function _resolveEnemyDefend(enemy, attack, attackValue) {
     "[에너미 방어]\n공격번호: " + attack["id"] + "\n공격값: " + attackValue + "\n" +
     "방어 굴림: " + defRoll.rollText + "\n결과: " + (success ? "방어 성공" : "방어 실패") + "\n최종피해: " + damage + "\n" +
     (damage > 0 ? "체력: " + result.before + " → " + result.after + " / " + result.maxHp : "피해 없음") +
-    (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut
+    (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut +
+    _fireAttackerResolvedOnEnemy(attack, damage)
   );
 }
 
@@ -9928,7 +9961,8 @@ function _resolveEnemyEvade(enemy, attack, attackValue) {
     "[에너미 회피]\n공격번호: " + attack["id"] + "\n공격값: " + attackValue + "\n" +
     "회피 굴림: " + evRoll.rollText + "\n결과: " + (success ? "회피 성공" : "회피 실패") + "\n최종피해: " + damage + "\n" +
     (damage > 0 ? "체력: " + result.before + " → " + result.after + " / " + result.maxHp : "피해 없음") +
-    (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut
+    (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut +
+    _fireAttackerResolvedOnEnemy(attack, damage)
   );
 }
 
@@ -9943,7 +9977,9 @@ function _resolveEnemyCounter(enemy, attack, attackValue, attackerRef, counterAc
   if (ctrValue > attackValue) {
     const damageResult = applyDamageToRef(attackerRef, ctrValue);
     resolvePendingAttack(attack["id"], { 대응종류: "맞대응", 대응값: ctrValue, 최종피해: ctrValue, 메모: "에너미 맞대응 성공. 공격자에게 반격 피해" });
-    return header + "결과: 에너미 맞대응 성공\n반격피해: " + ctrValue + "\n\n" + damageResult.text;
+    // 공격자의 공격은 적에게 피해 0(맞대응당함) → 공격해결후 발동(실패).
+    return header + "결과: 에너미 맞대응 성공\n반격피해: " + ctrValue + "\n\n" + damageResult.text +
+      _fireAttackerResolvedOnEnemy(attack, 0);
   }
 
   if (ctrValue < attackValue) {
@@ -9952,11 +9988,12 @@ function _resolveEnemyCounter(enemy, attack, attackValue, attackerRef, counterAc
     resolvePendingAttack(attack["id"], { 대응종류: "맞대응", 대응값: ctrValue, 최종피해: attackValue, 메모: "에너미 맞대응 실패. 에너미에게 피해" });
     return header + "결과: 에너미 맞대응 실패\n최종피해: " + attackValue + "\n" +
       "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
-      (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut;
+      (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut +
+      _fireAttackerResolvedOnEnemy(attack, attackValue);
   }
 
   resolvePendingAttack(attack["id"], { 대응종류: "맞대응", 대응값: ctrValue, 최종피해: 0, 메모: "에너미 맞대응 동률. 상쇄" });
-  return header + "결과: 동률 / 상쇄\n최종피해: 0";
+  return header + "결과: 동률 / 상쇄\n최종피해: 0" + _fireAttackerResolvedOnEnemy(attack, 0);
 }
 
 // ── enemyRespond 본체 — 파싱 + 모드 라우팅 ───────────────────────────
