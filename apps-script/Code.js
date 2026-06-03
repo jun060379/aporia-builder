@@ -1567,7 +1567,11 @@ function processPreDamageStatuses(alias, damageAmount) {
   return { damage, text: logs.join("\n\n"), debugText: debugLogs.join("\n") };
 }
 
-function applyDamageToCharacter(alias, damageAmount) {
+// 가해후 트리거 재진입 가드: 가해후 패시브가 또 피해를 입혀 무한 재귀하는 것을 막는다.
+var _DEALT_TRIGGER_ACTIVE = false;
+
+function applyDamageToCharacter(alias, damageAmount, opts) {
+  opts = opts || {};
   const rowInfo = findCharacterRowByAlias(alias);
 
   if (!rowInfo) {
@@ -1610,7 +1614,7 @@ function applyDamageToCharacter(alias, damageAmount) {
 
   setCellByHeader(fresh, "현재체력", after);
 
-  // 피해후 패시브 트리거
+  // 피해후 패시브 트리거 (피해를 받은 쪽)
   var passivePostText = "";
   try {
     var charForPostPassive = findCharacterByAlias(alias);
@@ -1621,6 +1625,25 @@ function applyDamageToCharacter(alias, damageAmount) {
       });
     }
   } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
+
+  // 가해후 패시브 트리거 (피해를 입힌 공격자 쪽) — 실제 피해 > 0 이고 자기 자신이 아닐 때만.
+  var passiveDealtText = "";
+  var attackerAlias = String(opts.attackerAlias || "").trim();
+  if (attackerAlias && damage > 0 && !_DEALT_TRIGGER_ACTIVE && attackerAlias !== String(alias).trim()) {
+    _DEALT_TRIGGER_ACTIVE = true;
+    try {
+      var dealerChar = findCharacterByAlias(attackerAlias);
+      if (dealerChar) {
+        passiveDealtText = firePassiveTriggerEffects(dealerChar, "가해후", {
+          targetAlias: alias,
+          finalValue: damage,
+          triggerArg: String(opts.sourceName || "").trim(),
+          resistanceMode: RESIST_NONE
+        });
+      }
+    } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
+    finally { _DEALT_TRIGGER_ACTIVE = false; }
+  }
 
   let downText = "";
 
@@ -1636,6 +1659,9 @@ function applyDamageToCharacter(alias, damageAmount) {
     : "";
   const passivePreBlock  = passivePreText  ? "\n\n" + passivePreText  : "";
   const passivePostBlock = passivePostText ? "\n\n" + passivePostText : "";
+  const passiveDealtBlock = passiveDealtText
+    ? "\n\n[가해후 패시브: " + attackerAlias + "]\n" + passiveDealtText
+    : "";
 
   const mainText =
     "[피해 적용]\n" +
@@ -1646,7 +1672,8 @@ function applyDamageToCharacter(alias, damageAmount) {
     modifierText +
     passivePreBlock +
     downText +
-    passivePostBlock;
+    passivePostBlock +
+    passiveDealtBlock;
 
   const detailText = preDamage.debugText
     ? mainText + "\n\n[패시브 디버그]\n" + preDamage.debugText
@@ -2117,6 +2144,16 @@ function actionCheck(parts, displayName) {
     ? statusResult.text + "\n\n"
     : "";
 
+  // 액션사용후 패시브 트리거. "액션사용후"(모든 액션) 또는 "액션사용후:액션명"(특정 액션).
+  var actionPostText = "";
+  try {
+    actionPostText = firePassiveTriggerEffects(character, "액션사용후", {
+      triggerArg: actionName, finalValue: sum, targetAlias: parsed.target || "",
+      resistanceMode: RESIST_NONE
+    });
+  } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
+  const actionPostBlock = actionPostText ? "\n\n" + actionPostText : "";
+
   const summary =
     statusPrefix +
     "[액션 판정]\n" +
@@ -2125,7 +2162,8 @@ function actionCheck(parts, displayName) {
     "주사위: " + diceCount + "d" + ACTION_DICE_SIDES + "\n" +
     "합계: " + sum +
     judgeSummary +
-    combatText;
+    combatText +
+    actionPostBlock;
 
   const detail =
     statusPrefix +
@@ -2143,7 +2181,8 @@ function actionCheck(parts, displayName) {
       ? _formatJudgeModDetail(statusMod, _actEquipMod) + "\n\n" : "") +
     "합계: " + sum +
     judgeSummary +
-    combatText;
+    combatText +
+    actionPostBlock;
 
   return makeFoldedResponse(summary, detail);
 }
@@ -3424,15 +3463,21 @@ function skillUse(parts, displayName) {
     ? "\n\n[대가 처리]\n" + costResult.logs.join("\n")
     : "";
 
-  // 판정후 트리거 패시브 (디메리트 침식 변경 등 포함)
+  // 판정후 / 스킬사용후 트리거 패시브 (디메리트 침식 변경 등 포함)
+  // "판정후"/"스킬사용후"(모든 스킬) 또는 ":스킬명"(특정 스킬) 매칭.
   var postPassiveText = "";
   try {
     var charAfter = findCharacterByAlias(alias);
     if (charAfter) {
-      var ppt = firePassiveTriggerEffects(charAfter, "판정후", {
-        targetAlias: targetAlias, finalValue: finalValue, resistanceMode: RESIST_NONE
-      });
-      if (ppt) postPassiveText = ppt;
+      var _ppCtx = {
+        targetAlias: targetAlias, finalValue: finalValue,
+        triggerArg: String(skill["스킬명"] || ""), resistanceMode: RESIST_NONE
+      };
+      var _pp = [
+        firePassiveTriggerEffects(charAfter, "판정후", _ppCtx),
+        firePassiveTriggerEffects(charAfter, "스킬사용후", _ppCtx)
+      ].filter(Boolean);
+      if (_pp.length) postPassiveText = _pp.join("\n\n");
     }
   } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
 
@@ -5145,7 +5190,7 @@ function _resolveCombatNoResponse(attack, attackValue, attackerAlias, targetAlia
   const foldState = { amount: 0 };
   const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue, foldState);
   const damage = Math.max(0, attackValue + foldState.amount);
-  const damageResult = applyDamageToCharacter(targetAlias, damage);
+  const damageResult = applyDamageToCharacter(targetAlias, damage, { attackerAlias: attackerAlias, sourceName: String(attack["공격명"] || "") });
   const foldNote = foldState.amount !== 0 ? "\n피해 보정: " + formatSigned(foldState.amount) : "";
 
   resolvePendingAttack(attack["id"], {
@@ -5177,7 +5222,7 @@ function _resolveCombatStatusBlocked(attack, attackValue, attackerAlias, targetA
   const foldState = { amount: 0 };
   const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue, foldState);
   const damage = Math.max(0, attackValue + foldState.amount);
-  const damageResult = applyDamageToCharacter(targetAlias, damage);
+  const damageResult = applyDamageToCharacter(targetAlias, damage, { attackerAlias: attackerAlias, sourceName: String(attack["공격명"] || "") });
   const foldNote = foldState.amount !== 0 ? "\n피해 보정: " + formatSigned(foldState.amount) : "";
 
   resolvePendingAttack(attack["id"], {
@@ -5231,7 +5276,7 @@ function _resolveCombatDefend(attack, character, rest, selfAlias, attackValue, a
     const foldState = { amount: 0 };
     attackEffectText = processPendingAttackSkillEffects(attack, RESIST_NORMAL, attackValue, foldState);
     damage = Math.max(0, baseDamage + foldState.amount);
-    damageResult = applyDamageToCharacter(targetAlias, damage);
+    damageResult = applyDamageToCharacter(targetAlias, damage, { attackerAlias: attackerAlias, sourceName: String(attack["공격명"] || "") });
     if (foldState.amount !== 0) foldNote = "\n피해 보정: " + formatSigned(foldState.amount);
   }
 
@@ -5297,7 +5342,7 @@ function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, at
     const foldState = { amount: 0 };
     attackEffectText = processPendingAttackSkillEffects(attack, RESIST_NORMAL, attackValue, foldState);
     damage = Math.max(0, attackValue + foldState.amount);
-    damageResult = applyDamageToCharacter(targetAlias, damage);
+    damageResult = applyDamageToCharacter(targetAlias, damage, { attackerAlias: attackerAlias, sourceName: String(attack["공격명"] || "") });
     if (foldState.amount !== 0) foldNote = "\n피해 보정: " + formatSigned(foldState.amount);
   }
 
@@ -5375,7 +5420,7 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
   if (counterSuccess) {
     const threshold = Math.ceil(attackValue * 1.5);
     const damage      = counterValue;
-    const damageResult = applyDamageToRef(attackerAlias, damage);
+    const damageResult = applyDamageToRef(attackerAlias, damage, { attackerAlias: selfAlias });
 
     let counterEffectText = "";
     if (response.kind === "스킬" && response.skill) {
@@ -5419,7 +5464,7 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
     const foldState = { amount: 0 };
     const attackEffectText = processPendingAttackSkillEffects(attack, RESIST_FORCE_FAIL, attackValue, foldState);
     const damage = Math.max(0, attackValue + foldState.amount);
-    const damageResult = applyDamageToCharacter(targetAlias, damage);
+    const damageResult = applyDamageToCharacter(targetAlias, damage, { attackerAlias: attackerAlias, sourceName: String(attack["공격명"] || "") });
     const foldNote = foldState.amount !== 0 ? "\n피해 보정: " + formatSigned(foldState.amount) : "";
 
     const shortReason = counterValue >= attackValue
@@ -7175,7 +7220,10 @@ function processSkillEffects(effectText, context) {
       }
 
       // 직접 모드(비-공격 효과 등): 음수는 0으로 간주(회복 아님).
-      logs.push(applyDamageToRef(targetAlias, Math.max(0, rawAmount)).text || "");
+      logs.push(applyDamageToRef(targetAlias, Math.max(0, rawAmount), {
+        attackerAlias: context.userAlias || "",
+        sourceName: context.skillName || ""
+      }).text || "");
       return;
     }
 
@@ -8757,10 +8805,32 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
 
 // 트리거 기반 패시브 효과 실행. 1차 구현: 효과 필드가 있으면 processSkillEffects로 처리.
 // 사용처: 판정시작 / 판정후 / 피해직전 / 피해후 / 세션종료 등.
+// 패시브 발동타이밍 매칭.
+//  - "항상"/"전체" → 모든 시점에 발동
+//  - 정확히 같은 트리거 → 발동
+//  - "트리거:인자" 형태(예: "액션사용후:은신") → base가 일치하고 인자가
+//    현재 사용한 액션/스킬명(triggerArg)과 같을 때만 발동
+function _passiveTriggerMatches(pTrigger, trigger, triggerArg) {
+  pTrigger = String(pTrigger || "").trim();
+  if (!pTrigger) return false;
+  if (pTrigger === "항상" || pTrigger === "전체") return true;
+  if (pTrigger === trigger) return true;
+
+  var ci = pTrigger.indexOf(":");
+  if (ci < 0) ci = pTrigger.indexOf("："); // 전각 콜론도 허용
+  if (ci > 0) {
+    var base = pTrigger.slice(0, ci).trim();
+    var arg  = pTrigger.slice(ci + 1).trim();
+    if (base === trigger && arg && String(triggerArg || "").trim() === arg) return true;
+  }
+  return false;
+}
+
 function firePassiveTriggerEffects(character, trigger, ctxOpts) {
   if (!character) return "";
   ctxOpts = ctxOpts || {};
   var targetAlias = ctxOpts.targetAlias || "";
+  var triggerArg = ctxOpts.triggerArg || "";
   var passives = getCandidatePassivesForCharacter(character);
   var ctx = buildConditionContext(character, targetAlias);
   var alias = String(character["별명"] || "").trim();
@@ -8768,8 +8838,7 @@ function firePassiveTriggerEffects(character, trigger, ctxOpts) {
 
   passives.forEach(function (p) {
     var pTrigger = String(p["발동"] || "").trim();
-    // "항상"/"전체" 트리거는 모든 발동 시점에 실행
-    if (pTrigger !== trigger && pTrigger !== "항상" && pTrigger !== "전체") return;
+    if (!_passiveTriggerMatches(pTrigger, trigger, triggerArg)) return;
 
     var effectText = String(p["효과"] || "").trim();
     if (!effectText) return;
@@ -9015,7 +9084,8 @@ function applyEnemyHpChange(enemy_id, delta, isHeal) {
   return { ok: false, before: 0, after: 0, maxHp: 0 };
 }
 
-function applyDamageToRef(ref, damage) {
+function applyDamageToRef(ref, damage, opts) {
+  opts = opts || {};
   var enemy = null;
   try { enemy = resolveEnemy(ref); } catch(e) {}
 
@@ -9028,6 +9098,27 @@ function applyDamageToRef(ref, damage) {
     const downText = (result.after <= 0 && result.before > 0)
       ? "\n\n[에너미 전투불능]\n" + label + "의 체력이 0이 되었습니다."
       : "";
+
+    // 가해후 패시브 트리거 — 에너미에게 피해를 입힌 공격자(PC)가 대상.
+    var dealtBlock = "";
+    var attackerAlias = String(opts.attackerAlias || "").trim();
+    if (attackerAlias && damage > 0 && !_DEALT_TRIGGER_ACTIVE) {
+      _DEALT_TRIGGER_ACTIVE = true;
+      try {
+        var dealerChar = findCharacterByAlias(attackerAlias);
+        if (dealerChar) {
+          var dealtText = firePassiveTriggerEffects(dealerChar, "가해후", {
+            targetAlias: label,
+            finalValue: damage,
+            triggerArg: String(opts.sourceName || "").trim(),
+            resistanceMode: RESIST_NONE
+          });
+          if (dealtText) dealtBlock = "\n\n[가해후 패시브: " + attackerAlias + "]\n" + dealtText;
+        }
+      } catch (_e) { /* 무시 */ }
+      finally { _DEALT_TRIGGER_ACTIVE = false; }
+    }
+
     return {
       ok: true,
       before: result.before,
@@ -9039,11 +9130,11 @@ function applyDamageToRef(ref, damage) {
         "대상: " + label + "\n" +
         "피해: " + damage + "\n" +
         "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
-        downText
+        downText + dealtBlock
     };
   }
 
-  return applyDamageToCharacter(ref, damage);
+  return applyDamageToCharacter(ref, damage, opts);
 }
 
 // applyDamageToRef의 회복 대칭 버전. ref가 에너미면 applyEnemyHpChange, PC면 applyHealingToCharacter.
@@ -11312,15 +11403,20 @@ function commonSkillUseCommand(parts, displayName) {
   const { pendingId, healingDetailText, combatDetailText,
           interferenceDetailText, effectDetailText, effectSummary } = _efx;
 
-  // 판정후 트리거 패시브 (디메리트 침식 변경 등 포함)
+  // 판정후 / 스킬사용후 트리거 패시브 (디메리트 침식 변경 등 포함)
   var postPassiveText = "";
   try {
     var charAfter = findCharacterByAlias(alias);
     if (charAfter) {
-      var ppt = firePassiveTriggerEffects(charAfter, "판정후", {
-        targetAlias: effectiveTarget, finalValue: finalValue, resistanceMode: RESIST_NONE
-      });
-      if (ppt) postPassiveText = ppt;
+      var _ppCtx = {
+        targetAlias: effectiveTarget, finalValue: finalValue,
+        triggerArg: String(displaySkillName || ""), resistanceMode: RESIST_NONE
+      };
+      var _pp = [
+        firePassiveTriggerEffects(charAfter, "판정후", _ppCtx),
+        firePassiveTriggerEffects(charAfter, "스킬사용후", _ppCtx)
+      ].filter(Boolean);
+      if (_pp.length) postPassiveText = _pp.join("\n\n");
     }
   } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
 
