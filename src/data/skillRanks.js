@@ -38,9 +38,29 @@ export function defaultSkill() {
     series: '화력',
     rank: 'F',
     formula: '',
-    effects: [],
+    효과: '',           // 줄=효과(한 줄 = "조건 => 효과") 문자열. 신규 표준.
+    effects: [],        // 레거시(블럭카드) — 로드 시 효과 문자열로 마이그레이션.
     condition: '',
     cost: '',
     description: '',
   };
+}
+
+// 레거시 effects[] 배열을 줄=효과 문자열로 변환.
+// 확정(confirmed) 효과의 generatedText를 줄바꿈으로 결합.
+export function effectsToText(effects) {
+  if (!Array.isArray(effects)) return '';
+  return effects
+    .filter((e) => e && e.confirmed && e.generatedText)
+    .map((e) => String(e.generatedText).trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+// 스킬 객체에서 효과 텍스트를 얻는다. 신규 `효과` 필드 우선, 없으면 레거시 effects[] 변환.
+export function getSkillEffectText(skill) {
+  if (!skill) return '';
+  const direct = String(skill.효과 || '').trim();
+  if (direct) return direct;
+  return effectsToText(skill.effects);
 }

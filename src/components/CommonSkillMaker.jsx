@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import ConditionEditor from './ConditionEditor.jsx';
-import { SKILL_TRADITIONS, SKILL_SERIES, SKILL_RANKS, makeEffect } from '../data/skillRanks';
+import EffectRowsEditor from './EffectRowsEditor.jsx';
+import { SKILL_TRADITIONS, SKILL_SERIES, SKILL_RANKS } from '../data/skillRanks';
 import {
   COMMON_SKILL_TYPES,
   COMMON_UNLOCK_LEVELS,
@@ -13,11 +14,10 @@ import {
   buildCommonSkillPreview,
   validateCommonSkill,
 } from '../data/commonSkills';
-import { validateFormula, validateFormulaStructure, previewFormula, getEffectWarnings } from '../utils/calcSkill';
+import { validateFormula, validateFormulaStructure, previewFormula } from '../utils/calcSkill';
 import { STAT_NAMES } from '../data/stats';
 import { ABILITY_NAMES } from '../data/abilities';
 import { PROFICIENCY_NAMES } from '../data/proficiencies';
-import EffectBlockModal from './EffectBlockModal';
 import FormulaBlockModal from './FormulaBlockModal';
 import CostEditor from './CostEditor.jsx';
 
@@ -36,64 +36,6 @@ const FORMULA_CATEGORIES = [
 const PREVIEW_STATS = { 근력: 10, 민첩: 10, 내구: 10, 감각: 10, 지능: 10 };
 const PREVIEW_ABILITIES = Object.fromEntries(ABILITY_NAMES.map((n) => [n, 5]));
 const PREVIEW_PROFICIENCIES = Object.fromEntries(PROFICIENCY_NAMES.map((n) => [n, 5]));
-
-function EffectCard({ effect, index, total, onUpdate, onDelete, onMoveUp, onMoveDown }) {
-  const [modalOpen, setModalOpen] = useState(false);
-  const warnings = getEffectWarnings(effect);
-  const hasText = !!effect.generatedText;
-
-  const handleInsert = (type, params, text) => {
-    onUpdate({ ...effect, type, params, generatedText: text });
-    setModalOpen(false);
-  };
-
-  return (
-    <div className={`rounded-xl border p-3 space-y-2 ${effect.confirmed ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[10px] text-slate-400 font-mono shrink-0">효과 {index + 1}</span>
-        {effect.confirmed && (
-          <span className="text-[11px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200">확정됨</span>
-        )}
-        <div className="flex gap-1 ml-auto shrink-0">
-          <button onClick={onMoveUp} disabled={index === 0} className="w-6 h-6 rounded-lg bg-white border border-slate-200 text-slate-400 text-xs disabled:opacity-30">↑</button>
-          <button onClick={onMoveDown} disabled={index === total - 1} className="w-6 h-6 rounded-lg bg-white border border-slate-200 text-slate-400 text-xs disabled:opacity-30">↓</button>
-          <button onClick={onDelete} className="w-6 h-6 rounded-lg bg-rose-50 border border-rose-200 text-rose-500 text-xs">✕</button>
-        </div>
-      </div>
-      {hasText && (
-        <div className="bg-white text-indigo-700 rounded-lg p-2 text-xs font-mono break-all whitespace-pre-wrap border border-indigo-100">
-          {effect.generatedText}
-        </div>
-      )}
-      {warnings.length > 0 && warnings.map((w, i) => (
-        <p key={i} className="text-xs text-amber-600">⚠ {w}</p>
-      ))}
-      <div className="flex flex-wrap gap-1.5">
-        <button onClick={() => setModalOpen(true)} className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg text-xs font-medium">
-          블럭 선택
-        </button>
-        {hasText && !effect.confirmed && (
-          <button onClick={() => onUpdate({ ...effect, confirmed: true })} className="px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-medium">
-            확정
-          </button>
-        )}
-        {effect.confirmed && (
-          <button onClick={() => onUpdate({ ...effect, confirmed: false })} className="px-3 py-1.5 bg-white border border-slate-200 text-slate-500 rounded-lg text-xs font-medium">
-            확정 해제
-          </button>
-        )}
-      </div>
-      {modalOpen && (
-        <EffectBlockModal
-          initialType={effect.type || 'template'}
-          initialParams={effect.params || {}}
-          onInsert={handleInsert}
-          onClose={() => setModalOpen(false)}
-        />
-      )}
-    </div>
-  );
-}
 
 export default function CommonSkillMaker() {
   const [skill, setSkill] = useState(() => defaultCommonSkill());
@@ -114,17 +56,6 @@ export default function CommonSkillMaker() {
   };
 
   const appendOperator = (op) => setSkill((s) => ({ ...s, formula: s.formula + ` ${op} ` }));
-
-  const addEffect = () => setSkill((s) => ({ ...s, effects: [...s.effects, makeEffect()] }));
-  const updateEffect = (id, updated) => setSkill((s) => ({ ...s, effects: s.effects.map((e) => (e.id === id ? updated : e)) }));
-  const deleteEffect = (id) => setSkill((s) => ({ ...s, effects: s.effects.filter((e) => e.id !== id) }));
-  const moveEffect = (idx, dir) => setSkill((s) => {
-    const next = [...s.effects];
-    const swap = idx + dir;
-    if (swap < 0 || swap >= next.length) return s;
-    [next[idx], next[swap]] = [next[swap], next[idx]];
-    return { ...s, effects: next };
-  });
 
   const tokenErrors = validateFormula(skill.formula);
   const structureWarns = validateFormulaStructure(skill.formula);
@@ -304,34 +235,12 @@ export default function CommonSkillMaker() {
         )}
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-slate-500 tracking-wide">효과 목록</span>
-          <span className="text-[11px] text-slate-400 font-mono">{skill.effects.length}개</span>
-        </div>
-        {skill.effects.length === 0 && (
-          <p className="text-xs text-slate-400 italic py-1">효과가 없습니다. 아래 버튼으로 추가하세요.</p>
-        )}
-        <div className="space-y-2">
-          {skill.effects.map((ef, idx) => (
-            <EffectCard
-              key={ef.id}
-              effect={ef}
-              index={idx}
-              total={skill.effects.length}
-              onUpdate={(u) => updateEffect(ef.id, u)}
-              onDelete={() => deleteEffect(ef.id)}
-              onMoveUp={() => moveEffect(idx, -1)}
-              onMoveDown={() => moveEffect(idx, 1)}
-            />
-          ))}
-        </div>
-        <button
-          onClick={addEffect}
-          className="w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-400 rounded-xl border border-dashed border-slate-300 text-sm"
-        >
-          + 효과 추가
-        </button>
+      <div className="space-y-1">
+        <span className="text-[11px] text-slate-500 tracking-wide">효과</span>
+        <EffectRowsEditor
+          value={skill.효과}
+          onChange={(v) => setSkill((s) => ({ ...s, 효과: v }))}
+        />
       </div>
 
       <label className="flex flex-col gap-1">

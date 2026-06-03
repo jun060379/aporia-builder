@@ -1,4 +1,4 @@
-import { validateFormula, validateFormulaStructure, hasTargetReference, getEffectWarnings } from '../utils/calcSkill';
+import { validateFormula, validateFormulaStructure, hasTargetReference } from '../utils/calcSkill';
 import { calcAllActions } from '../utils/calcAction';
 import { RANK_MAP } from '../data/skillRanks';
 
@@ -102,15 +102,6 @@ function buildIssues(char, remaining, skills, stats, abilities, proficiencies, e
         detail: 'S / U / EX 랭크는 신청 전 운영진과 사전 협의를 권장합니다.',
       });
     }
-  });
-
-  // 9. 효과 경고
-  skills.forEach(sk => {
-    const n = sk.name?.trim() || '(이름 없음)';
-    (sk.effects ?? []).forEach(ef => {
-      getEffectWarnings(ef)
-        .forEach(w => issues.push({ type: 'warn', label: `[${n}] ${w}` }));
-    });
   });
 
   return issues;

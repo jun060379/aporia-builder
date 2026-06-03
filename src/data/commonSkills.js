@@ -36,7 +36,8 @@ export function defaultCommonSkill() {
     series: '화력',
     rank: 'F',
     formula: '',
-    effects: [],
+    효과: '',          // 줄=효과 문자열(신규 표준)
+    effects: [],       // 레거시(블럭카드) — 직렬화 시 효과 문자열로 폴백
     target: 'optional',
     condition: '',
     cost: '',
@@ -58,8 +59,15 @@ export function buildEffectsText(effects) {
     .join('\n');
 }
 
+// 줄=효과 문자열(신규) 우선, 없으면 레거시 effects[] 변환.
+export function getCommonSkillEffectText(skill) {
+  const direct = String(skill?.효과 || '').trim();
+  if (direct) return direct;
+  return buildEffectsText(skill?.effects);
+}
+
 export function buildCommonSkillTSV(skill) {
-  const effectsText = buildEffectsText(skill.effects);
+  const effectsText = getCommonSkillEffectText(skill);
   const row = [
     skill.key,
     skill.name,
@@ -93,7 +101,7 @@ export function buildCommonSkillPreview(skill) {
   lines.push(`해금레벨: ${skill.unlockLevel}`);
   lines.push(`계통/계열/랭크: ${skill.tradition} / ${skill.series} / ${skill.rank}`);
   lines.push(`계산식: ${skill.formula || '-'}`);
-  const effectsText = buildEffectsText(skill.effects);
+  const effectsText = getCommonSkillEffectText(skill);
   if (effectsText) lines.push(`효과:\n${effectsText}`);
   lines.push(`대상: ${skill.target}`);
   if (skill.condition) lines.push(`조건: ${skill.condition}`);

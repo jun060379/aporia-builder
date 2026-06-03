@@ -1442,6 +1442,49 @@ function _parsePassiveSuChi(raw, vars) {
   }
 }
 
+// 콤마 구분 판정 유형 목록(typeStr)이 현재 판정 유형(checkTypes)과 겹치면 true.
+// 빈 값/"전체"는 항상 매칭. _passiveJudgmentMatches와 동일 규칙.
+function _matchCheckTypes(typeStr, checkTypes) {
+  var raw = String(typeStr || "").trim();
+  if (!raw || raw === "전체") return true;
+  var list = raw.split(/[,，、]/).map(function (s) { return s.trim(); }).filter(Boolean);
+  var ct = (checkTypes || []).map(function (t) { return String(t || "").trim(); }).filter(Boolean);
+  if (!ct.length) return false;
+  return ct.some(function (t) { return list.indexOf(t) >= 0; });
+}
+
+// 패시브의 "효과" 컬럼에서 모디파이어 set-effect 줄을 추출.
+//   각 줄: "[세부조건 =>] 변수 [유형목록] = 값"  (변수 ∈ varNames)
+//   - 세부조건은 evaluateConditionList(ctx)로 게이트
+//   - 판정보정은 유형목록 vs checkTypes 매칭(checkTypes 미지정이면 유형 무시)
+// 반환: [{ variable, mode:'add'|'mult', value }]
+function _collectPassiveEffectModifiers(passive, varNames, ctx, checkTypes) {
+  var out = [];
+  var effectText = String(passive["효과"] || "").trim();
+  if (!effectText) return out;
+  effectText.split(/[\n;]/).map(function (l) { return l.trim(); }).filter(Boolean)
+    .forEach(function (line) {
+      var effPart = line;
+      var arrow = line.match(/^([\s\S]*?)\s*(?:=>|⇒|→|->)\s*([\s\S]*)$/);
+      if (arrow) {
+        var condPart = arrow[1].trim();
+        effPart = arrow[2].trim();
+        if (condPart) {
+          var cr = evaluateConditionList(condPart, ctx);
+          if (!cr.ok) return;
+        }
+      }
+      if (!effPart) return;
+      var setEff = _parseSetEffect(effPart);
+      if (!setEff || varNames.indexOf(setEff.variable) < 0) return;
+      if (checkTypes && setEff.variable === "판정보정" &&
+          !_matchCheckTypes(setEff.checkType, checkTypes)) return;
+      var parsed = _parsePassiveSuChi(setEff.value, ctx.vars);
+      out.push({ variable: setEff.variable, mode: parsed.mode, value: parsed.value });
+    });
+  return out;
+}
+
 // 피해보정 패시브 (분류=피해보정 또는 효과코드=피해보정) 적용.
 // 취약(damage 증가) 이후, 보호막(damage 흡수) 이전에 호출한다.
 function _applyPassiveDamageModifier(alias, damage) {
@@ -1470,10 +1513,25 @@ function _applyPassiveDamageModifier(alias, damage) {
       debugLogs.push("조건결과 ok=" + result.ok + " failed=" + JSON.stringify(result.failed));
       if (!result.ok) return;
 
+      const name   = p["이름"] || p["key"];
+
+      // 효과 컬럼의 줄-효과(피해보정/피해감소) 합산. 피해감소는 양수=경감 → 음수 보정.
+      _collectPassiveEffectModifiers(p, ["피해보정", "피해감소"], ctx, null).forEach(function (m) {
+        if (m.mode === 'mult') {
+          if (m.value === 1) return;
+          multFactor *= m.value;
+          logs.push("[패시브: " + name + "]\n피해 배율: ×" + m.value);
+        } else {
+          var v = (m.variable === "피해감소") ? -Math.abs(Math.floor(m.value)) : Math.floor(m.value);
+          if (!v) return;
+          addDelta += v;
+          logs.push("[패시브: " + name + "]\n피해 보정: " + formatSigned(v));
+        }
+      });
+
       const parsed = _parsePassiveSuChi(p["수치"], ctx.vars);
       const dMult  = result.detailMult  || 1;
       const dBonus = result.detailBonus || 0;
-      const name   = p["이름"] || p["key"];
 
       if (parsed.mode === 'mult') {
         const factor = parsed.value * dMult;
@@ -1519,10 +1577,25 @@ function _applyPassiveHealingModifier(alias, amount) {
       const result = evaluateConditionList(p["조건"], ctx);
       if (!result.ok) return;
 
+      const name   = p["이름"] || p["key"];
+
+      // 효과 컬럼의 줄-효과(회복보정) 합산.
+      _collectPassiveEffectModifiers(p, ["회복보정"], ctx, null).forEach(function (m) {
+        if (m.mode === 'mult') {
+          if (m.value === 1) return;
+          multFactor *= m.value;
+          logs.push("[패시브: " + name + "]\n회복 배율: ×" + m.value);
+        } else {
+          var v = Math.floor(m.value);
+          if (!v) return;
+          addDelta += v;
+          logs.push("[패시브: " + name + "]\n회복 보정: " + formatSigned(v));
+        }
+      });
+
       const parsed = _parsePassiveSuChi(p["수치"], ctx.vars);
       const dMult  = result.detailMult  || 1;
       const dBonus = result.detailBonus || 0;
-      const name   = p["이름"] || p["key"];
 
       if (parsed.mode === 'mult') {
         const factor = parsed.value * dMult;
@@ -6955,8 +7028,14 @@ function applyTemplateStatusWithResistance(targetAlias, templateName, opts, cont
 // 기존 효과 명령(상태부여/스택증가 등)은 첫 토큰 뒤에 공백+다른 단어가
 // 오므로 이 정규식과 매칭되지 않는다 → 충돌 없음.
 function _parseSetEffect(effPart) {
-  var m = String(effPart == null ? "" : effPart)
-    .match(/^\s*([^\s=<>!]+)\s*(==|=)\s*(.+?)\s*$/);
+  var s = String(effPart == null ? "" : effPart);
+  // 모디파이어 변수(판정보정/피해보정/피해감소/회복보정)는 변수와 = 사이에
+  // 콤마 판정 유형 목록을 가질 수 있다. 예: "판정보정 참격,관통 = 3" → checkType="참격,관통".
+  var mod = s.match(/^\s*(판정보정|피해보정|피해감소|회복보정)\s*([^=<>!]*?)\s*(==|=)\s*(.+?)\s*$/);
+  if (mod) {
+    return { variable: mod[1].trim(), checkType: (mod[2] || "").trim(), value: mod[4].trim() };
+  }
+  var m = s.match(/^\s*([^\s=<>!]+)\s*(==|=)\s*(.+?)\s*$/);
   if (!m) return null;
   return { variable: m[1].trim(), value: m[3].trim() };
 }
@@ -6966,9 +7045,10 @@ function _parseSetEffect(effPart) {
 // 모디파이어 개념 변수(피해감소/피해보정/회복보정/판정보정)는 이번 단계에서는
 //   로그/반환값까지만 (실제 전투 합산 연동은 후속).
 // 그 외 변수는 오류 메시지 반환.
-function applySetEffect(variable, valueExpr, context) {
+function applySetEffect(variable, valueExpr, context, checkType) {
   context = context || {};
   var v = String(variable).trim();
+  var checkTypeStr = String(checkType || "").trim() || "전체";
 
   var alias = String(
     context.userAlias ||
@@ -7013,7 +7093,7 @@ function applySetEffect(variable, valueExpr, context) {
     if (v === "판정보정") {
       return addStatusToCharacter(modTarget, "판정보정", num >= 0 ? "강화" : "약화",
         num >= 0 ? "buff" : "debuff",
-        { value: num, trigger: "판정시작", checkType: "전체", stackMode: "덮어쓰기",
+        { value: num, trigger: "판정시작", checkType: checkTypeStr, stackMode: "덮어쓰기",
           source: context.skillName || "판정보정", memo: "" });
     }
     if (v === "피해보정" || v === "피해감소") {
@@ -7123,7 +7203,7 @@ function processSkillEffects(effectText, context) {
     // ── 값 설정 효과: "변수 = 값" / "변수 == 값" ──
     const setEff = _parseSetEffect(effPart);
     if (setEff) {
-      logs.push(applySetEffect(setEff.variable, setEff.value, context));
+      logs.push(applySetEffect(setEff.variable, setEff.value, context, setEff.checkType));
       return;
     }
 
@@ -8932,10 +9012,21 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
     var cond = evaluateConditionList(p["조건"], ctx);
     if (!cond.ok) return;
 
+    var name   = p["이름"] || p["key"];
+
+    // 효과 컬럼의 줄-효과(판정보정 [유형] = 값) 합산. 유형은 checkTypes와 매칭.
+    _collectPassiveEffectModifiers(p, ["판정보정"], ctx, checkTypes).forEach(function (m) {
+      if (m.mode === 'mult') {
+        if (m.value !== 1) { multSum += m.value; multCount++; lines.push("[패시브: " + name + "]\n판정 배율: ×" + m.value); }
+      } else {
+        var mv = Math.floor(m.value);
+        if (mv) { delta += mv; lines.push("[패시브: " + name + "]\n보정: " + formatSigned(mv)); }
+      }
+    });
+
     var parsed = _parsePassiveSuChi(p["수치"], ctx.vars);
     var dMult  = cond.detailMult  || 1;
     var dBonus = cond.detailBonus || 0;
-    var name   = p["이름"] || p["key"];
     if (parsed.mode === 'mult') {
       var factor = parsed.value * dMult;
       if (factor !== 1) { multSum += factor; multCount++; lines.push("[패시브: " + name + "]\n판정 배율: ×" + factor); }
@@ -11724,11 +11815,14 @@ function getEquipmentModifier(alias, checkTypes) {
       var effectCode = String(item["효과코드"] || "").trim();
       var value = Number(item["수치"] || 0);
       if (!effectCode || !value) return;
-      var m = effectCode.match(/^(스탯|액션|이능)보정:(.+)$/);
+      // 스탯/액션/계열 보정. (이능보정은 구데이터 하위호환 별칭 → 계열로 취급)
+      var m = effectCode.match(/^(스탯|액션|계열|이능)보정:(.+)$/);
       if (!m) return;
-      var targetName = m[2].trim();
+      // 대상은 콤마로 여러 개 지정 가능: "계열보정:화력,간섭".
+      var targets = m[2].split(/[,，、]/).map(function(s){ return s.trim(); }).filter(Boolean);
       var types = (checkTypes || []).map(function(t){ return String(t||"").trim(); });
-      if (types.indexOf(targetName) < 0 && types.indexOf("전체") < 0) return;
+      var matched = types.indexOf("전체") >= 0 || targets.some(function(t){ return types.indexOf(t) >= 0; });
+      if (!matched) return;
       delta += value;
       logs.push("[장비: " + String(eq["아이템명"]) + "]\n보정: " + formatSigned(value));
     });

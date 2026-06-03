@@ -4,6 +4,7 @@ import { ABILITY_NAMES } from '../data/abilities';
 import { PROFICIENCY_NAMES } from '../data/proficiencies';
 import { calcAllActions } from '../utils/calcAction';
 import { normalizeFormula } from '../utils/calcSkill';
+import { getSkillEffectText } from '../data/skillRanks';
 
 function Section({ title, children, right }) {
   return (
@@ -224,10 +225,7 @@ function AbilityGrid({ names, values, showZero, emptyLabel }) {
 }
 
 function SkillCard({ sk }) {
-  const effectLines = (sk?.effects ?? [])
-    .filter((e) => e?.confirmed)
-    .map((e) => e?.generatedText)
-    .filter(Boolean);
+  const effectText = getSkillEffectText(sk);
 
   return (
     <div className="rounded-xl border border-indigo-100 bg-white/80 p-3 space-y-1.5">
@@ -253,10 +251,10 @@ function SkillCard({ sk }) {
           })()}</code>
         </div>
       )}
-      {effectLines.length > 0 && (
+      {effectText && (
         <div className="rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-[11px] text-slate-700 whitespace-pre-wrap">
           <div className="text-[10px] text-slate-400 mb-0.5">효과</div>
-          {effectLines.join('\n')}
+          {effectText}
         </div>
       )}
       {(sk?.condition || sk?.cost || sk?.description) && (

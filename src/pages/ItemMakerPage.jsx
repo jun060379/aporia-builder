@@ -9,17 +9,17 @@ const CATEGORIES = ['소모품', '장비', '기타'];
 const SLOTS = ['무기', '방어구', '장신구1', '장신구2'];
 
 const EFFECT_KINDS = [
-  { id: '회복',     label: '회복',       needsTarget: false, note: '대상 HP 회복 (소모품)' },
-  { id: '스탯보정', label: '스탯 보정',  needsTarget: 'stat',   note: '판정 시 스탯 보정' },
-  { id: '액션보정', label: '액션 보정',  needsTarget: 'action', note: '판정 시 액션 보정' },
-  { id: '이능보정', label: '이능 보정',  needsTarget: 'power',  note: '판정 시 이능 보정' },
-  { id: '피해감소', label: '피해 감소',  needsTarget: false, note: '받는 피해 감소 (장비/소모품)' },
-  { id: '없음',     label: '효과 없음',  needsTarget: false, note: '효과코드 없음' },
+  { id: '회복',     label: '회복',       needsTarget: false,    note: '대상 HP 회복 (소모품)' },
+  { id: '스탯보정', label: '스탯 보정',  needsTarget: 'stat',   note: '판정 시 스탯 보정 (복수 선택 가능)' },
+  { id: '액션보정', label: '액션 보정',  needsTarget: 'action', note: '판정 시 액션 보정 (복수 선택 가능)' },
+  { id: '계열보정', label: '계열 보정',  needsTarget: 'series', note: '판정 시 스킬 계열 보정 (복수 선택 가능)' },
+  { id: '피해감소', label: '피해 감소',  needsTarget: false,    note: '받는 피해 감소 (장비/소모품)' },
+  { id: '없음',     label: '효과 없음',  needsTarget: false,    note: '효과코드 없음' },
 ];
 
-const STAT_NAMES   = ['근력', '민첩', '내구', '감각', '지능'];
-const ACTION_NAMES = ['참격', '관통', '타격', '격투', '사격', '방어', '회피', '저항', '조사', '해석', '은신', '추적', '설득'];
-const POWER_NAMES  = ['화력', '방호', '치유', '재생', '간섭', '강화'];
+const STAT_NAMES    = ['근력', '민첩', '내구', '감각', '지능'];
+const ACTION_NAMES  = ['참격', '관통', '타격', '격투', '사격', '방어', '회피', '저항', '조사', '해석', '은신', '추적', '설득'];
+const SERIES_NAMES  = ['화력', '방호', '치유', '재생', '간섭', '강화'];
 
 const ITEM_HEADERS = ['id', '이름', '분류', '슬롯', '효과코드', '수치', '횟수', '설명', '메모'];
 
@@ -35,16 +35,22 @@ const selectCls = 'w-full bg-white border border-slate-200 text-slate-900 rounde
 function targetOptions(needsTarget) {
   if (needsTarget === 'stat')   return STAT_NAMES;
   if (needsTarget === 'action') return ACTION_NAMES;
-  if (needsTarget === 'power')  return POWER_NAMES;
+  if (needsTarget === 'series') return SERIES_NAMES;
   return [];
+}
+
+// effectTarget은 콤마로 구분된 복수 대상 문자열. 예: "화력,간섭".
+function targetListOf(row) {
+  return String(row.effectTarget || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
 }
 
 function buildEffectCode(row) {
   const kind = EFFECT_KINDS.find(k => k.id === row.effectKind);
   if (!kind || kind.id === '없음') return '';
   if (kind.needsTarget) {
-    if (!row.effectTarget) return '';
-    return `${kind.id}:${row.effectTarget}`;
+    const targets = targetListOf(row);
+    if (!targets.length) return '';
+    return `${kind.id}:${targets.join(',')}`;
   }
   return kind.id;
 }
@@ -76,7 +82,7 @@ function ItemMaker() {
   const errors = useMemo(() => {
     const errs = [];
     if (!row.이름.trim()) errs.push('이름은 필수입니다.');
-    if (kind.needsTarget && !row.effectTarget) errs.push('효과 대상을 선택하세요.');
+    if (kind.needsTarget && !targetListOf(row).length) errs.push('효과 대상을 1개 이상 선택하세요.');
     if (row.분류 === '장비' && !row.슬롯) errs.push('장비는 슬롯이 필요합니다.');
     return errs;
   }, [row, kind]);
@@ -141,11 +147,14 @@ function ItemMaker() {
   }
 
   function editExisting(it) {
-    const ek = EFFECT_KINDS.find(k => it.effect.startsWith(k.id)) || EFFECT_KINDS.find(k => k.id === '없음');
-    const tgt = it.effect.includes(':') ? it.effect.split(':')[1] : '';
+    // 구데이터 "이능보정:..." → "계열보정:..." 로 정규화.
+    let eff = String(it.effect || '');
+    if (eff.startsWith('이능보정')) eff = '계열보정' + eff.slice('이능보정'.length);
+    const ek = EFFECT_KINDS.find(k => eff.startsWith(k.id)) || EFFECT_KINDS.find(k => k.id === '없음');
+    const tgt = eff.includes(':') ? eff.slice(eff.indexOf(':') + 1).trim() : '';
     setRow({
       이름: it.name, 분류: it.category || '소모품', 슬롯: it.slot || '무기',
-      effectKind: ek.id === '없음' && !it.effect ? '없음' : (ek.id || '없음'),
+      effectKind: ek.id === '없음' && !eff ? '없음' : (ek.id || '없음'),
       effectTarget: tgt,
       수치: it.value === '' ? '' : String(it.value),
       횟수: it.count === '' ? '' : String(it.count),
@@ -209,13 +218,33 @@ function ItemMaker() {
         <p className="text-[10px] text-slate-400">{kind.note}</p>
 
         {kind.needsTarget && (
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-slate-500">대상 선택</span>
-            <select className={selectCls} value={row.effectTarget} onChange={field('effectTarget')}>
-              <option value="">— 선택 —</option>
-              {targetOptions(kind.needsTarget).map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </label>
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-slate-500">대상 선택 (복수 가능 · 누르면 토글)</span>
+            <div className="flex flex-wrap gap-1.5">
+              {targetOptions(kind.needsTarget).map(t => {
+                const active = targetListOf(row).includes(t);
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setRow(r => {
+                      const list = String(r.effectTarget || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                      const i = list.indexOf(t);
+                      if (i >= 0) list.splice(i, 1); else list.push(t);
+                      return { ...r, effectTarget: list.join(',') };
+                    })}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                      active
+                        ? 'bg-violet-600 text-white border-violet-600'
+                        : 'bg-white text-slate-500 border-slate-200 hover:border-violet-300'
+                    }`}
+                  >
+                    {t}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
 
         <div className="grid grid-cols-2 gap-3">

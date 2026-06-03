@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
 import EffectBlockModal from './EffectBlockModal';
+import { STAT_NAMES } from '../data/stats';
+import { ACTIONS } from '../data/actions';
+import { SKILL_SERIES } from '../data/skillRanks';
 
 const inputCls = "w-full min-w-0 bg-white border border-slate-200 text-slate-900 rounded-lg px-2.5 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors font-mono";
 
@@ -45,6 +48,25 @@ const EFFECT_SET_PRESETS = [
   { label: '판정보정',     tpl: '판정보정 = ' },
   { label: '랜덤지정',     tpl: '랜덤상태부여 자신 지정 참격,관통,타격,사격,격투' },
 ];
+
+// 판정보정 유형 칩: 누르면 "판정보정 <유형> = " 템플릿 생성(유형별 보정).
+const JUDGMENT_TYPE_GROUPS = [
+  { label: '범주', items: ['전체', '스탯', '액션', '이능', '스킬', '대응', '저항'] },
+  { label: '스탯', items: STAT_NAMES },
+  { label: '액션', items: ACTIONS.map(a => a.name) },
+  { label: '계열', items: SKILL_SERIES.filter(s => s !== '특수') },
+];
+
+// "판정보정 <유형목록> = 값" 줄에서 유형 토큰을 추가/토글. 값(우변)은 보존.
+function addJudgmentType(eff, type) {
+  const m = String(eff || '').match(/^\s*판정보정\s*([^=]*?)\s*=\s*(.*)$/);
+  const val = m ? (m[2] || '') : '';
+  const prevTypes = m ? (m[1] || '') : '';
+  if (type === '전체') return `판정보정 = ${val}`;
+  const types = prevTypes.split(/[,，]/).map(s => s.trim()).filter(Boolean).filter(t => t !== '전체');
+  if (!types.includes(type)) types.push(type);
+  return `판정보정 ${types.join(',')} = ${val}`;
+}
 
 export default function EffectRowsEditor({ value, onChange }) {
   // 입력 중 공백/빈 효과가 직렬화에서 잘려나가지 않도록 내부 상태로 행을 보관.
@@ -139,6 +161,26 @@ export default function EffectRowsEditor({ value, onChange }) {
                 className="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 border border-indigo-200 transition-colors"
               >블럭 선택</button>
             </div>
+
+            {/* 판정보정 줄일 때: 적용 판정 유형 칩 (판정보정 <유형> = 값) */}
+            {row.eff.trim().startsWith('판정보정') && (
+              <div className="space-y-1 rounded-lg bg-violet-50/60 border border-violet-100 p-1.5">
+                <p className="text-[10px] text-violet-500 font-semibold">적용 판정 유형 (비우면 모든 판정)</p>
+                {JUDGMENT_TYPE_GROUPS.map(grp => (
+                  <div key={grp.label} className="flex flex-wrap gap-1 items-center">
+                    <span className="text-[10px] text-slate-400 w-7 shrink-0">{grp.label}</span>
+                    {grp.items.map(it => (
+                      <button
+                        key={it}
+                        type="button"
+                        onClick={() => patchRow(i, { eff: addJudgmentType(row.eff, it) })}
+                        className="text-[10px] px-1.5 py-0.5 bg-white hover:bg-violet-100 text-slate-500 hover:text-violet-700 border border-slate-200 hover:border-violet-300 rounded transition-colors"
+                      >{it}</button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -153,6 +195,7 @@ export default function EffectRowsEditor({ value, onChange }) {
         <p className="font-semibold mb-0.5">문법</p>
         <p>조건 연산자: <code>&lt;= &gt;= &lt; &gt; == !=</code> · 설정 효과: <code>변수 = 값</code> (또는 <code>==</code>)</p>
         <p>설정 가능 변수: 이면침식 · 현재체력 · 일상점 · 피해감소 · 회복보정 · 판정보정</p>
+        <p><code>판정보정 참격,관통 = 3</code> — 변수와 <code>=</code> 사이에 콤마로 판정 유형을 넣으면 해당 유형 판정에만 보정(비우면 전체). <code>*N</code> 으로 배율도 가능.</p>
         <p>기존 효과(<code>상태부여</code>·<code>스택증가</code> 등)도 그대로 입력 가능. 조건을 비우면 항상 실행됩니다.</p>
         <p className="mt-1"><code>랜덤상태부여 자신 지정 참격,관통,타격,사격,격투</code> — 목록 중 무작위 1개로 <code>지정_OO</code> 상태 부여(나머지 제거). 수치 옵션 주면 해당 액션 판정 버프도 함께.</p>
         <p>조건에서 <code>사용액션</code>(방금 쓴 액션·스킬명) · <code>상태접미_지정</code>(현재 지정된 항목)을 비교 가능. 예: <code>사용액션 == 상태접미_지정</code></p>

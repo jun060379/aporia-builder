@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { createApplication } from '../lib/applications';
 import {
   ENEMY_SKILL_CATEGORIES,
@@ -8,7 +8,7 @@ import {
   buildEnemySkillText,
   isEffectAutoApplicable,
 } from '../lib/enemyText';
-import EnemySkillEffectBuilder from './EnemySkillEffectBuilder.jsx';
+import EffectRowsEditor from './EffectRowsEditor.jsx';
 import EnemySkillEffectPreview from './EnemySkillEffectPreview.jsx';
 import ConditionEditor from './ConditionEditor.jsx';
 
@@ -48,7 +48,6 @@ export default function EnemySkillForm() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  const effectRef = useRef(null);
   const keyHasSpace = useMemo(() => /\s/.test(skillKey), [skillKey]);
 
   const previewPayload = useMemo(() => ({
@@ -200,17 +199,7 @@ export default function EnemySkillForm() {
       {/* 효과 제작 */}
       <section className="space-y-2">
         <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">효과 제작</h3>
-        <EnemySkillEffectBuilder value={effect} onChange={setEffect} textareaRef={effectRef} />
-        <Field label="효과 (effect)">
-          <textarea
-            ref={effectRef}
-            value={effect}
-            onChange={(e) => setEffect(e.target.value)}
-            rows={4}
-            className={inputCls}
-            placeholder="비워두면 효과 없음으로 저장됩니다."
-          />
-        </Field>
+        <EffectRowsEditor value={effect} onChange={setEffect} />
         <div>
           <div className="text-[11px] font-medium text-slate-500 mb-1">효과 미리보기</div>
           <EnemySkillEffectPreview value={effect} />

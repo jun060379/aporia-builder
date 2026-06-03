@@ -53,16 +53,11 @@ export default function Checklist({ remaining, skills }) {
   const skillsWithErrors = skills.filter(sk => validateFormula(sk.formula ?? '').length > 0);
   const formulaOk = skillsWithErrors.length === 0;
 
-  const skillsWithUnconfirmed = skills.filter(sk =>
-    sk.effects && sk.effects.length > 0 && sk.effects.some(e => !e.confirmed)
-  );
-  const effectsOk = skillsWithUnconfirmed.length === 0;
-
   const targetSkills = skills.filter(sk => hasTargetReference(sk.formula ?? ''));
   const targetConditionOk = targetSkills.length === 0 ||
     targetSkills.every(sk => (sk.condition ?? '').includes('대상'));
 
-  const allOk = budgetOk && formulaOk && effectsOk &&
+  const allOk = budgetOk && formulaOk &&
     (targetSkills.length === 0 || targetConditionOk) && manualChecks.copied;
 
   return (
@@ -90,13 +85,6 @@ export default function Checklist({ remaining, skills }) {
           status={formulaOk ? 'ok' : 'err'}
           label={formulaOk ? '스킬 계산식에 오류가 없습니다.' : `계산식 오류 (${skillsWithErrors.length}개 스킬)`}
           detail={formulaOk ? undefined : `오류 스킬: ${skillsWithErrors.map(s => s.name || '(이름 없음)').join(', ')}`}
-        />
-
-        <CheckItem
-          auto
-          status={effectsOk ? 'ok' : 'warn'}
-          label={effectsOk ? '모든 효과가 확정되었습니다.' : `미확정 효과 있음 (${skillsWithUnconfirmed.length}개 스킬)`}
-          detail={effectsOk ? undefined : '스킬 메이커에서 효과를 확정해주세요.'}
         />
 
         {targetSkills.length > 0 && (

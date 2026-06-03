@@ -3,6 +3,7 @@ import { STAT_NAMES } from '../data/stats';
 import { ABILITY_NAMES } from '../data/abilities';
 import { PROFICIENCY_NAMES } from '../data/proficiencies';
 import { normalizeFormula } from '../utils/calcSkill';
+import { getSkillEffectText } from '../data/skillRanks';
 
 function CopyBlock({ title, text }) {
   const [copied, setCopied] = useState(false);
@@ -35,13 +36,9 @@ function CopyBlock({ title, text }) {
 }
 
 function buildSkillText(sk) {
-  const effectLines = (sk.effects ?? [])
-    .filter(e => e.confirmed)
-    .map(e => e.generatedText)
-    .filter(Boolean);
-
-  const effectBlock = effectLines.length > 0
-    ? '효과:\n' + effectLines.join('\n')
+  const effectText = getSkillEffectText(sk);
+  const effectBlock = effectText
+    ? '효과:\n' + effectText
     : '효과:\n없음';
 
   return [
