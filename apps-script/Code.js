@@ -7198,6 +7198,8 @@ function processSkillEffects(effectText, context) {
         const condChar = context.character ||
           (context.userAlias ? findCharacterByAlias(context.userAlias) : null);
         const condCtx = buildConditionContext(condChar, context.targetAlias || "");
+        // 방금 사용한 액션/스킬명을 줄 조건에 노출 (예: 사용액션 == 상태접미_지정)
+        if (context.usedAction !== undefined) condCtx.vars["사용액션"] = String(context.usedAction || "");
         const condResult = evaluateConditionList(condPart, condCtx);
         if (!condResult.ok) {
           logs.push("[조건 미충족] " + condPart);
@@ -7310,7 +7312,7 @@ function processSkillEffects(effectText, context) {
         }
       ));
 
-      logs.push("[랜덤 지정] " + (opts["문구"] || ("이번 턴 지정: " + pick)));
+      logs.push("[랜덤 지정] " + (opts["문구"] ? (opts["문구"] + ": " + pick) : ("이번 턴 지정: " + pick)));
       return;
     }
 
@@ -9099,6 +9101,7 @@ function firePassiveTriggerEffects(character, trigger, ctxOpts) {
         userAlias: alias,
         targetAlias: targetAlias,
         finalValue: Number(ctxOpts.finalValue || 0),
+        usedAction: String(triggerArg || ""),  // 효과 줄 조건에서 사용액션 == 상태접미_X 비교 지원
         skillName: "패시브: " + (p["이름"] || p["key"]),
         skill: { 스킬명: p["이름"] || p["key"], 효과: effectText },
         resistanceMode: ctxOpts.resistanceMode || RESIST_NONE
