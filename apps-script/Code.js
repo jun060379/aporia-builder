@@ -652,8 +652,9 @@ function commandListCommand() {
     "  !아이템사용 <아이템명> [대상:별명]",
     "",
     "[ 세션 ]",
-    "  !fin                극/세션 종료 (임시 상태/스택 정리)",
+    "  !fin                극/세션 종료 (전체 임시 상태/스택 정리)",
     "  !fin <메시지>",
+    "  !fin 별명1 별명2 …  지정 캐릭터만 상태/스택 초기화",
     "  !fin --keep-status  상태 유지, 스택만 정리",
     "  !fin --keep-stack   스택 유지, 상태만 정리",
     "  !fin --no-clear     메시지만 출력",
@@ -8557,7 +8558,8 @@ function _finAppendMemo(oldMemo) {
   return base ? (base + " | " + tag) : tag;
 }
 
-function clearTemporaryStatuses() {
+// aliasSet: {별명: true} 형태의 필터. 주면 해당 대상만 정리. 없으면 전체.
+function clearTemporaryStatuses(aliasSet) {
   var rows;
   try {
     rows = getSheetData(SHEET_STATUS_DB);
@@ -8572,6 +8574,7 @@ function clearTemporaryStatuses() {
   rows.forEach(function (r) {
     var state = String(r["상태"] || "").trim();
     if (state !== "ACTIVE") return;
+    if (aliasSet && !aliasSet[String(r["대상"] || "").trim()]) return;
 
     if (_finStatusShouldKeep(r)) {
       kept++;
@@ -8589,7 +8592,8 @@ function clearTemporaryStatuses() {
   return { cleared: cleared, kept: kept };
 }
 
-function clearTemporaryStacks() {
+// aliasSet: {별명: true} 형태의 필터. 주면 해당 대상만 정리. 없으면 전체.
+function clearTemporaryStacks(aliasSet) {
   var ss = _getSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_STACK_DB);
   if (!sheet) return { cleared: 0, kept: 0 };
@@ -8616,6 +8620,7 @@ function clearTemporaryStacks() {
 
     var current = Number(rowObj["수치"] || 0);
     if (isNaN(current) || current <= 0) continue;
+    if (aliasSet && !aliasSet[String(rowObj["대상"] || "").trim()]) continue;
 
     if (_finStackShouldKeep(rowObj)) {
       kept++;
@@ -8641,7 +8646,7 @@ function finishSession(parts, displayName) {
   var keepStatus = false;
   var keepStack = false;
   var noClear = false;
-  var msgTokens = [];
+  var rest = [];
 
   tokens.forEach(function (t) {
     var s = String(t || "").trim();
@@ -8649,7 +8654,7 @@ function finishSession(parts, displayName) {
     if (s === "--keep-status") { keepStatus = true; return; }
     if (s === "--keep-stack")  { keepStack  = true; return; }
     if (s === "--no-clear")    { noClear    = true; return; }
-    msgTokens.push(s);
+    rest.push(s);
   });
 
   if (noClear) {
@@ -8657,16 +8662,34 @@ function finishSession(parts, displayName) {
     keepStack = true;
   }
 
-  var message = msgTokens.join(" ").trim();
+  // 비-플래그 토큰이 전부 캐릭터 별명으로 해석되면 → 그 캐릭터들만 초기화.
+  //   (!fin 캐릭터1 캐릭터2 ...)
+  // 하나라도 별명이 아니면 → 전체 토큰을 종료 메시지로 취급(기존 동작).
+  var targetAliases = [];
+  var aliasSet = null;
+  if (rest.length > 0) {
+    var resolved = rest.map(function (t) {
+      var c = findCharacterByAlias(t);
+      return c ? String(c["별명"] || t).trim() : null;
+    });
+    if (resolved.every(function (x) { return !!x; })) {
+      aliasSet = {};
+      resolved.forEach(function (a) { if (!aliasSet[a]) { aliasSet[a] = true; targetAliases.push(a); } });
+    }
+  }
+  var targeted = !!aliasSet;
+
+  var message = targeted ? "" : rest.join(" ").trim();
   if (!message) message = "...다음 시간에 계속.";
 
-  // 세션종료 패시브 효과 (모든 캐릭터 대상)
+  // 세션종료 패시브 효과 (대상 지정 시 해당 캐릭터만, 아니면 전체)
   var passiveLogs = [];
   try {
     var allChars = getSheetData(SHEET_BOT_DB);
     allChars.forEach(function (ch) {
       var aliasV = String(ch["별명"] || "").trim();
       if (!aliasV) return;
+      if (aliasSet && !aliasSet[aliasV]) return;
       var out = firePassiveTriggerEffects(ch, "세션종료", { resistanceMode: RESIST_NONE });
       if (out) passiveLogs.push("[" + aliasV + "]\n" + out);
     });
@@ -8674,13 +8697,22 @@ function finishSession(parts, displayName) {
     // 패시브 시트 없거나 오류 → 무시.
   }
 
-  var statusResult = keepStatus ? { cleared: 0, kept: 0 } : clearTemporaryStatuses();
-  var stackResult  = keepStack  ? { cleared: 0, kept: 0 } : clearTemporaryStacks();
+  var statusResult = keepStatus ? { cleared: 0, kept: 0 } : clearTemporaryStatuses(aliasSet);
+  var stackResult  = keepStack  ? { cleared: 0, kept: 0 } : clearTemporaryStacks(aliasSet);
 
+  // ── 접힌 요약: 종료 메시지만 ──
+  var summaryLines = ["[극/세션 종료]"];
+  if (targeted) summaryLines.push("대상: " + targetAliases.join(", "));
+  summaryLines.push("");
+  summaryLines.push(message);
+  var summary = summaryLines.join("\n");
+
+  // ── 상세: 정리 결과/옵션/패시브 ──
   var lines = [];
-  lines.push("[극/세션 종료]");
-  lines.push("");
-  lines.push(message);
+  lines.push("[극/세션 종료 상세]");
+  lines.push(targeted
+    ? "초기화 대상: " + targetAliases.join(", ") + " (" + targetAliases.length + "명)"
+    : "초기화 범위: 전체 캐릭터");
   lines.push("");
   lines.push("정리 결과:");
   lines.push("상태 초기화: " + statusResult.cleared + "개");
@@ -8703,7 +8735,7 @@ function finishSession(parts, displayName) {
     lines.push(passiveLogs.join("\n\n"));
   }
 
-  return lines.join("\n");
+  return makeFoldedResponse(summary, lines.join("\n"));
 }
 
 // =====================================================================
