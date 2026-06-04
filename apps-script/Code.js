@@ -11071,6 +11071,11 @@ function handlePortalWebhook(body) {
     return registerItemFromPayload((body && body.item) || null);
   }
 
+  // 캐릭터 스킬 직접 등록 (관리자 전용)
+  if (action === "register_skill") {
+    return registerSkillFromPayload((body && body.skill) || null);
+  }
+
   if (action !== "approve_application") {
     return { ok: false, error: "Unsupported action: " + action };
   }
@@ -12412,6 +12417,61 @@ function registerItemFromPayload(item) {
     }
   } catch (err) {
     return { ok: false, error: "[아이템 등록 오류] " + (err && err.message ? err.message : String(err)) };
+  }
+}
+
+// 캐릭터 스킬 직접 등록(운영자 도구 → Vercel admin 검증 후 호출).
+// (소유자 + 스킬명)으로 upsert. SKILL_DB 컬럼: 소유자/스킬명/계통/계열/랭크/계산식/효과/조건/대가/설명.
+function registerSkillFromPayload(skill) {
+  try {
+    if (!skill || typeof skill !== "object") return { ok: false, error: "skill 데이터가 비어 있습니다." };
+    var owner = String(skill["소유자"] || skill.owner || "").trim();
+    var name  = String(skill["스킬명"] || skill.name || "").trim();
+    if (!owner) return { ok: false, error: "소유자(캐릭터 별명)는 필수입니다." };
+    if (!name)  return { ok: false, error: "스킬명은 필수입니다." };
+    if (!findCharacterRowByAlias(owner)) return { ok: false, error: "소유자 캐릭터를 찾을 수 없습니다: " + owner };
+
+    var now = getNowText();
+    var row = {
+      소유자:  owner,
+      스킬명:  name,
+      계통:    String(skill["계통"]   || "").trim(),
+      계열:    String(skill["계열"]   || "").trim(),
+      랭크:    String(skill["랭크"]   || "").trim(),
+      계산식:  String(skill["계산식"] || "").trim(),
+      효과:    String(skill["효과"]   || "").trim(),
+      조건:    String(skill["조건"]   || "").trim(),
+      대가:    String(skill["대가"]   || "").trim(),
+      설명:    String(skill["설명"]   || "").trim(),
+      승인자:  "aporia-portal",
+      승인일:  now
+    };
+
+    // (소유자+스킬명) 일치 행 있으면 갱신, 없으면 추가.
+    var data = getSheetData(SHEET_SKILL_DB);
+    var idx = -1;
+    for (var i = 0; i < data.length; i++) {
+      if (String(data[i]["소유자"]).trim() === owner && String(data[i]["스킬명"]).trim() === name) { idx = i; break; }
+    }
+
+    if (idx >= 0) {
+      var sh = _getSpreadsheet().getSheetByName(SHEET_SKILL_DB);
+      var headers = getSheetHeaders(SHEET_SKILL_DB);
+      var rowNum = idx + 2; // 헤더 1행 + 1-based
+      headers.forEach(function (h, c) {
+        if (row[h] !== undefined) sh.getRange(rowNum, c + 1).setValue(row[h]);
+      });
+      invalidateSheetCache(SHEET_SKILL_DB);
+      invalidateGameDataCache();
+      return { ok: true, message: "스킬 갱신됨", name: name, owner: owner, mode: "updated" };
+    }
+
+    appendRowByHeaders(SHEET_SKILL_DB, row);
+    invalidateSheetCache(SHEET_SKILL_DB);
+    invalidateGameDataCache();
+    return { ok: true, message: "스킬 등록됨", name: name, owner: owner, mode: "inserted" };
+  } catch (err) {
+    return { ok: false, error: "[스킬 등록 오류] " + (err && err.message ? err.message : String(err)) };
   }
 }
 

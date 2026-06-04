@@ -621,7 +621,7 @@ function ArchField({ field: f, meta, onChange }) {
   );
 }
 
-function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCancel }) {
+function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCancel, onChange }) {
   // 효과는 줄=효과 문자열(skill.효과). 레거시 effects[]가 있으면 로드 시 변환.
   const initSkill = (src) => {
     const s = src || defaultSkill();
@@ -644,6 +644,12 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
     setMode(initMode(editingSkill));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingSkill]);
+
+  // 실시간 미리보기용 — 스킬 상태 변경마다 부모에 통지.
+  useEffect(() => {
+    if (onChange) { const { effects, ...rest } = skill; onChange(rest); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skill]);
 
   const field = (key) => (e) => setSkill(s => ({ ...s, [key]: e.target.value }));
 
@@ -989,6 +995,7 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
 export default function SkillMaker({
   editingSkill, stats, abilities, proficiencies, onSave, onCancel,
   editingPassive, onSavePassive, onUpdatePassive, onCancelPassiveEdit,
+  onSkillChange,
 }) {
   // 편집 중일 때는 해당 모드 고정
   const [mode, setMode] = useState('skill');
@@ -1054,6 +1061,7 @@ export default function SkillMaker({
           proficiencies={proficiencies}
           onSave={onSave}
           onCancel={onCancel}
+          onChange={onSkillChange}
         />
       ) : (
         <PassiveForm
