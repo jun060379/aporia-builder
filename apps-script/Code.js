@@ -3408,8 +3408,8 @@ function _computeSkillRollCore(character, skillRow, rank, mods, targetAlias) {
   let finalValue = applyMods(result, mods);
   const statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type, KIND_RESPONSE], targetAlias || "");
   finalValue = statusMod.value;
-  // 장비 계열 보정: 스킬의 계열(type)에 맞는 계열보정 장비를 합산.
-  const equipMod = getEquipmentModifier(alias, [KIND_SKILL, type]);
+  // 장비 계열/계통 보정: 스킬의 계열(type)·계통에 맞는 계열보정/계통보정 장비를 합산.
+  const equipMod = getEquipmentModifier(alias, [KIND_SKILL, type, String(skillRow["계통"] || "").trim()]);
   finalValue += equipMod.delta;
 
   // 이면침식 배율은 모든 보정 완료 후 마지막에 적용
@@ -3613,8 +3613,8 @@ function skillUse(parts, displayName) {
     // 세부 조건 보정 적용 (곱셈 → 덧셈 순)
     if (condDetailMult !== 1) finalValue = Math.floor(finalValue * condDetailMult);
     if (condDetailBonus !== 0) finalValue += condDetailBonus;
-    // 장비 계열 보정: 스킬 계열(type)에 맞는 계열보정 장비 합산.
-    equipMod = getEquipmentModifier(alias, [KIND_SKILL, type]);
+    // 장비 계열/계통 보정: 스킬 계열(type)·계통에 맞는 계열보정/계통보정 장비 합산.
+    equipMod = getEquipmentModifier(alias, [KIND_SKILL, type, String(skill["계통"] || "").trim()]);
     finalValue += equipMod.delta;
     // 이면침식 배율은 모든 보정 완료 후 마지막에 적용
   } catch (e) {
@@ -11760,8 +11760,8 @@ function commonSkillUseCommand(parts, displayName) {
     finalValue = statusMod.value;
     if (condDetailMult !== 1) finalValue = Math.floor(finalValue * condDetailMult);
     if (condDetailBonus !== 0) finalValue += condDetailBonus;
-    // 장비 계열 보정: 공용 스킬 계열(type)에 맞는 계열보정 장비 합산.
-    equipMod = getEquipmentModifier(alias, [KIND_SKILL, type]);
+    // 장비 계열/계통 보정: 공용 스킬 계열(type)·계통에 맞는 계열보정/계통보정 장비 합산.
+    equipMod = getEquipmentModifier(alias, [KIND_SKILL, type, String(commonSkill["계통"] || "").trim()]);
     finalValue += equipMod.delta;
     // 이면침식 배율은 모든 보정 완료 후 마지막에 적용
   } catch (e) {
@@ -11994,10 +11994,10 @@ function getEquipmentModifier(alias, checkTypes) {
       var effectCode = String(item["효과코드"] || "").trim();
       var value = Number(item["수치"] || 0);
       if (!effectCode || !value) return;
-      // 스탯/액션/계열 보정. (이능보정은 구데이터 하위호환 별칭 → 계열로 취급)
-      var m = effectCode.match(/^(스탯|액션|계열|이능)보정:(.+)$/);
+      // 스탯/액션/계열/계통 보정. (이능보정은 구데이터 하위호환 별칭 → 계열로 취급)
+      var m = effectCode.match(/^(스탯|액션|계열|계통|이능)보정:(.+)$/);
       if (!m) return;
-      // 대상은 콤마로 여러 개 지정 가능: "계열보정:화력,간섭".
+      // 대상은 콤마로 여러 개 지정 가능: "계열보정:화력,간섭" / "계통보정:마술,주술".
       var targets = m[2].split(/[,，、]/).map(function(s){ return s.trim(); }).filter(Boolean);
       var types = (checkTypes || []).map(function(t){ return String(t||"").trim(); });
       var matched = types.indexOf("전체") >= 0 || targets.some(function(t){ return types.indexOf(t) >= 0; });

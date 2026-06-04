@@ -11,17 +11,19 @@ const SLOTS = ['무기', '방어구', '장신구1', '장신구2'];
 const EQUIP_RANKS = ['', 'F', 'E', 'D', 'C', 'B', 'A', 'S', 'U', 'EX'];
 
 const EFFECT_KINDS = [
-  { id: '회복',     label: '회복',       needsTarget: false,    note: '대상 HP 회복 (소모품)' },
-  { id: '스탯보정', label: '스탯 보정',  needsTarget: 'stat',   note: '판정 시 스탯 보정 (복수 선택 가능)' },
-  { id: '액션보정', label: '액션 보정',  needsTarget: 'action', note: '판정 시 액션 보정 (복수 선택 가능)' },
-  { id: '계열보정', label: '계열 보정',  needsTarget: 'series', note: '판정 시 스킬 계열 보정 (복수 선택 가능)' },
-  { id: '피해감소', label: '피해 감소',  needsTarget: false,    note: '받는 피해 감소 (장비/소모품)' },
-  { id: '없음',     label: '효과 없음',  needsTarget: false,    note: '효과코드 없음' },
+  { id: '회복',     label: '회복',       needsTarget: false,       note: '대상 HP 회복 (소모품)' },
+  { id: '스탯보정', label: '스탯 보정',  needsTarget: 'stat',      note: '판정 시 스탯 보정 (복수 선택 가능)' },
+  { id: '액션보정', label: '액션 보정',  needsTarget: 'action',    note: '판정 시 액션 보정 (복수 선택 가능)' },
+  { id: '계열보정', label: '계열 보정',  needsTarget: 'series',    note: '판정 시 스킬 계열 보정 (복수 선택 가능)' },
+  { id: '계통보정', label: '계통 보정',  needsTarget: 'tradition', note: '판정 시 스킬 계통 보정 (복수 선택 가능)' },
+  { id: '피해감소', label: '피해 감소',  needsTarget: false,       note: '받는 피해 감소 (장비/소모품)' },
+  { id: '없음',     label: '효과 없음',  needsTarget: false,       note: '효과코드 없음' },
 ];
 
-const STAT_NAMES    = ['근력', '민첩', '내구', '감각', '지능'];
-const ACTION_NAMES  = ['참격', '관통', '타격', '격투', '사격', '방어', '회피', '저항', '조사', '해석', '은신', '추적', '설득'];
-const SERIES_NAMES  = ['화력', '방호', '치유', '재생', '간섭', '강화'];
+const STAT_NAMES      = ['근력', '민첩', '내구', '감각', '지능'];
+const ACTION_NAMES    = ['참격', '관통', '타격', '격투', '사격', '방어', '회피', '저항', '조사', '해석', '은신', '추적', '설득'];
+const SERIES_NAMES    = ['화력', '방호', '치유', '재생', '간섭', '강화', '특수'];
+const TRADITION_NAMES = ['마술', '주술', '신성', '마법', '혈계', '요력', '특수'];
 
 const ITEM_HEADERS = ['id', '이름', '분류', '슬롯', '랭크', '효과코드', '수치', '횟수', '설명', '메모'];
 
@@ -35,9 +37,10 @@ const inputCls  = 'w-full bg-white border border-slate-200 text-slate-900 rounde
 const selectCls = 'w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 outline-none transition-colors';
 
 function targetOptions(needsTarget) {
-  if (needsTarget === 'stat')   return STAT_NAMES;
-  if (needsTarget === 'action') return ACTION_NAMES;
-  if (needsTarget === 'series') return SERIES_NAMES;
+  if (needsTarget === 'stat')      return STAT_NAMES;
+  if (needsTarget === 'action')    return ACTION_NAMES;
+  if (needsTarget === 'series')    return SERIES_NAMES;
+  if (needsTarget === 'tradition') return TRADITION_NAMES;
   return [];
 }
 
