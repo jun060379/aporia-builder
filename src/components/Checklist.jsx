@@ -44,7 +44,7 @@ function CheckItem({ auto, checked, onChange, label, detail, status }) {
   );
 }
 
-export default function Checklist({ remaining, skills }) {
+export default function Checklist({ remaining, skills, passives }) {
   const [manualChecks, setManualChecks] = useState({ targetCond: false, copied: false });
   const toggle = (key) => setManualChecks(p => ({ ...p, [key]: !p[key] }));
 
@@ -53,11 +53,13 @@ export default function Checklist({ remaining, skills }) {
   const skillsWithErrors = skills.filter(sk => validateFormula(sk.formula ?? '').length > 0);
   const formulaOk = skillsWithErrors.length === 0;
 
+  const passiveOk = (passives?.length ?? 0) > 0;
+
   const targetSkills = skills.filter(sk => hasTargetReference(sk.formula ?? ''));
   const targetConditionOk = targetSkills.length === 0 ||
     targetSkills.every(sk => (sk.condition ?? '').includes('대상'));
 
-  const allOk = budgetOk && formulaOk &&
+  const allOk = budgetOk && formulaOk && passiveOk &&
     (targetSkills.length === 0 || targetConditionOk) && manualChecks.copied;
 
   return (
@@ -85,6 +87,13 @@ export default function Checklist({ remaining, skills }) {
           status={formulaOk ? 'ok' : 'err'}
           label={formulaOk ? '스킬 계산식에 오류가 없습니다.' : `계산식 오류 (${skillsWithErrors.length}개 스킬)`}
           detail={formulaOk ? undefined : `오류 스킬: ${skillsWithErrors.map(s => s.name || '(이름 없음)').join(', ')}`}
+        />
+
+        <CheckItem
+          auto
+          status={passiveOk ? 'ok' : 'err'}
+          label={passiveOk ? `패시브 ${passives.length}개 등록됨` : '패시브를 1개 이상 등록해야 합니다.'}
+          detail={passiveOk ? undefined : '스킬 패널 → 패시브 신청에서 1개 이상 추가하세요.'}
         />
 
         {targetSkills.length > 0 && (

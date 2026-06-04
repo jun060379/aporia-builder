@@ -10,9 +10,15 @@ export default function SubmitApplicationPanel({ char, stats, abilities, profici
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
+  const hasPassive = (passives?.length ?? 0) > 0;
+
   const handleSubmit = async () => {
     setError('');
     setNotice('');
+    if (!hasPassive) {
+      setError('패시브를 1개 이상 등록해야 신청할 수 있습니다. (스킬 패널 → 패시브 신청)');
+      return;
+    }
     setSubmitting(true);
     try {
       const title = (char?.name && String(char.name).trim()) || '이름 없는 캐릭터 데이터';
@@ -71,10 +77,15 @@ export default function SubmitApplicationPanel({ char, stats, abilities, profici
           <p className="text-xs text-slate-500">
             현재 빌더의 캐릭터 데이터를 제출합니다. 제출 후 <Link to="/my" className="text-violet-600 hover:underline">내 신청 목록</Link>에서 상태를 확인할 수 있습니다.
           </p>
+          {!hasPassive && (
+            <p className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-700">
+              ⚠ 패시브를 1개 이상 등록해야 신청할 수 있습니다. (스킬 패널 → 패시브 신청)
+            </p>
+          )}
           <button
             onClick={handleSubmit}
-            disabled={submitting}
-            className="inline-flex items-center rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm shadow-violet-200 hover:from-violet-700 hover:to-indigo-700 active:scale-[0.98] transition disabled:opacity-60"
+            disabled={submitting || !hasPassive}
+            className="inline-flex items-center rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm shadow-violet-200 hover:from-violet-700 hover:to-indigo-700 active:scale-[0.98] transition disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {submitting ? '신청 중...' : '등록 신청'}
           </button>

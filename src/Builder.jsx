@@ -323,7 +323,7 @@ export default function App() {
 
           {rightTab === '신청텍스트' && (
             <div className="space-y-3">
-              <Checklist remaining={remaining} skills={skills} />
+              <Checklist remaining={remaining} skills={skills} passives={passives} />
               <SubmitApplicationPanel char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} passives={passives} />
               <ApplicationText char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} passives={passives} />
             </div>
