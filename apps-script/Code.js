@@ -467,6 +467,7 @@ function handleCommand(utterance, displayName) {
 
   if (command === "!수정") return characterModify(parts, displayName);
   if (command === "!성장") return characterGrow(parts, displayName);
+  if (command === "!경험치") return experienceGrant(parts, displayName);
 
   if (command === "!관계등록") return anchorRegister(utterance, displayName);
   if (command === "!관계수정") return anchorModify(parts, displayName);
@@ -574,6 +575,7 @@ function commandListCommand() {
     "  !캐릭터반려  <신청번호> <사유>",
     "  !수정        <캐릭터별명> <항목> <값>",
     "  !성장        <캐릭터별명> <항목>",
+    "  !경험치      <별명1> [별명2 …] <경험치량>  (다수 동시 부여)",
     "",
     "[ 판정 · 액션 ]",
     "  !판정        <스탯명> [난이도] [보정]",
@@ -4283,6 +4285,76 @@ function characterGrow(parts, displayName) {
     "변경 후 사용점수: " + refreshed.used + "\n" +
     "남은점수: " + refreshed.remain
   );
+}
+
+// !경험치 별명1 [별명2 ...] 경험치량
+// 여러 캐릭터에게 동시에 경험치를 가산(마지막 토큰이 부여량, 음수 가능).
+// 레벨은 BOT_DB의 시트 함수가 경험치로 자동 계산하므로 flush 후 재읽기.
+function experienceGrant(parts, displayName) {
+  var tokens = (parts || []).slice(1).map(function (t) { return String(t || "").trim(); }).filter(Boolean);
+  if (tokens.length < 2) {
+    return (
+      "사용법: !경험치 별명1 [별명2 ...] 경험치량\n\n" +
+      "예시:\n" +
+      "!경험치 월하륜 아테나 샤를 50\n" +
+      "!경험치 월하륜 +30   (음수도 가능: -10)\n\n" +
+      "마지막 값이 부여할 경험치량입니다."
+    );
+  }
+
+  var amountToken = tokens[tokens.length - 1];
+  if (!/^[+-]?\d+$/.test(amountToken)) {
+    return "경험치량(마지막 값)은 정수여야 합니다: " + amountToken;
+  }
+  var amount = parseInt(amountToken, 10);
+  var aliases = tokens.slice(0, tokens.length - 1);
+
+  var results = [];
+  var notFound = [];
+  var oldLevels = {};
+
+  // 1) 경험치 가산 (찾은 캐릭터만)
+  aliases.forEach(function (a) {
+    var found = findCharacterRowByAlias(a);
+    if (!found) { notFound.push(a); return; }
+    var idx = found.headers.indexOf("경험치");
+    if (idx < 0) { notFound.push(a + "(경험치 열 없음)"); return; }
+    var canonical = String(found.character["별명"] || a).trim();
+    if (oldLevels.hasOwnProperty(canonical)) return; // 중복 별명 방지
+    var oldExp = Number(found.character["경험치"] || 0);
+    var newExp = Math.max(0, oldExp + amount);
+    oldLevels[canonical] = readCharacterLevel(found.character);
+    found.sheet.getRange(found.rowIndex, idx + 1).setValue(newExp);
+    results.push({ alias: canonical, oldExp: oldExp, newExp: newExp });
+  });
+
+  if (results.length === 0) {
+    return "[경험치 부여 실패]\n적용된 캐릭터가 없습니다.\n찾을 수 없음: " + (notFound.join(", ") || "-");
+  }
+
+  SpreadsheetApp.flush();
+
+  // 2) 레벨/예산 재계산 + 보고
+  var lines = [];
+  lines.push("[경험치 부여]");
+  lines.push("처리자: " + displayName);
+  lines.push("부여량: " + (amount >= 0 ? "+" : "") + amount);
+  lines.push("");
+  results.forEach(function (r) {
+    var after = rereadCharacterRow(r.alias);
+    var newLevel = after ? readCharacterLevel(after.character) : oldLevels[r.alias];
+    try { refreshCharacterBudget(r.alias); } catch (_e) {}
+    var oldLv = oldLevels[r.alias];
+    var lvText = "";
+    if (newLevel > oldLv) lvText = "  ▲ Lv." + oldLv + "→" + newLevel + " 레벨업!";
+    else if (newLevel < oldLv) lvText = "  ▼ Lv." + oldLv + "→" + newLevel;
+    lines.push("• " + r.alias + ": 경험치 " + r.oldExp + " → " + r.newExp + " (Lv." + newLevel + ")" + lvText);
+  });
+  if (notFound.length > 0) {
+    lines.push("");
+    lines.push("찾을 수 없음: " + notFound.join(", "));
+  }
+  return lines.join("\n");
 }
 
 function modifyStatGrade(oldValue, changeText) {
