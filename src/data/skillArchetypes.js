@@ -15,7 +15,9 @@ export const PRESET_RANK_COEF = {
 };
 
 // 액션의 스탯/기능/숙련 구조 + 선택 랭크 계수로
-// "1d20 + 랭크 + ( 기초부 ) * ( 배율부 )" 계산식을 생성.
+// "1d20 + 랭크 + ( 기초부 ) * ( 1 + 배율부 )" 계산식을 생성.
+// 배율부는 calcAction.js의 multiplier = 1 + Σ(기능/숙련*계수) 규칙과 동일하게
+// 선두에 "1 +"를 둔다. (없으면 기능/숙련이 0일 때 기초부가 거의 사라짐)
 export function buildActionPresetFormula(action, rank) {
   if (!action) return '';
   const [c1, c2] = PRESET_RANK_COEF[rank] || PRESET_RANK_COEF.E;
@@ -25,7 +27,7 @@ export function buildActionPresetFormula(action, rank) {
   if (b[1]) baseParts.push(`${b[1].stat} * ${c2}`);
   const basePart = baseParts.join(' + ');
   const multPart = (action.mult || []).map(m => `${m.key} * ${m.coef}`).join(' + ');
-  return `1d20 + 랭크 + ( ${basePart} ) * ( ${multPart} )`;
+  return `1d20 + 랭크 + ( ${basePart} ) * ( 1 + ${multPart} )`;
 }
 
 function actionByName(name) {
