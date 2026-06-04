@@ -11909,9 +11909,31 @@ function ensureItemSheets() {
     sh.setFrozenRows(1);
     return sh;
   }
-  ensure(SHEET_ITEM_DB,      ["id","이름","분류","슬롯","효과코드","수치","횟수","설명","메모"]);
+  ensure(SHEET_ITEM_DB,      ["id","이름","분류","슬롯","랭크","효과코드","수치","횟수","설명","메모"]);
   ensure(SHEET_INVENTORY_DB, ["id","소유자","아이템명","수량","상태","획득일"]);
   ensure(SHEET_EQUIPMENT_DB, ["id","소유자","슬롯","아이템명","장착일"]);
+
+  // 기존 ITEM_DB에 랭크 컬럼이 없으면 추가(메타데이터 전용 등급, 계산 영향 없음).
+  _ensureSheetColumn(SHEET_ITEM_DB, "랭크", "슬롯");
+}
+
+// 시트에 지정 헤더 컬럼이 없으면 추가한다. afterHeader가 있으면 그 컬럼 바로 뒤에 삽입,
+// 없으면 맨 끝에 추가. 이미 있으면 아무것도 하지 않는다.
+function _ensureSheetColumn(sheetName, colName, afterHeader) {
+  var ss = _getSpreadsheet();
+  var sh = ss.getSheetByName(sheetName);
+  if (!sh) return;
+  var lastCol = sh.getLastColumn();
+  var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
+  if (headers.indexOf(colName) >= 0) return;
+  var afterIdx = afterHeader ? headers.indexOf(afterHeader) : -1;
+  if (afterIdx >= 0) {
+    sh.insertColumnAfter(afterIdx + 1);
+    sh.getRange(1, afterIdx + 2).setValue(colName);
+  } else {
+    sh.getRange(1, lastCol + 1).setValue(colName);
+  }
+  invalidateSheetCache(sheetName);
 }
 
 function _makeItemId() {
@@ -12041,7 +12063,8 @@ function equipmentShowCommand(parts, displayName) {
   rows.forEach(function(r) {
     var item = getItemByName(String(r["아이템명"]));
     var effectInfo = item ? ("  " + String(item["효과코드"] || "") + " " + (item["수치"] ? formatSigned(Number(item["수치"])) : "")) : "";
-    lines.push("[" + String(r["슬롯"]) + "] " + String(r["아이템명"]) + effectInfo);
+    var rankInfo = (item && String(item["랭크"] || "").trim()) ? " (랭크 " + String(item["랭크"]).trim() + ")" : "";
+    lines.push("[" + String(r["슬롯"]) + "] " + String(r["아이템명"]) + rankInfo + effectInfo);
   });
   return lines.join("\n");
 }
@@ -12419,6 +12442,7 @@ function registerItemFromPayload(item) {
       이름:     name,
       분류:     category,
       슬롯:     String(item["슬롯"]    || "").trim(),
+      랭크:     String(item["랭크"]    || "").trim(),
       효과코드: String(item["효과코드"] || "").trim(),
       수치:     (item["수치"] === undefined || item["수치"] === null || String(item["수치"]).trim() === "") ? "" : Number(item["수치"]),
       횟수:     (item["횟수"] === undefined || item["횟수"] === null || String(item["횟수"]).trim() === "") ? "" : Number(item["횟수"]),
@@ -12508,6 +12532,7 @@ function getItemDbList() {
         name:     String(r["이름"]   || ""),
         category: String(r["분류"]   || ""),
         slot:     String(r["슬롯"]   || ""),
+        rank:     String(r["랭크"]   || ""),
         effect:   String(r["효과코드"] || ""),
         value:    (r["수치"] === undefined || r["수치"] === "") ? "" : Number(r["수치"]),
         count:    (r["횟수"] === undefined || r["횟수"] === "") ? "" : Number(r["횟수"]),

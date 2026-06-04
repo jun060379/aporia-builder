@@ -7,6 +7,8 @@ import PlaceholderPage from './PlaceholderPage.jsx';
 // ── 상수 ──────────────────────────────────────────────────────
 const CATEGORIES = ['소모품', '장비', '기타'];
 const SLOTS = ['무기', '방어구', '장신구1', '장신구2'];
+// 장비 랭크: 등급 표시용(메타데이터). 계산에는 영향 없음. 스킬 랭크와 동일 척도.
+const EQUIP_RANKS = ['', 'F', 'E', 'D', 'C', 'B', 'A', 'S', 'U', 'EX'];
 
 const EFFECT_KINDS = [
   { id: '회복',     label: '회복',       needsTarget: false,    note: '대상 HP 회복 (소모품)' },
@@ -21,10 +23,10 @@ const STAT_NAMES    = ['근력', '민첩', '내구', '감각', '지능'];
 const ACTION_NAMES  = ['참격', '관통', '타격', '격투', '사격', '방어', '회피', '저항', '조사', '해석', '은신', '추적', '설득'];
 const SERIES_NAMES  = ['화력', '방호', '치유', '재생', '간섭', '강화'];
 
-const ITEM_HEADERS = ['id', '이름', '분류', '슬롯', '효과코드', '수치', '횟수', '설명', '메모'];
+const ITEM_HEADERS = ['id', '이름', '분류', '슬롯', '랭크', '효과코드', '수치', '횟수', '설명', '메모'];
 
 const EMPTY = {
-  이름: '', 분류: '소모품', 슬롯: '무기',
+  이름: '', 분류: '소모품', 슬롯: '무기', 랭크: '',
   effectKind: '회복', effectTarget: '',
   수치: '', 횟수: '', 설명: '', 메모: '',
 };
@@ -93,6 +95,7 @@ function ItemMaker() {
       이름: row.이름,
       분류: row.분류,
       슬롯: row.분류 === '장비' ? row.슬롯 : '',
+      랭크: row.분류 === '장비' ? row.랭크 : '',
       효과코드: effectCode,
       수치: row.수치,
       횟수: row.횟수,
@@ -106,6 +109,7 @@ function ItemMaker() {
     이름: row.이름.trim(),
     분류: row.분류,
     슬롯: row.분류 === '장비' ? row.슬롯 : '',
+    랭크: row.분류 === '장비' ? row.랭크 : '',
     효과코드: effectCode,
     수치: row.수치,
     횟수: row.횟수,
@@ -153,7 +157,7 @@ function ItemMaker() {
     const ek = EFFECT_KINDS.find(k => eff.startsWith(k.id)) || EFFECT_KINDS.find(k => k.id === '없음');
     const tgt = eff.includes(':') ? eff.slice(eff.indexOf(':') + 1).trim() : '';
     setRow({
-      이름: it.name, 분류: it.category || '소모품', 슬롯: it.slot || '무기',
+      이름: it.name, 분류: it.category || '소모품', 슬롯: it.slot || '무기', 랭크: it.rank || '',
       effectKind: ek.id === '없음' && !eff ? '없음' : (ek.id || '없음'),
       effectTarget: tgt,
       수치: it.value === '' ? '' : String(it.value),
@@ -190,6 +194,14 @@ function ItemMaker() {
               <span className="text-[11px] text-slate-500">슬롯</span>
               <select className={selectCls} value={row.슬롯} onChange={field('슬롯')}>
                 {SLOTS.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+          )}
+          {row.분류 === '장비' && (
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-slate-500">랭크 <span className="text-slate-300">(등급 표시용 · 계산 영향 없음)</span></span>
+              <select className={selectCls} value={row.랭크} onChange={field('랭크')}>
+                {EQUIP_RANKS.map(r => <option key={r || '없음'} value={r}>{r || '— 없음 —'}</option>)}
               </select>
             </label>
           )}
@@ -334,6 +346,7 @@ function ItemMaker() {
                   <div className="flex flex-wrap gap-1 mt-0.5">
                     <span className="text-[10px] text-violet-600 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{it.category}</span>
                     {it.slot && <span className="text-[10px] text-slate-500">{it.slot}</span>}
+                    {it.rank && <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">랭크 {it.rank}</span>}
                     {it.effect && <span className="text-[10px] text-slate-500 font-mono">{it.effect}{it.value !== '' ? ` ${it.value}` : ''}</span>}
                   </div>
                 </div>
