@@ -8,6 +8,7 @@ import EnemySkillApplicationView from '../components/EnemySkillApplicationView.j
 import AdminCategoryTabs, { ADMIN_CATEGORIES } from '../components/AdminCategoryTabs.jsx';
 import CommonSkillMaker from '../components/CommonSkillMaker.jsx';
 import PassiveMaker from '../components/PassiveMaker.jsx';
+import AdminSkillMaker from '../components/AdminSkillMaker.jsx';
 import UserManagement from '../components/UserManagement.jsx';
 import {
   getAdminApplications,
@@ -148,6 +149,7 @@ export default function AdminPage() {
           {[
             { key: 'review', label: '신청 검수' },
             { key: 'users', label: '사용자 관리' },
+            { key: 'skill', label: '스킬·패시브 제작기' },
             { key: 'common-skill', label: '공용 스킬 제작기' },
             { key: 'passive', label: '패시브 제작기' },
           ].map((v) => {
@@ -168,6 +170,7 @@ export default function AdminPage() {
           })}
         </div>
 
+        {adminView === 'skill' && <AdminSkillMaker />}
         {adminView === 'common-skill' && <CommonSkillMaker />}
         {adminView === 'passive' && <PassiveMaker />}
         {adminView === 'users' && <UserManagement />}

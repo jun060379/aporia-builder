@@ -14,7 +14,7 @@ import ProficiencyEditor from './components/ProficiencyEditor';
 import BudgetSummary from './components/BudgetSummary';
 import ActionTable from './components/ActionTable';
 import ActionDetail from './components/ActionDetail';
-import SkillMaker from './components/SkillMaker';
+import SkillConceptMaker from './components/SkillConceptMaker';
 import SkillList from './components/SkillList';
 import PassiveList from './components/PassiveList';
 import ApplicationText from './components/ApplicationText';
@@ -290,11 +290,8 @@ export default function App() {
           {leftTab === '스킬' && (
             <div className="space-y-3">
               <BudgetSummary char={char} stats={stats} abilities={abilities} proficiencies={proficiencies} skills={skills} editingSkill={editingSkill} />
-              <SkillMaker
+              <SkillConceptMaker
                 editingSkill={editingSkill}
-                stats={stats}
-                abilities={abilities}
-                proficiencies={proficiencies}
                 onSave={handleSaveSkill}
                 onCancel={handleCancelEdit}
                 editingPassive={editingPassive}
