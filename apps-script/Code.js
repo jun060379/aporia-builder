@@ -3403,13 +3403,15 @@ function _computeSkillRollCore(character, skillRow, rank, mods, targetAlias) {
 
   let typeBonusText = "";
   const type = String(skillRow["계열"] || "").trim();
+  const tradition = String(skillRow["계통"] || "").trim();
   if (type === "방호") { result += 3; typeBonusText = "방호 보정: +3"; }
 
   let finalValue = applyMods(result, mods);
-  const statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type, KIND_RESPONSE], targetAlias || "");
+  // 계열(type)·계통 둘 다 판정 유형 키로 사용 → 상태/장비 보정이 양쪽에 매칭.
+  const statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type, tradition, KIND_RESPONSE], targetAlias || "");
   finalValue = statusMod.value;
   // 장비 계열/계통 보정: 스킬의 계열(type)·계통에 맞는 계열보정/계통보정 장비를 합산.
-  const equipMod = getEquipmentModifier(alias, [KIND_SKILL, type, String(skillRow["계통"] || "").trim()]);
+  const equipMod = getEquipmentModifier(alias, [KIND_SKILL, type, tradition]);
   finalValue += equipMod.delta;
 
   // 이면침식 배율은 모든 보정 완료 후 마지막에 적용
@@ -3596,6 +3598,7 @@ function skillUse(parts, displayName) {
 
   let typeBonusText = "";
   const type = String(skill["계열"]).trim();
+  const tradition = String(skill["계통"] || "").trim();
 
   if (type === "방호") {
     result += 3;
@@ -3608,13 +3611,14 @@ function skillUse(parts, displayName) {
 
   try {
     finalValue = applyMods(result, mods);
-    statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type], targetAlias || "");
+    // 계열(type)·계통 둘 다 판정 유형 키로 사용 → 상태/장비 보정이 양쪽에 매칭.
+    statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type, tradition], targetAlias || "");
     finalValue = statusMod.value;
     // 세부 조건 보정 적용 (곱셈 → 덧셈 순)
     if (condDetailMult !== 1) finalValue = Math.floor(finalValue * condDetailMult);
     if (condDetailBonus !== 0) finalValue += condDetailBonus;
     // 장비 계열/계통 보정: 스킬 계열(type)·계통에 맞는 계열보정/계통보정 장비 합산.
-    equipMod = getEquipmentModifier(alias, [KIND_SKILL, type, String(skill["계통"] || "").trim()]);
+    equipMod = getEquipmentModifier(alias, [KIND_SKILL, type, tradition]);
     finalValue += equipMod.delta;
     // 이면침식 배율은 모든 보정 완료 후 마지막에 적용
   } catch (e) {
@@ -11746,6 +11750,7 @@ function commonSkillUseCommand(parts, displayName) {
 
   let typeBonusText = "";
   const type = String(commonSkill["계열"] || "").trim();
+  const tradition = String(commonSkill["계통"] || "").trim();
   if (type === "방호") {
     result += 3;
     typeBonusText = "방호 보정: +3\n";
@@ -11756,12 +11761,13 @@ function commonSkillUseCommand(parts, displayName) {
   let equipMod = { delta: 0, text: "" };
   try {
     finalValue = applyMods(result, mods);
-    statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type], effectiveTarget || "");
+    // 계열(type)·계통 둘 다 판정 유형 키로 사용 → 상태/장비 보정이 양쪽에 매칭.
+    statusMod = applyStatusModifierToValue(alias, finalValue, [KIND_SKILL, type, tradition], effectiveTarget || "");
     finalValue = statusMod.value;
     if (condDetailMult !== 1) finalValue = Math.floor(finalValue * condDetailMult);
     if (condDetailBonus !== 0) finalValue += condDetailBonus;
     // 장비 계열/계통 보정: 공용 스킬 계열(type)·계통에 맞는 계열보정/계통보정 장비 합산.
-    equipMod = getEquipmentModifier(alias, [KIND_SKILL, type, String(commonSkill["계통"] || "").trim()]);
+    equipMod = getEquipmentModifier(alias, [KIND_SKILL, type, tradition]);
     finalValue += equipMod.delta;
     // 이면침식 배율은 모든 보정 완료 후 마지막에 적용
   } catch (e) {
