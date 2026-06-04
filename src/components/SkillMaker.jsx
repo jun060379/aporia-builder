@@ -60,7 +60,7 @@ const PASSIVE_OWNER_TYPES = [
 const PASSIVE_TRIGGERS = [
   '항상', '판정계산전', '판정시작', '판정후',
   '액션사용후', '스킬사용후',
-  '피해직전', '피해후', '가해후', '공격해결후', '회복시', '세션종료', '수동'
+  '피해직전', '피해후', '가해후', '공격해결후', '회복후', '회복시', '세션종료', '수동'
 ];
 const PASSIVE_CHECK_TYPES = ['전체', '스탯', '액션', '이능', '스킬', '대응', '저항'];
 
@@ -455,6 +455,13 @@ function PassiveForm({ editingPassive, onSavePassive, onUpdatePassive, onCancelE
                   }
                 />
               </label>
+            )}
+            {(trigBase === '회복후' || trigBase === '회복시') && (
+              <p className="col-span-2 text-[11px] text-amber-600">
+                {trigBase === '회복후'
+                  ? '회복후: 회복을 받은 직후 트리거효과가 발동합니다 (피해후의 회복판). 예: 회복 대상이 되면 중독.'
+                  : '주의: 회복시는 분류=회복보정 전용입니다. 트리거효과(상태부여 등)는 회복후를 쓰세요. 회복시로 두면 발동하지 않습니다.'}
+              </p>
             )}
           </div>
         )}

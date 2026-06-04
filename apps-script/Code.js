@@ -1272,6 +1272,9 @@ function clampHp(value, maxHp) {
   return Math.max(0, Math.min(v, m));
 }
 
+// 회복후 트리거 재진입 가드: 회복후 패시브가 또 회복을 일으켜 무한 재귀하는 것을 막는다.
+var _HEAL_TRIGGER_ACTIVE = false;
+
 function applyHealingToCharacter(alias, healAmount) {
   const rowInfo = findCharacterRowByAlias(alias);
 
@@ -1313,8 +1316,27 @@ function applyHealingToCharacter(alias, healAmount) {
 
   setCellByHeader(fresh, "현재체력", after);
 
-  const passiveBlock = (passiveHealResult.logs.length > 0 || statusHealResult.logs.length > 0)
-    ? "\n\n" + passiveHealResult.logs.concat(statusHealResult.logs).join("\n\n")
+  // 회복후 패시브 트리거 (회복을 받은 쪽). 실제 회복량이 0이어도 발동.
+  // (예: 회복 대상이 되면 중독 — 회복량이 0으로 보정돼도 트리거는 돈다)
+  var passiveHealTriggerText = "";
+  if (!_HEAL_TRIGGER_ACTIVE) {
+    _HEAL_TRIGGER_ACTIVE = true;
+    try {
+      var charForHealPassive = findCharacterByAlias(alias);
+      if (charForHealPassive) {
+        passiveHealTriggerText = firePassiveTriggerEffects(charForHealPassive, "회복후", {
+          resistanceMode: RESIST_NONE,
+          finalValue: heal
+        });
+      }
+    } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
+    finally { _HEAL_TRIGGER_ACTIVE = false; }
+  }
+
+  const passiveLogs = passiveHealResult.logs.concat(statusHealResult.logs);
+  if (passiveHealTriggerText) passiveLogs.push(passiveHealTriggerText);
+  const passiveBlock = passiveLogs.length > 0
+    ? "\n\n" + passiveLogs.join("\n\n")
     : "";
 
   return {
