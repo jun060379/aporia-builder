@@ -2175,8 +2175,9 @@ function rollActionValueForCharacter(character, actionName, mods) {
 
   const factor = 1 + factorBonus;
   const rawCoef = baseTotal * factor;
-  const moddedCoef = applyMods(rawCoef, mods);
-  const finalCoef = Math.max(0, moddedCoef);
+  // 명령어 보정·장비 보정은 더 이상 계수(다이스 전)에 넣지 않는다.
+  // 다이스 수는 순수 계수로만 정하고, 보정/장비는 굴린 최종값에 더한다.
+  const finalCoef = Math.max(0, Math.floor(rawCoef));
 
   const diceCount = Math.max(1, Math.ceil(finalCoef / ACTION_DICE_STEP));
   const rolls = rollDice(diceCount, ACTION_DICE_SIDES);
@@ -2185,6 +2186,11 @@ function rollActionValueForCharacter(character, actionName, mods) {
   const alias = String(character["별명"] || "").trim();
   const statusMod = applyStatusModifierToValue(alias, sum, [KIND_ACTION, actionName, KIND_RESPONSE]);
   sum = statusMod.value;
+  // 장비 보정(최종값 가산)
+  const equipMod = getEquipmentModifier(alias, [KIND_ACTION, actionName, KIND_RESPONSE]);
+  sum += equipMod.delta;
+  // 명령어 보정(최종값에 +N/-N/*N 적용)
+  sum = applyMods(sum, mods);
 
   return {
     actionName: actionName,
@@ -2197,6 +2203,8 @@ function rollActionValueForCharacter(character, actionName, mods) {
     rolls: rolls,
     sum: sum,
     statusMod: statusMod,
+    equipMod: equipMod,
+    mods: mods,
     detailLines: detailLines
   };
 }
@@ -2270,20 +2278,8 @@ function actionCheck(parts, displayName) {
   const factor = 1 + factorBonus;
   const rawCoef = baseTotal * factor;
 
-  let moddedCoef;
-
-  try {
-    moddedCoef = applyMods(rawCoef, mods);
-  } catch (e) {
-    return (
-      "[액션 판정 오류]\n" +
-      character["이름"] + " - " + actionName + "\n\n" +
-      "보정 처리 중 오류가 발생했습니다.\n\n" +
-      "오류: " + e.message
-    );
-  }
-
-  const finalCoef = Math.max(0, moddedCoef);
+  // 명령어 보정은 계수(다이스 전)가 아니라 굴린 최종값에 더한다. 다이스 수는 순수 계수로만.
+  const finalCoef = Math.max(0, Math.floor(rawCoef));
 
   const diceCount = Math.max(1, Math.ceil(finalCoef / ACTION_DICE_STEP));
   const rolls = rollDice(diceCount, ACTION_DICE_SIDES);
@@ -2293,6 +2289,17 @@ function actionCheck(parts, displayName) {
   sum = statusMod.value;
   const _actEquipMod = getEquipmentModifier(alias, [KIND_ACTION, actionName]);
   sum += _actEquipMod.delta;
+  // 명령어 보정(최종값에 +N/-N/*N 적용)
+  try {
+    sum = applyMods(sum, mods);
+  } catch (e) {
+    return (
+      "[액션 판정 오류]\n" +
+      character["이름"] + " - " + actionName + "\n\n" +
+      "보정 처리 중 오류가 발생했습니다.\n\n" +
+      "오류: " + e.message
+    );
+  }
 
   let combatText = "";
 
@@ -2355,12 +2362,12 @@ function actionCheck(parts, displayName) {
     "기초부 합계: " + round2(baseTotal) + "\n" +
     "배율부: 1 + " + round2(factorBonus) + " = " + round2(factor) + "\n" +
     "계수값: " + round2(rawCoef) + "\n" +
-    "보정: " + (mods.join(" ") || "없음") + "\n" +
     "최종 계수: " + finalCoef + "\n\n" +
     "주사위: " + diceCount + "d" + ACTION_DICE_SIDES + "\n" +
     "결과: " + rolls.join(", ") + "\n" +
     (_formatJudgeModDetail(statusMod, _actEquipMod)
       ? _formatJudgeModDetail(statusMod, _actEquipMod) + "\n\n" : "") +
+    "명령 보정: " + (mods.join(" ") || "없음") + "\n" +
     "합계: " + sum +
     judgeSummary +
     combatText +

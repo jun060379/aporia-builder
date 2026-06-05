@@ -44,7 +44,7 @@ export const ACTIONS = [
   {
     name: '저항',
     isDamage: false,
-    base: [{ stat: '내구', coef: 1 }, { stat: '지능', coef: 0.5 }],
+    base: [{ stat: '내구', coef: 0.75 }, { stat: '지능', coef: 0.75 }],
     mult: [{ key: '인내', coef: 0.12 }, { key: '이면학', coef: 0.08 }, { key: '지식', coef: 0.05 }, { key: '저항숙련', coef: 0.25 }],
   },
   {
