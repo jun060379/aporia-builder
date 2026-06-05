@@ -3142,8 +3142,16 @@ function buildFormulaVariables(character, rankValue, targetAlias) {
   injectStatusVariables(vars, selfAlias, "");
 
   if (targetAlias) {
-    injectStackVariables(vars, targetAlias, "대상");
-    injectStatusVariables(vars, targetAlias, "대상");
+    // 대상이 에너미면 상태/스택 키를 정규 별명으로 통일 (PC가 enemy_id로 지정해도 일치).
+    var _tStatusKey = targetAlias;
+    var _tEnemy = null;
+    if (!findCharacterByAlias(targetAlias)) {
+      try { _tEnemy = resolveEnemy(targetAlias); } catch (_e) { _tEnemy = null; }
+      if (_tEnemy) _tStatusKey = enemyCanonicalAlias(_tEnemy);
+    }
+
+    injectStackVariables(vars, _tStatusKey, "대상");
+    injectStatusVariables(vars, _tStatusKey, "대상");
 
     // 대상 HP 비율 ("대상현재체력비율 <= 30" 등 조건에서 사용)
     try {
@@ -3154,6 +3162,12 @@ function buildFormulaVariables(character, rankValue, targetAlias) {
         vars["대상최대체력"]     = _tMax;
         vars["대상현재체력"]     = _tCur;
         vars["대상현재체력비율"] = _tMax > 0 ? Math.floor(_tCur / _tMax * 100) : 0;
+      } else if (_tEnemy) {
+        const _eMax = Math.floor(Number(_tEnemy["max_hp"])     || 0);
+        const _eCur = Math.floor(Number(_tEnemy["current_hp"]) || 0);
+        vars["대상최대체력"]     = _eMax;
+        vars["대상현재체력"]     = _eCur;
+        vars["대상현재체력비율"] = _eMax > 0 ? Math.floor(_eCur / _eMax * 100) : 0;
       }
     } catch (_e) { /* 대상 미존재 시 무시 */ }
   }
@@ -6793,12 +6807,25 @@ function _evalOptNum(raw, context) {
   return isNaN(Number(v)) ? "" : Math.floor(Number(v));
 }
 
+// 상태/스택 저장 키 정규화 — 대상이 에너미면 정규 별명(alias→name→enemy_id)으로 통일한다.
+// STATUS_DB/STACK_DB 쓰기와 전투/패시브 조회가 같은 키를 쓰도록 보장. PC는 그대로 둔다.
+function _canonStatusTarget(alias) {
+  alias = String(alias || "").trim();
+  if (!alias || alias === "자신" || alias === "대상") return alias;
+  if (findCharacterByAlias(alias)) return alias;  // PC 우선
+  try {
+    var e = resolveEnemy(alias);
+    if (e) return enemyCanonicalAlias(e);
+  } catch (_e) { /* 에너미 아님 → 원본 유지 */ }
+  return alias;
+}
+
 function resolveEffectTarget(token, context) {
   token = String(token || "").trim();
   context = context || {};
 
   if (token === "자신") {
-    return context.userAlias || "";
+    return _canonStatusTarget(context.userAlias || "");
   }
 
   if (token === "대상") {
@@ -6812,15 +6839,15 @@ function resolveEffectTarget(token, context) {
 
     // !스킬 스킬명 대상:자신 을 허용.
     if (targetAlias === "자신") {
-      return context.userAlias || "";
+      return _canonStatusTarget(context.userAlias || "");
     }
 
-    return targetAlias;
+    return _canonStatusTarget(targetAlias);
   }
 
   // 직접 별명을 적은 경우.
   // 예: 상태부여 몬스터A 출혈 ...
-  return token;
+  return _canonStatusTarget(token);
 }
 
 function readEffectNumber(value, context, fallback) {
@@ -7281,9 +7308,10 @@ function applySetEffect(variable, valueExpr, context, checkType) {
   };
   if (MODIFIER_LABEL.hasOwnProperty(v)) {
     if (!alias) return "[설정 실패]\n변수: " + v + "\n대상 캐릭터를 확인할 수 없습니다.";
-    // 적용 대상: 옵션 대상이 있으면 그쪽, 없으면 자신.
+    // 적용 대상: 옵션 대상이 있으면 그쪽, 없으면 자신. 에너미면 정규 별명으로 통일.
     var modTarget = String(context.targetAlias || "").trim();
     modTarget = (modTarget && modTarget !== "자신") ? modTarget : alias;
+    modTarget = _canonStatusTarget(modTarget);
 
     if (v === "판정보정") {
       return addStatusToCharacter(modTarget, "판정보정", num >= 0 ? "강화" : "약화",
@@ -8428,7 +8456,7 @@ function statusTemplateApplyCommand(parts, displayName) {
   }
 
   const t = resolved.template;
-  const targetAlias = resolved.targetAlias;
+  const targetAlias = _canonStatusTarget(resolved.targetAlias);
   const opts = parseEffectOptions(parts.slice(resolved.optionStartIndex));
 
   // 명령어 옵션이 있으면 템플릿 값보다 우선한다.
