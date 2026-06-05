@@ -637,7 +637,7 @@ function commandListCommand() {
     "  !에너미템플릿등록 / !에너미템플릿삭제",
     "",
     "[ 패시브 ]",
-    "  !패시브목록 [캐릭터별명]",
+    "  !패시브목록 [캐릭터별명/에너미ID·별명]",
     "",
     "[ 닉네임 ]",
     "  !닉네임목록 [별명]        등록된 닉네임 확인",
@@ -1516,10 +1516,10 @@ function _applyPassiveDamageModifier(alias, damage) {
   const logs = [];
   const debugLogs = [];
   try {
-    const character = findCharacterByAlias(alias);
-    if (!character) { debugLogs.push("캐릭터 없음: " + alias); return { damage, logs, debugLogs }; }
+    const character = _resolveCharLike(alias);
+    if (!character) { debugLogs.push("대상 없음: " + alias); return { damage, logs, debugLogs }; }
 
-    const passives = getCandidatePassivesForCharacter(character);
+    const passives = getCandidatePassivesForOwner(character);
     debugLogs.push("후보수=" + passives.length + " 캐릭터=" + alias);
     const ctx      = buildConditionContext(character, "");
     debugLogs.push("현재체력비율=" + (ctx.vars["현재체력비율"] || 0));
@@ -1583,10 +1583,10 @@ function _applyPassiveDamageModifier(alias, damage) {
 function _applyPassiveHealingModifier(alias, amount) {
   const logs = [];
   try {
-    const character = findCharacterByAlias(alias);
+    const character = _resolveCharLike(alias);
     if (!character) return { amount, logs };
 
-    const passives = getCandidatePassivesForCharacter(character);
+    const passives = getCandidatePassivesForOwner(character);
     const ctx      = buildConditionContext(character, "");
     let addDelta  = 0;
     let multFactor = 1;
@@ -1791,7 +1791,7 @@ function applyDamageToCharacter(alias, damageAmount, opts) {
   if (attackerAlias && !_DEALT_TRIGGER_ACTIVE && attackerAlias !== String(alias).trim()) {
     _DEALT_TRIGGER_ACTIVE = true;
     try {
-      var dealerChar = findCharacterByAlias(attackerAlias);
+      var dealerChar = _resolveCharLike(attackerAlias);  // 공격자가 PC 또는 에너미
       if (dealerChar) {
         var _argName = String(opts.sourceName || "").trim();
         var _parts = [];
@@ -5453,7 +5453,7 @@ function rollResponseValue(character, defaultActionName, tokens, targetAlias) {
 function _fireAttackerResolvedText(attackerAlias, argName, damage, targetAlias) {
   attackerAlias = String(attackerAlias || "").trim();
   if (!attackerAlias || _DEALT_TRIGGER_ACTIVE) return "";
-  var dealer = findCharacterByAlias(attackerAlias);
+  var dealer = _resolveCharLike(attackerAlias);  // 공격자가 PC 또는 에너미
   if (!dealer) return "";
   _DEALT_TRIGGER_ACTIVE = true;
   try {
@@ -8846,7 +8846,81 @@ function _normalizePassiveOwnerType(raw) {
   if (s === "character" || s === "캐릭터" || s === "개인") return "character";
   if (s === "faction" || s === "소속" || s === "파벌") return "faction";
   if (s === "species" || s === "종족") return "species";
+  if (s === "enemy" || s === "에너미" || s === "적") return "enemy";
+  if (s === "template" || s === "템플릿" || s === "에너미템플릿") return "template";
   return "unknown";
+}
+
+// 에너미 행을 패시브/조건/효과 처리용 의사(疑似) 캐릭터 객체로 변환.
+// buildFormulaVariables / firePassiveTriggerEffects 등이 캐릭터 객체를 기대하므로,
+// 별명·체력·액션 수치를 캐릭터 필드명에 맞춰 매핑한다. __enemy 플래그로 후보 선별을 분기.
+function enemyToPseudoCharacter(enemy) {
+  if (!enemy) return null;
+  var alias = String(enemy["alias"] || enemy["name"] || enemy["enemy_id"] || "").trim();
+  var pseudo = {
+    "별명": alias,
+    "이름": String(enemy["name"] || alias),
+    "종족": "",
+    "소속": "",
+    "최대체력": Math.floor(Number(enemy["max_hp"]) || 0),
+    "현재체력": Math.floor(Number(enemy["current_hp"]) || 0),
+    __enemy: true,
+    __enemyRow: enemy
+  };
+  // 에너미 액션 수치(참격/방어/저항 …)를 직접 변수로 노출 — 조건/계산식에서 참조 가능.
+  ENEMY_ACTION_FIELDS.forEach(function (f) {
+    if (enemy[f] !== undefined && enemy[f] !== "") pseudo[f] = Math.floor(Number(enemy[f]) || 0);
+  });
+  return pseudo;
+}
+
+// 에너미 소유 패시브 후보(조건 평가 전). owner=enemy(enemy_id/별명 일치) 또는 template(template_key 일치).
+// 캐릭터 전용 소유타입(global/character/faction/species)은 에너미에 적용하지 않는다.
+function getCandidatePassivesForEnemy(enemy) {
+  if (!enemy) return [];
+  var rows = getAllPassiveRows();
+  var id    = String(enemy["enemy_id"] || "").trim();
+  var alias = normalizeEnemyRef(enemy["alias"]);
+  var name  = normalizeEnemyRef(enemy["name"]);
+  var tkey  = String(enemy["template_key"] || "").trim();
+
+  return rows.filter(function (p) {
+    var nm = String(p["이름"] || p["key"] || "").trim();
+    if (!nm) return false;
+
+    var owner = _normalizePassiveOwnerType(p["소유타입"]);
+    var ownerKey = String(p["소유키"] || "").trim();
+
+    if (owner === "enemy") {
+      if (!ownerKey || ownerKey === "*") return true;
+      var nk = normalizeEnemyRef(ownerKey);
+      return ownerKey === id || (alias && nk === alias) || (name && nk === name);
+    }
+    if (owner === "template") {
+      if (!ownerKey || ownerKey === "*") return false;
+      return tkey && ownerKey === tkey;
+    }
+    return false;
+  });
+}
+
+// 소유 엔티티(캐릭터/에너미)에 맞는 후보 패시브 목록을 반환.
+function getCandidatePassivesForOwner(character) {
+  if (character && character.__enemy) return getCandidatePassivesForEnemy(character.__enemyRow);
+  return getCandidatePassivesForCharacter(character);
+}
+
+// 별명/ID로 캐릭터 또는 에너미를 해석해 (의사)캐릭터 객체를 반환. 우선순위: 캐릭터 → 에너미.
+function _resolveCharLike(ref) {
+  ref = String(ref || "").trim();
+  if (!ref) return null;
+  var c = findCharacterByAlias(ref);
+  if (c) return c;
+  try {
+    var e = resolveEnemy(ref);
+    if (e) return enemyToPseudoCharacter(e);
+  } catch (_e) { /* 에너미도 아님 */ }
+  return null;
 }
 
 // 소유타입/소유키/해금레벨로 필터링한 1차 후보(조건 평가 전).
@@ -8867,6 +8941,7 @@ function getCandidatePassivesForCharacter(character) {
     var ownerKey = String(p["소유키"] || "").trim();
 
     if (owner === "unknown") return false;
+    if (owner === "enemy" || owner === "template") return false;  // 에너미 전용 — 캐릭터엔 미적용
     if (owner === "character" && ownerKey && ownerKey !== alias) return false;
     if (owner === "faction" && ownerKey && ownerKey !== faction) return false;
     if (owner === "species" && ownerKey && ownerKey !== species) return false;
@@ -9282,7 +9357,7 @@ function firePassiveTriggerEffects(character, trigger, ctxOpts) {
   ctxOpts = ctxOpts || {};
   var targetAlias = ctxOpts.targetAlias || "";
   var triggerArg = ctxOpts.triggerArg || "";
-  var passives = getCandidatePassivesForCharacter(character);
+  var passives = getCandidatePassivesForOwner(character);
   var ctx = buildConditionContext(character, targetAlias);
   // 조건에서 방금 사용한 액션/스킬명을 참조할 수 있게 노출 (예: 사용액션 == 상태접미_지정)
   ctx.vars["사용액션"] = String(triggerArg || "");
@@ -9320,6 +9395,48 @@ function firePassiveTriggerEffects(character, trigger, ctxOpts) {
 
 // ── !패시브목록 명령어 ──────────────────────────────────────────────
 
+// 에너미 패시브 목록 텍스트. 에너미는 레벨 개념이 없어 잠김 섹션이 없다.
+function _enemyPassiveListText(enemy) {
+  var pseudo = enemyToPseudoCharacter(enemy);
+  var alias = String(pseudo["별명"] || "").trim();
+  var rows = getCandidatePassivesForEnemy(enemy);
+  var ctx = buildConditionContext(pseudo, "");
+
+  var applied = [];
+  var manual = [];
+  var failed = [];
+
+  rows.forEach(function (p) {
+    var name = String(p["이름"] || p["key"] || "").trim();
+    if (!name) return;
+    var summary = name +
+      (p["분류"] ? " / " + p["분류"] : "") +
+      (Number(p["수치"]) ? " " + formatSigned(Number(p["수치"])) : "") +
+      (p["판정"] ? " / 판정: " + p["판정"] : "");
+
+    var cond = evaluateConditionList(p["조건"], ctx);
+    if (!cond.ok) { failed.push(summary + "\n  실패: " + cond.failed.join(", ")); return; }
+    if (cond.plainText.length > 0) { manual.push(summary + "\n  조건: " + cond.plainText.join(", ")); return; }
+    applied.push(summary);
+  });
+
+  var lines = ["[에너미 패시브 목록]", "에너미: " + alias + " (" + enemy["enemy_id"] + ")"];
+  if (enemy["template_key"]) lines.push("템플릿: " + enemy["template_key"]);
+  lines.push("");
+
+  function section(title, arr) {
+    lines.push(title + ":");
+    if (arr.length === 0) lines.push("- (없음)");
+    else arr.forEach(function (s) { lines.push("- " + s); });
+    lines.push("");
+  }
+  section("적용 중", applied);
+  section("수동 확인", manual);
+  section("조건 미충족", failed);
+
+  return lines.join("\n").replace(/\n+$/, "");
+}
+
 function passiveListCommand(parts, displayName) {
   var targetAlias = "";
   if (parts && parts.length >= 2) {
@@ -9329,6 +9446,12 @@ function passiveListCommand(parts, displayName) {
   var character = targetAlias ? findCharacterByAlias(targetAlias) : findCharacter(displayName);
 
   if (!character) {
+    // 캐릭터가 아니면 에너미 패시브 목록을 시도.
+    if (targetAlias) {
+      var enemyForList = null;
+      try { enemyForList = resolveEnemy(targetAlias); } catch (_e) { /* 에너미도 아님 */ }
+      if (enemyForList) return _enemyPassiveListText(enemyForList);
+    }
     return "캐릭터를 찾을 수 없습니다.\n" + (targetAlias || "디스코드 별명: " + displayName);
   }
 
@@ -9514,28 +9637,93 @@ function rollEnemyAction(enemy, actionName, bonus) {
   };
 }
 
+// 에너미 피해/회복 트리거 재진입 가드 (피해후 패시브가 또 자기에게 피해를 입혀 무한 재귀하는 것 방지).
+var _ENEMY_HP_TRIGGER_ACTIVE = false;
+
 function applyEnemyHpChange(enemy_id, delta, isHeal) {
   ensureEnemySheets();
   const ss = _getSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_ENEMIES);
   const values = sheet.getDataRange().getValues();
   const headers = values[0].map(function(h) { return String(h).trim(); });
-  const idIdx   = headers.indexOf("enemy_id");
-  const curIdx  = headers.indexOf("current_hp");
-  const maxIdx  = headers.indexOf("max_hp");
+  const idIdx    = headers.indexOf("enemy_id");
+  const curIdx   = headers.indexOf("current_hp");
+  const maxIdx   = headers.indexOf("max_hp");
+  const aliasIdx = headers.indexOf("alias");
+  const nameIdx  = headers.indexOf("name");
 
   for (let r = 1; r < values.length; r++) {
     if (String(values[r][idIdx]).trim() === String(enemy_id).trim()) {
       const before = Math.floor(Number(values[r][curIdx]) || 0);
       const maxHp  = Math.floor(Number(values[r][maxIdx]) || 0);
-      const after  = isHeal
-        ? Math.min(maxHp, before + Math.abs(delta))
-        : Math.max(0, before - Math.abs(delta));
+      const alias  = String((aliasIdx >= 0 ? values[r][aliasIdx] : "") ||
+                            (nameIdx  >= 0 ? values[r][nameIdx]  : "") || enemy_id).trim();
+
+      let amount = Math.abs(Math.floor(Number(delta) || 0));
+      const passiveLogs = [];
+
+      if (isHeal) {
+        // 회복보정 패시브 + 상태 보정
+        const ph = _applyPassiveHealingModifier(alias, amount);
+        amount = ph.amount;
+        const sh = _applyStatusHealingModifier(alias, amount);
+        amount = sh.amount;
+        passiveLogs.push.apply(passiveLogs, ph.logs.concat(sh.logs));
+      } else {
+        // 취약 → 피해보정 패시브 → 피해보정 상태 → 보호막 → 장비 (캐릭터와 동일 파이프라인)
+        const pre = processPreDamageStatuses(alias, amount);
+        amount = pre.damage;
+        if (pre.text) passiveLogs.push(pre.text);
+
+        // 피해직전 패시브 트리거 (HP 반영 전).
+        if (!_ENEMY_HP_TRIGGER_ACTIVE) {
+          _ENEMY_HP_TRIGGER_ACTIVE = true;
+          try {
+            const pseudoPre = enemyToPseudoCharacter(resolveEnemy(enemy_id));
+            if (pseudoPre) {
+              const preText = firePassiveTriggerEffects(pseudoPre, "피해직전", {
+                resistanceMode: RESIST_NONE, finalValue: amount
+              });
+              if (preText) passiveLogs.push(preText);
+            }
+          } catch (_e) { /* 무시 */ }
+          finally { _ENEMY_HP_TRIGGER_ACTIVE = false; }
+        }
+      }
+
+      const after = isHeal
+        ? Math.min(maxHp, before + amount)
+        : Math.max(0, before - amount);
       sheet.getRange(r + 1, curIdx + 1).setValue(after);
-      return { ok: true, before: before, after: after, maxHp: maxHp };
+      invalidateSheetCache(SHEET_ENEMIES);
+
+      // 피해후 / 회복후 패시브 트리거 (재진입 가드).
+      let triggerText = "";
+      if (!_ENEMY_HP_TRIGGER_ACTIVE) {
+        _ENEMY_HP_TRIGGER_ACTIVE = true;
+        try {
+          const pseudo = enemyToPseudoCharacter(resolveEnemy(enemy_id));
+          if (pseudo) {
+            triggerText = firePassiveTriggerEffects(pseudo, isHeal ? "회복후" : "피해후", {
+              resistanceMode: RESIST_NONE, finalValue: amount
+            });
+          }
+        } catch (_e) { /* 패시브 시트 없거나 오류 → 무시 */ }
+        finally { _ENEMY_HP_TRIGGER_ACTIVE = false; }
+      }
+      if (triggerText) passiveLogs.push(triggerText);
+
+      const passiveText = passiveLogs.filter(Boolean).join("\n\n");
+      return { ok: true, before: before, after: after, maxHp: maxHp,
+               damage: amount, passiveText: passiveText };
     }
   }
-  return { ok: false, before: 0, after: 0, maxHp: 0 };
+  return { ok: false, before: 0, after: 0, maxHp: 0, damage: 0, passiveText: "" };
+}
+
+// applyEnemyHpChange 결과의 패시브 로그를 출력에 덧붙이기 위한 헬퍼.
+function _enemyPassiveBlock(result) {
+  return (result && result.passiveText) ? "\n\n" + result.passiveText : "";
 }
 
 function applyDamageToRef(ref, damage, opts) {
@@ -9553,13 +9741,13 @@ function applyDamageToRef(ref, damage, opts) {
       ? "\n\n[에너미 전투불능]\n" + label + "의 체력이 0이 되었습니다."
       : "";
 
-    // 공격 해결 시 공격자(PC) 쪽 트리거 — 공격해결후(피해 0 포함) + 가해후(피해>0).
+    // 공격 해결 시 공격자(PC/에너미) 쪽 트리거 — 공격해결후(피해 0 포함) + 가해후(피해>0).
     var dealtBlock = "";
     var attackerAlias = String(opts.attackerAlias || "").trim();
     if (attackerAlias && !_DEALT_TRIGGER_ACTIVE) {
       _DEALT_TRIGGER_ACTIVE = true;
       try {
-        var dealerChar = findCharacterByAlias(attackerAlias);
+        var dealerChar = _resolveCharLike(attackerAlias);
         if (dealerChar) {
           var _argName = String(opts.sourceName || "").trim();
           var _parts = [];
@@ -9590,7 +9778,7 @@ function applyDamageToRef(ref, damage, opts) {
         "대상: " + label + "\n" +
         "피해: " + damage + "\n" +
         "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
-        downText + dealtBlock
+        _enemyPassiveBlock(result) + downText + dealtBlock
     };
   }
 
@@ -9614,7 +9802,8 @@ function applyHealingToRef(ref, amount) {
         "[회복 적용]\n" +
         "대상: " + label + "\n" +
         "회복량: " + amount + "\n" +
-        "체력: " + result.before + " → " + result.after + " / " + result.maxHp
+        "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+        _enemyPassiveBlock(result)
     };
   }
 
@@ -9913,6 +10102,7 @@ function enemyDamage(parts, displayName) {
     "대상: " + (enemy["alias"] || enemy["name"]) + "\n" +
     "피해: " + amount + "\n" +
     "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+    _enemyPassiveBlock(result) +
     (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]\n체력이 0이 되었습니다." : "")
   );
 }
@@ -9938,7 +10128,8 @@ function enemyHeal(parts, displayName) {
     "[에너미 회복]\n" +
     "대상: " + (enemy["alias"] || enemy["name"]) + "\n" +
     "회복: " + amount + "\n" +
-    "체력: " + result.before + " → " + result.after + " / " + result.maxHp
+    "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+    _enemyPassiveBlock(result)
   );
 }
 
@@ -10065,12 +10256,12 @@ function enemyAttack(parts, displayName, utterance) {
 //  - 공격해결후: 피해 0 포함 항상 (성공/실패 판정 + 다음 지령 등)
 //  - 가해후    : 실제 피해 > 0 일 때만
 // 적 피해는 applyEnemyHpChange로 직접 처리돼 applyDamageToRef를 안 타므로, 여기서 별도 발동.
-// triggerArg=공격명(=액션명), finalValue=최종피해. 공격자가 PC가 아니면 스킵.
+// triggerArg=공격명(=액션명), finalValue=최종피해. 공격자가 PC/에너미가 아니면 스킵.
 function _fireAttackerResolvedOnEnemy(attack, damage) {
   try {
     var attackerAlias = String((attack && attack["공격자"]) || "").trim();
     if (!attackerAlias || _DEALT_TRIGGER_ACTIVE) return "";
-    var dealer = findCharacterByAlias(attackerAlias);
+    var dealer = _resolveCharLike(attackerAlias);  // 공격자가 PC 또는 에너미
     if (!dealer) return "";
     _DEALT_TRIGGER_ACTIVE = true;
     try {
@@ -10100,6 +10291,7 @@ function _resolveEnemyNoResponse(enemy, attack, attackValue) {
     "[에너미 무대응]\n" +
     "공격번호: " + attack["id"] + "\n공격값: " + attackValue + "\n최종피해: " + attackValue + "\n" +
     "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+    _enemyPassiveBlock(result) +
     (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut +
     _fireAttackerResolvedOnEnemy(attack, attackValue)
   );
@@ -10124,6 +10316,7 @@ function _resolveEnemyDefend(enemy, attack, attackValue) {
     "[에너미 방어]\n공격번호: " + attack["id"] + "\n공격값: " + attackValue + "\n" +
     "방어 굴림: " + defRoll.rollText + "\n결과: " + (success ? "방어 성공" : "방어 실패") + "\n최종피해: " + damage + "\n" +
     (damage > 0 ? "체력: " + result.before + " → " + result.after + " / " + result.maxHp : "피해 없음") +
+    _enemyPassiveBlock(result) +
     (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut +
     _fireAttackerResolvedOnEnemy(attack, damage)
   );
@@ -10148,6 +10341,7 @@ function _resolveEnemyEvade(enemy, attack, attackValue) {
     "[에너미 회피]\n공격번호: " + attack["id"] + "\n공격값: " + attackValue + "\n" +
     "회피 굴림: " + evRoll.rollText + "\n결과: " + (success ? "회피 성공" : "회피 실패") + "\n최종피해: " + damage + "\n" +
     (damage > 0 ? "체력: " + result.before + " → " + result.after + " / " + result.maxHp : "피해 없음") +
+    _enemyPassiveBlock(result) +
     (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut +
     _fireAttackerResolvedOnEnemy(attack, damage)
   );
@@ -10175,6 +10369,7 @@ function _resolveEnemyCounter(enemy, attack, attackValue, attackerRef, counterAc
     resolvePendingAttack(attack["id"], { 대응종류: "맞대응", 대응값: ctrValue, 최종피해: attackValue, 메모: "에너미 맞대응 실패. 에너미에게 피해" });
     return header + "결과: 에너미 맞대응 실패\n최종피해: " + attackValue + "\n" +
       "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+      _enemyPassiveBlock(result) +
       (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut +
       _fireAttackerResolvedOnEnemy(attack, attackValue);
   }
@@ -10611,7 +10806,8 @@ function enemySkillUse(parts, displayName) {
         "\n[회복 적용]\n" +
         "대상: " + healTargetLabel + "\n" +
         "회복량: " + rollResult.total + "\n" +
-        "체력: " + result.before + " → " + result.after + " / " + result.maxHp
+        "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+        _enemyPassiveBlock(result)
       );
     } else if (targetIsEnemy && targetEnemyObj) {
       const result = applyEnemyHpChange(targetEnemyObj["enemy_id"], rollResult.total, true);
@@ -10620,7 +10816,8 @@ function enemySkillUse(parts, displayName) {
         "\n[회복 적용]\n" +
         "대상: " + healTargetLabel + "\n" +
         "회복량: " + rollResult.total + "\n" +
-        "체력: " + result.before + " → " + result.after + " / " + result.maxHp
+        "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+        _enemyPassiveBlock(result)
       );
     } else if (targetIsPC) {
       const result = applyHealingToCharacter(targetRef, rollResult.total);

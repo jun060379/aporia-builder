@@ -56,6 +56,8 @@ const PASSIVE_OWNER_TYPES = [
   { value: 'character', label: '캐릭터 (특정 별명)' },
   { value: 'faction',   label: '소속 (파벌/조직)' },
   { value: 'species',   label: '종족' },
+  { value: 'enemy',     label: '에너미 (ID/별명)' },
+  { value: 'template',  label: '에너미 템플릿 (template_key)' },
 ];
 const PASSIVE_TRIGGERS = [
   '항상', '판정계산전', '판정시작', '판정후',
@@ -341,17 +343,17 @@ function PassiveForm({ editingPassive, onSavePassive, onUpdatePassive, onCancelE
             <span className="text-[11px] text-slate-500">적용 대상</span>
             <select className={selectCls} value={row.소유타입}
               onChange={e => setRow(r => ({ ...r, 소유타입: e.target.value, 소유키: e.target.value === 'global' ? '*' : '' }))}>
-              {[
-                { value: 'global',    label: '공용 (모든 캐릭터)' },
-                { value: 'character', label: '특정 캐릭터 (별명)' },
-                { value: 'faction',   label: '소속/파벌' },
-                { value: 'species',   label: '종족' },
-              ].map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              {PASSIVE_OWNER_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-[11px] text-slate-500">
-              {row.소유타입 === 'global' ? '소유 키 (자동)' : row.소유타입 === 'character' ? '캐릭터 별명' : row.소유타입 === 'faction' ? '소속명' : '종족명'}
+              {row.소유타입 === 'global' ? '소유 키 (자동)'
+                : row.소유타입 === 'character' ? '캐릭터 별명'
+                : row.소유타입 === 'faction' ? '소속명'
+                : row.소유타입 === 'species' ? '종족명'
+                : row.소유타입 === 'enemy' ? '에너미 ID/별명'
+                : 'template_key'}
             </span>
             <input
               className={inputCls}

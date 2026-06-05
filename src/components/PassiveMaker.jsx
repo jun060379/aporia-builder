@@ -10,6 +10,8 @@ const OWNER_TYPES = [
   { value: 'character', label: '캐릭터 (character)' },
   { value: 'faction',   label: '소속 (faction)' },
   { value: 'species',   label: '종족 (species)' },
+  { value: 'enemy',     label: '에너미 (enemy)' },
+  { value: 'template',  label: '에너미 템플릿 (template)' },
 ];
 const CATEGORIES  = ['판정보정', '피해보정', '회복보정', '저항', '트리거효과', '기타'];
 const EFFECT_CODES = [
@@ -99,7 +101,7 @@ export default function PassiveMaker() {
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[11px] text-slate-500 tracking-wide">소유키 (global=*, 그 외=대상 식별자)</span>
-          <input className={inputCls} value={row.소유키} onChange={field('소유키')} placeholder="* 또는 캐릭터별명/소속명/종족명" />
+          <input className={inputCls} value={row.소유키} onChange={field('소유키')} placeholder="* 또는 캐릭터별명/소속명/종족명/에너미ID·별명/template_key" />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[11px] text-slate-500 tracking-wide">해금레벨 (빈칸=0)</span>
