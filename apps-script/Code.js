@@ -6876,7 +6876,34 @@ function rollResistanceForStatus(targetAlias, difficulty, mods) {
   const targetCharacter = findCharacterByAlias(targetAlias);
 
   if (!targetCharacter) {
-    throw new Error("저항 대상 캐릭터를 찾을 수 없습니다: " + targetAlias);
+    // 캐릭터가 아니면 에너미로 시도 — 에너미는 '저항' 액션 주사위로 굴린다.
+    var enemyT = null;
+    try { enemyT = resolveEnemy(targetAlias); } catch (_e) { /* 에너미도 아님 */ }
+    if (enemyT) {
+      var bonusSum = (mods || []).reduce(function (a, m) {
+        var n = Number(String(m).replace(/[^0-9+\-]/g, ""));
+        return a + (isNaN(n) ? 0 : n);
+      }, 0);
+      var er = rollEnemyAction(enemyT, "저항", bonusSum);
+      var diffE = Math.floor(Number(difficulty) || 0);
+      var successE = er.total >= diffE;
+      return {
+        targetAlias: targetAlias,
+        difficulty: diffE,
+        mods: mods,
+        rolled: er,
+        value: er.total,
+        success: successE,
+        text:
+          "[상태 저항]\n" +
+          "대상: " + targetAlias + " (에너미)\n" +
+          "저항난이도: " + diffE + "\n\n" +
+          "액션: 저항\n" +
+          "굴림: " + er.rollText + "\n\n" +
+          "판정: " + (successE ? "저항 성공" : "저항 실패")
+      };
+    }
+    throw new Error("저항 대상을 찾을 수 없습니다(캐릭터/에너미 아님): " + targetAlias);
   }
 
   const rolled = rollActionValueForCharacter(targetCharacter, "저항", mods);
@@ -8012,9 +8039,9 @@ function getSelfAlias(displayName) {
 }
 
 function parseMaybeTarget(parts, displayName, startIndex) {
-  const selfAlias = getSelfAlias(displayName);
   const first = String(parts[startIndex] || "").trim();
 
+  // 1) 캐릭터 별명이면 대상으로.
   if (first && findCharacterByAlias(first)) {
     return {
       targetAlias: first,
@@ -8022,8 +8049,21 @@ function parseMaybeTarget(parts, displayName, startIndex) {
     };
   }
 
+  // 2) 에너미(ID/별명/이름)면 정규 별명으로 대상 지정 (상태 키 일관성 유지).
+  if (first) {
+    var enemyT = null;
+    try { enemyT = resolveEnemy(first); } catch (_e) { /* 에너미 아님 */ }
+    if (enemyT) {
+      return {
+        targetAlias: enemyCanonicalAlias(enemyT),
+        nextIndex: startIndex + 1
+      };
+    }
+  }
+
+  // 3) 그 외 → 시전자 자신.
   return {
-    targetAlias: selfAlias,
+    targetAlias: getSelfAlias(displayName),
     nextIndex: startIndex
   };
 }
@@ -8851,12 +8891,19 @@ function _normalizePassiveOwnerType(raw) {
   return "unknown";
 }
 
+// 에너미의 정규 별명 — 상태/스택/체력 키로 일관되게 사용 (alias → name → enemy_id 우선).
+// STATUS_DB·STACK_DB는 이 문자열을 대상 키로 쓰므로 모든 경로에서 동일해야 한다.
+function enemyCanonicalAlias(enemy) {
+  if (!enemy) return "";
+  return String(enemy["alias"] || enemy["name"] || enemy["enemy_id"] || "").trim();
+}
+
 // 에너미 행을 패시브/조건/효과 처리용 의사(疑似) 캐릭터 객체로 변환.
 // buildFormulaVariables / firePassiveTriggerEffects 등이 캐릭터 객체를 기대하므로,
 // 별명·체력·액션 수치를 캐릭터 필드명에 맞춰 매핑한다. __enemy 플래그로 후보 선별을 분기.
 function enemyToPseudoCharacter(enemy) {
   if (!enemy) return null;
-  var alias = String(enemy["alias"] || enemy["name"] || enemy["enemy_id"] || "").trim();
+  var alias = enemyCanonicalAlias(enemy);
   var pseudo = {
     "별명": alias,
     "이름": String(enemy["name"] || alias),
@@ -10825,6 +10872,20 @@ function enemySkillUse(parts, displayName) {
     }
   }
 
+  // ── Effect DSL (상태부여/스택/상태해제 등) ─────────────────────────
+  // 화력은 적중 시 processPendingAttackSkillEffects → applyEnemySkillEffect로 지연 처리.
+  // 그 외 계열은 여기서 즉시 실행. 자신=에너미 별명, 대상=지정 대상(PC/에너미).
+  var effectOut = "";
+  if (effectText && category !== "화력") {
+    effectOut = applyEnemySkillEffect(effectText, {
+      userAlias:      enemyCanonicalAlias(enemy),
+      targetAlias:    targetRef,
+      finalValue:     rollResult.total,
+      skillName:      skillName,
+      resistanceMode: RESIST_NORMAL
+    });
+  }
+
   // ── Build output ──────────────────────────────────────────────────
   return (
     (enemyConditionHeader ? enemyConditionHeader + "\n\n" : "") +
@@ -10839,7 +10900,8 @@ function enemySkillUse(parts, displayName) {
     "최종값: "   + rollResult.total +
     (effectText ? "\n\n효과: " + effectText : "") +
     combatText  +
-    healText
+    healText     +
+    effectOut
   );
 }
 
@@ -10969,42 +11031,18 @@ function getEnemySkillFromPendingAttack(attack) {
 // ── Enemy skill effect application ───────────────────────────────────
 
 // 피해/회복은 processSkillEffects(applyDamageToRef / applyHealingToRef)가 처리.
-// 에너미 대상 상태/스택은 미지원이므로 별도 차단 후 나머지는 processSkillEffects에 위임.
+// 상태/스택은 별명 키(STATUS_DB/STACK_DB)로 저장되며 에너미 별명도 동일하게 동작하므로,
+// 모든 효과 줄을 processSkillEffects에 그대로 위임한다.
 function applyEnemySkillEffect(effectText, context) {
   effectText = String(effectText || "").trim();
   if (!effectText) return "";
 
   context = context || {};
-  const userAlias   = String(context.userAlias   || "").trim();
-  const targetAlias = String(context.targetAlias || "").trim();
 
   const lines = effectText.split(/\n/).map(function(l) { return l.trim(); }).filter(Boolean);
   const logs  = [];
 
   lines.forEach(function(line) {
-    const tokens    = line.split(/\s+/);
-    const cmd       = tokens[0];
-    const entityTok = tokens.length >= 2 ? tokens[1] : "";
-
-    var actualAlias = "";
-    if (entityTok === "자신")  actualAlias = userAlias;
-    else if (entityTok === "대상") actualAlias = targetAlias;
-
-    var entityIsEnemy = false;
-    if (actualAlias) {
-      try { resolveEnemy(actualAlias); entityIsEnemy = true; } catch(e) {}
-    }
-
-    if (entityIsEnemy &&
-        ["상태템플릿부여","상태부여","상태해제","스택증가","스택감소","스택설정"].includes(cmd)) {
-      logs.push(
-        "[효과 미지원]\n" +
-        "에너미 대상 상태/스택 처리가 구현되어 있지 않습니다.\n" +
-        "효과: " + line
-      );
-      return;
-    }
-
     try {
       const r = processSkillEffects(line, context);
       if (r) logs.push(r.replace(/^\n+\[스킬 효과\]\n/, ""));

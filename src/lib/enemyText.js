@@ -8,7 +8,7 @@ export const ENEMY_SKILL_RANKS = ['F', 'E', 'D', 'C', 'B', 'A', 'S', 'U', 'EX'];
 export const ENEMY_OWNER_TYPES = ['global', 'template', 'enemy'];
 export const ENEMY_TARGET_MODES = ['none', 'optional', 'required'];
 
-export const EFFECT_PREFIXES = ['상태템플릿부여', '스택증가', '스택감소', '피해', '회복'];
+export const EFFECT_PREFIXES = ['상태템플릿부여', '상태부여', '상태해제', '스택증가', '스택감소', '스택설정', '피해', '회복'];
 
 export function isEffectLineAutoApplicable(line) {
   const t = (line || '').trim();
