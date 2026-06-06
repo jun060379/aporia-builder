@@ -7323,13 +7323,30 @@ function applySetEffect(variable, valueExpr, context, checkType) {
     } catch (_e) { /* vars 없이 진행 */ }
   }
 
-  var num;
-  try { num = readEffectNumber(valueExpr, evalCtx, NaN); }
-  catch (_e) { num = NaN; }
-  if (isNaN(Number(num))) {
-    return "[설정 실패]\n변수: " + v + "\n값을 숫자로 해석할 수 없습니다: " + valueExpr;
+  // 곱셈 보정 마커(*N / ×N) 지원 — 모디파이어 변수는 배율로 저장한다.
+  // 예: "판정보정 ... = *(1 + 0.04*스택_근기)" → 수치 "*1.2" 상태 생성(× 적용).
+  var _valStr = String(valueExpr == null ? "" : valueExpr).trim();
+  var isMult  = /^[*×＊]/.test(_valStr);
+  var num = NaN, multFactor = NaN;
+  if (isMult) {
+    var _inner = _valStr.replace(/^[*×＊]\s*/, "");
+    try {
+      var _r = safeEvalFormula(_inner || "1", (evalCtx && evalCtx.vars) || {});
+      multFactor = (_r && _r.rawValue !== undefined) ? _r.rawValue
+                 : Number(_r && _r.value !== undefined ? _r.value : _r);
+    } catch (_e) { multFactor = NaN; }
+    if (isNaN(Number(multFactor))) {
+      return "[설정 실패]\n변수: " + v + "\n배율 식을 해석할 수 없습니다: " + valueExpr;
+    }
+    multFactor = Math.round(Number(multFactor) * 1e6) / 1e6;
+  } else {
+    try { num = readEffectNumber(valueExpr, evalCtx, NaN); }
+    catch (_e) { num = NaN; }
+    if (isNaN(Number(num))) {
+      return "[설정 실패]\n변수: " + v + "\n값을 숫자로 해석할 수 없습니다: " + valueExpr;
+    }
+    num = Math.floor(Number(num));
   }
-  num = Math.floor(Number(num));
 
   // ── 모디파이어 개념 변수: 임시 상태로 실제 적용 ──
   //   판정보정 → 강화/약화 상태(getStatusValueModifier가 판정에 반영)
@@ -7350,21 +7367,24 @@ function applySetEffect(variable, valueExpr, context, checkType) {
     modTarget = _canonStatusTarget(modTarget);
 
     if (v === "판정보정") {
-      return addStatusToCharacter(modTarget, "판정보정", num >= 0 ? "강화" : "약화",
-        num >= 0 ? "buff" : "debuff",
-        { value: num, trigger: "판정시작", checkType: checkTypeStr, stackMode: "덮어쓰기",
+      var jBuff = isMult ? (multFactor >= 1) : (num >= 0);
+      var jVal  = isMult ? ("*" + multFactor) : num;
+      return addStatusToCharacter(modTarget, "판정보정", jBuff ? "강화" : "약화",
+        jBuff ? "buff" : "debuff",
+        { value: jVal, trigger: "판정시작", checkType: checkTypeStr, stackMode: "덮어쓰기",
           source: context.skillName || "판정보정", memo: "" });
     }
     if (v === "피해보정" || v === "피해감소") {
-      // 피해감소는 양수=경감 → 내부적으로 음수 보정으로 저장. 피해보정은 그대로(음수=경감).
-      var dv = (v === "피해감소") ? -Math.abs(num) : num;
+      // 곱셈(*N)은 그대로 배율 저장. 덧셈은 피해감소=음수(경감)/피해보정=그대로.
+      var dv = isMult ? ("*" + multFactor) : ((v === "피해감소") ? -Math.abs(num) : num);
       return addStatusToCharacter(modTarget, v, "피해보정", "피해보정",
         { value: dv, trigger: "피해직전", checkType: "전체", stackMode: "덮어쓰기",
           source: context.skillName || v, memo: "" });
     }
     // 회복보정
+    var hv = isMult ? ("*" + multFactor) : num;
     return addStatusToCharacter(modTarget, "회복보정", "회복보정", "회복보정",
-      { value: num, trigger: "회복시", checkType: "전체", stackMode: "덮어쓰기",
+      { value: hv, trigger: "회복시", checkType: "전체", stackMode: "덮어쓰기",
         source: context.skillName || "회복보정", memo: "" });
   }
 
@@ -7372,6 +7392,9 @@ function applySetEffect(variable, valueExpr, context, checkType) {
   if (v !== "이면침식" && v !== "현재체력" && v !== "일상점") {
     return "[설정 실패]\n설정할 수 없는 변수입니다: " + v +
       "\n(가능: 이면침식, 현재체력, 일상점, 피해감소, 회복보정, 판정보정)";
+  }
+  if (isMult) {
+    return "[설정 실패]\n변수: " + v + "\n곱셈(*N)은 보정 변수(판정보정/피해보정/회복보정)에만 쓸 수 있습니다.";
   }
   if (!alias) {
     return "[설정 실패]\n변수: " + v + "\n대상 캐릭터를 확인할 수 없습니다.";
