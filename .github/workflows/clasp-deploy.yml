@@ -1,0 +1,45 @@
+name: Deploy Apps Script (clasp)
+
+# apps-script/** 변경이 main에 push되면 clasp push를 GitHub Actions(클라우드)에서 실행.
+# → 로컬 post-commit 훅 없이도(컴퓨터가 꺼져 있어도) 봇이 배포된다.
+# 필요한 시크릿: CLASPRC_JSON  (로컬 `clasp login` 후 ~/.clasprc.json 내용 그대로)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps-script/**'
+  workflow_dispatch: {}   # Actions 탭에서 수동 실행 버튼
+
+concurrency:
+  group: clasp-deploy
+  cancel-in-progress: false
+
+jobs:
+  clasp-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 로컬과 토큰 포맷을 맞추기 위해 clasp 2.x로 고정.
+      # (로컬 clasp가 3.x라면 @google/clasp@latest 로 바꾸세요.)
+      - name: Install clasp
+        run: npm install -g @google/clasp@2.4.2
+
+      - name: Write clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          if [ -z "${CLASPRC_JSON}" ]; then
+            echo "::error::CLASPRC_JSON 시크릿이 없습니다. 저장소 Settings → Secrets and variables → Actions 에 추가하세요."
+            exit 1
+          fi
+          printf '%s' "${CLASPRC_JSON}" > "${HOME}/.clasprc.json"
+
+      - name: clasp push
+        working-directory: apps-script
+        run: clasp push --force
