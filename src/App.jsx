@@ -10,6 +10,7 @@ import Signup from './pages/Signup.jsx';
 import CharactersPage from './pages/CharactersPage.jsx';
 import ItemMakerPage from './pages/ItemMakerPage.jsx';
 import MyCharacterPage from './pages/MyCharacterPage.jsx';
+import ShopPage from './pages/ShopPage.jsx';
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="/builder" element={<Builder />} />
           <Route path="/characters" element={<CharactersPage />} />
           <Route path="/items" element={<ItemMakerPage />} />
+          <Route path="/shop" element={<ShopPage />} />
           <Route path="/my-character" element={<MyCharacterPage />} />
           <Route path="/enemy" element={<EnemyPage />} />
           <Route path="/my" element={<MyPage />} />

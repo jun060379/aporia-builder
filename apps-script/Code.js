@@ -22,6 +22,9 @@ const SHEET_NICKNAME_DB    = "NICKNAME_DB";
 const SHEET_ITEM_DB        = "ITEM_DB";
 const SHEET_INVENTORY_DB   = "INVENTORY_DB";
 const SHEET_EQUIPMENT_DB   = "EQUIPMENT_DB";
+const SHEET_SHOP_DB        = "SHOP_DB";
+const SILVER_FIELD         = "은화";
+const QUICKSLOT_FIELDS     = ["퀵슬롯1", "퀵슬롯2", "퀵슬롯3"];
 const COMMON_UNLOCK_LEVELS = [1, 2, 4, 6, 8, 12];
 const DEFAULT_FACTION = "무소속";
 const ENEMY_ACTION_FIELDS = [
@@ -332,8 +335,12 @@ function getGameData() {
       });
     } catch (_e) {}
 
+    // 상점 카탈로그 (SHOP_DB, ITEM_DB 조인)
+    var shop = [];
+    try { shop = getShopList(); } catch (_e) { shop = []; }
+
     var result = { ok: true, characters: characters, skills: skills, passives: passives,
-                   items: items, inventory: inventory, equipment: equipment };
+                   items: items, inventory: inventory, equipment: equipment, shop: shop };
     // 결과를 캐시에 저장 (100KB 제한 초과 시 무시)
     try {
       var sc = CacheService.getScriptCache();
@@ -523,6 +530,12 @@ function handleCommand(utterance, displayName) {
   if (command === "!장비해제")   return unequipCommand(parts, displayName);
   if (command === "!아이템사용") return itemUseCommand(parts, displayName);
 
+  if (command === "!은화")       return silverGrantCommand(parts, displayName);
+  if (command === "!교환")       return tradeCommand(parts, displayName);
+  if (command === "!퀵슬롯1")    return quickslotUseCommand(parts, displayName, 1);
+  if (command === "!퀵슬롯2")    return quickslotUseCommand(parts, displayName, 2);
+  if (command === "!퀵슬롯3")    return quickslotUseCommand(parts, displayName, 3);
+
   if (command === "!명령어목록" || command === "!도움말" || command === "!help") {
     return commandListCommand();
   }
@@ -551,6 +564,12 @@ function handleCommand(utterance, displayName) {
       if (findCommonSkill(dynamicName)) {
         // alias를 명시 삽입 → _resolveCommandCharacter에서 스킬명이 별명으로 오인되는 것 방지
         return commonSkillUseCommand(["!공용스킬", skillAlias, dynamicName].concat(parts.slice(1)), displayName);
+      }
+
+      // 동적 단축: 명령명이 호출자 퀵슬롯1~3에 등록된 아이템명과 일치하면 그 아이템 사용.
+      var _quickItems = QUICKSLOT_FIELDS.map(function (f) { return String(skillCharacter[f] || "").trim(); });
+      if (_quickItems.indexOf(dynamicName) >= 0) {
+        return quickslotUseCommand(parts, displayName, dynamicName);
       }
     }
   }
@@ -652,6 +671,14 @@ function commandListCommand() {
     "  !장비착용 [별명] <아이템명>",
     "  !장비해제 [별명] <슬롯|아이템명>",
     "  !아이템사용 <아이템명> [대상:별명]",
+    "",
+    "[ 경제 · 상점 ]",
+    "  !은화 <별명1> [별명2 …] <금액>   (+ 지급 / - 차감, GM)",
+    "  !교환 <상대> <아이템명> [수량]    (즉시 양도)",
+    "  !교환 <상대> 은화 <금액>",
+    "  !퀵슬롯1 / !퀵슬롯2 / !퀵슬롯3 [대상:별명]",
+    "  !<아이템명>   (퀵슬롯 등록 아이템 단축 사용)",
+    "  ※ 상점 구매·퀵슬롯 등록은 웹 빌더에서",
     "",
     "[ 세션 ]",
     "  !fin                극/세션 종료 (전체 임시 상태/스택 정리)",
@@ -11476,6 +11503,14 @@ function handlePortalWebhook(body) {
     return registerSkillFromPayload((body && body.skill) || null);
   }
 
+  // 상점 품목 등록/삭제 (관리자 전용)
+  if (action === "register_shop_item") {
+    return registerShopItemFromPayload((body && body.shopItem) || null);
+  }
+  if (action === "delete_shop_item") {
+    return deleteShopItem(String((body && body.name) || ""));
+  }
+
   if (action !== "approve_application") {
     return { ok: false, error: "Unsupported action: " + action };
   }
@@ -12740,12 +12775,9 @@ function _invApiUnequip(alias, slotOrInvId) {
   });
 }
 
-// 소모품 사용 (invId 기반). 효과 적용 + 수량 차감.
-function _invApiUse(alias, invId, target) {
-  if (!invId) return { ok: false, message: "invId가 필요합니다." };
-  var invRow = _invFindRowById(alias, invId);
-  if (!invRow) return { ok: false, message: "인벤토리 항목을 찾을 수 없습니다: " + invId };
-
+// 소모품 사용 핵심 — 인벤토리 행(invRow) 효과 적용 + 수량 차감. { ok, message } 반환.
+// invId 기반(_invApiUse)·이름 기반(퀵슬롯/단축 명령) 양쪽에서 공유한다.
+function _consumeInventoryRow(alias, invRow, target) {
   var itemName = String(invRow["아이템명"] || "").trim();
   var item = getItemByName(itemName);
   if (!item) return { ok: false, message: "ITEM_DB에 없는 아이템입니다: " + itemName };
@@ -12796,8 +12828,28 @@ function _invApiUse(alias, invId, target) {
     updateRowById(SHEET_INVENTORY_DB, "id", String(invRow["id"]), { 수량: newQty });
   }
   var qtyNote = newQty <= 0 ? " (소진됨)" : " (남은 수량: " + newQty + ")";
+  return { ok: true, message: result + qtyNote };
+}
 
-  return Object.assign(_invApiView(alias), { ok: true, message: result + qtyNote });
+// 소모품 사용 (invId 기반). 효과 적용 + 수량 차감. → 인벤토리 뷰 반환.
+function _invApiUse(alias, invId, target) {
+  if (!invId) return { ok: false, message: "invId가 필요합니다." };
+  var invRow = _invFindRowById(alias, invId);
+  if (!invRow) return { ok: false, message: "인벤토리 항목을 찾을 수 없습니다: " + invId };
+  var r = _consumeInventoryRow(alias, invRow, target);
+  if (!r.ok) return r;
+  return Object.assign(_invApiView(alias), { ok: true, message: r.message });
+}
+
+// 이름 기반 소모품 사용 (퀵슬롯/단축 명령). { ok, message } 반환(뷰 미포함).
+function useInventoryItemByName(alias, itemName, target) {
+  itemName = String(itemName || "").trim();
+  if (!itemName) return { ok: false, message: "아이템명이 필요합니다." };
+  var invRow = getInventoryRows(alias).find(function (r) {
+    return String(r["아이템명"] || "").trim() === itemName;
+  });
+  if (!invRow) return { ok: false, message: "인벤토리에 없는 아이템입니다: " + itemName };
+  return _consumeInventoryRow(alias, invRow, target);
 }
 
 // ── 아이템 등록 (웹 빌더 배포용, 관리자 전용) ─────────────────────────
@@ -12924,27 +12976,280 @@ function getItemDbList() {
 }
 
 // =====================================================================
+// 은화(재화) + 상점(SHOP_DB) + 퀵슬롯 경제 시스템
+// =====================================================================
+
+// BOT_DB 은화/퀵슬롯 열 + SHOP_DB 시트를 멱등 보장.
+function ensureEconomySheets() {
+  try {
+    _ensureSheetColumn(SHEET_BOT_DB, SILVER_FIELD, "현재체력");
+    QUICKSLOT_FIELDS.forEach(function (c) { _ensureSheetColumn(SHEET_BOT_DB, c); });
+  } catch (_e) { /* 열 추가 실패는 무시 (권한/시트 부재) */ }
+  try {
+    var ss = _getSpreadsheet();
+    if (!ss.getSheetByName(SHEET_SHOP_DB)) {
+      var sh = ss.insertSheet(SHEET_SHOP_DB);
+      sh.getRange(1, 1, 1, 4).setValues([["아이템명", "가격", "공개", "메모"]]);
+      sh.setFrozenRows(1);
+    }
+  } catch (_e) {}
+}
+
+// ── 은화 ───────────────────────────────────────────────────────────
+function getSilverByAlias(alias) {
+  var ch = findCharacterByAlias(alias);
+  return ch ? Math.max(0, Math.floor(Number(ch[SILVER_FIELD] || 0))) : 0;
+}
+
+// 은화 가감. delta 음수면 차감(0 미만으로 내려가지 않음). { ok, before, after } 반환.
+function addSilver(alias, delta) {
+  ensureEconomySheets();
+  var rowInfo = findCharacterRowByAlias(alias);
+  if (!rowInfo) return { ok: false, error: "캐릭터를 찾을 수 없습니다: " + alias };
+  if (rowInfo.headers.indexOf(SILVER_FIELD) < 0) {
+    return { ok: false, error: "BOT_DB에 '" + SILVER_FIELD + "' 열이 없습니다. 시트에 열을 추가하세요." };
+  }
+  var before = Math.max(0, Math.floor(Number(rowInfo.character[SILVER_FIELD] || 0)));
+  var after  = Math.max(0, before + Math.floor(Number(delta) || 0));
+  setCellByHeader(rowInfo, SILVER_FIELD, after);
+  _invalidateMyCharCache(alias);
+  return { ok: true, before: before, after: after };
+}
+
+// ── 상점(SHOP_DB) ──────────────────────────────────────────────────
+// 상점 카탈로그. ITEM_DB 정의를 조인해 효과/슬롯/설명까지 포함.
+function getShopList() {
+  try {
+    ensureEconomySheets();
+    return getSheetData(SHEET_SHOP_DB).map(function (r) {
+      var name = String(r["아이템명"] || "").trim();
+      if (!name) return null;
+      var def = getItemByName(name) || {};
+      var pub = String(r["공개"] == null ? "" : r["공개"]).trim().toLowerCase();
+      return {
+        name:     name,
+        price:    Math.max(0, Math.floor(Number(r["가격"] || 0))),
+        isPublic: !(pub === "false" || pub === "0" || pub === "n" || pub === "no" || pub === "비공개"),
+        memo:     String(r["메모"] || ""),
+        category: String(def["분류"]   || ""),
+        slot:     String(def["슬롯"]   || ""),
+        rank:     String(def["랭크"]   || ""),
+        effect:   String(def["효과코드"] || ""),
+        value:    (def["수치"] === undefined || def["수치"] === "") ? "" : Number(def["수치"]),
+        count:    (def["횟수"] === undefined || def["횟수"] === "") ? "" : Number(def["횟수"]),
+        description: String(def["설명"] || "")
+      };
+    }).filter(Boolean);
+  } catch (_e) { return []; }
+}
+
+// 상점 품목 등록(관리자, Vercel admin 검증 후 호출). 아이템명 키 upsert.
+// payload: { 아이템명, 가격, 공개, 메모 }
+function registerShopItemFromPayload(payload) {
+  try {
+    if (!payload || typeof payload !== "object") return { ok: false, error: "shop 데이터가 비어 있습니다." };
+    var name = String(payload["아이템명"] || payload.name || "").trim();
+    if (!name) return { ok: false, error: "아이템명은 필수입니다." };
+    if (!getItemByName(name)) return { ok: false, error: "ITEM_DB에 없는 아이템입니다: " + name };
+
+    var priceRaw = (payload["가격"] != null) ? payload["가격"] : payload.price;
+    var price = Math.max(0, Math.floor(Number(priceRaw) || 0));
+    var pubRaw = (payload["공개"] != null) ? payload["공개"] : payload.public;
+    var isPublic = !(pubRaw === false || String(pubRaw).trim().toLowerCase() === "false");
+
+    ensureEconomySheets();
+    var row = {
+      아이템명: name,
+      가격:     price,
+      공개:     isPublic ? "TRUE" : "FALSE",
+      메모:     String(payload["메모"] || payload.memo || "").trim()
+    };
+    var mode = upsertRowByKey(SHEET_SHOP_DB, "아이템명", name, row);
+    invalidateSheetCache(SHEET_SHOP_DB);
+    invalidateGameDataCache();
+    return { ok: true, message: mode === "updated" ? "상점 갱신됨" : "상점 등록됨",
+             name: name, price: price, mode: mode };
+  } catch (err) {
+    return { ok: false, error: "[상점 등록 오류] " + (err && err.message ? err.message : String(err)) };
+  }
+}
+
+// 상점 품목 삭제(관리자).
+function deleteShopItem(name) {
+  try {
+    ensureEconomySheets();
+    var removed = deleteRowByKey(SHEET_SHOP_DB, "아이템명", String(name || "").trim());
+    invalidateSheetCache(SHEET_SHOP_DB);
+    invalidateGameDataCache();
+    return { ok: !!removed, name: name };
+  } catch (err) {
+    return { ok: false, error: "[상점 삭제 오류] " + (err && err.message ? err.message : String(err)) };
+  }
+}
+
+// ── 인벤토리 추가(스택) ────────────────────────────────────────────
+// ACTIVE 동일 아이템 행이 있으면 수량 합산, 없으면 새 행 추가.
+function _addToInventory(alias, itemName, qty) {
+  ensureItemSheets();
+  qty = Math.max(1, Math.floor(Number(qty) || 1));
+  var existing = getInventoryRows(alias).find(function (r) {
+    return String(r["아이템명"] || "").trim() === itemName;
+  });
+  if (existing) {
+    var newQty = Math.max(0, Number(existing["수량"] || 0)) + qty;
+    updateRowById(SHEET_INVENTORY_DB, "id", String(existing["id"]), { 수량: newQty });
+    return newQty;
+  }
+  appendRowByHeaders(SHEET_INVENTORY_DB, {
+    id: _makeInvId(), 소유자: alias, 아이템명: itemName,
+    수량: qty, 상태: "ACTIVE", 획득일: getNowText()
+  });
+  return qty;
+}
+
+// ── 명령어: !은화 (GM 지급/차감, 다중 대상) ─────────────────────────
+// !은화 <캐릭터1> [캐릭터2 ...] <금액(부호 가능)>
+function silverGrantCommand(parts, displayName) {
+  if (!parts || parts.length < 3) {
+    return "사용법: !은화 <캐릭터1> [캐릭터2 ...] <금액>\n" +
+           "예시: !은화 월하륜 아르 100   /   !은화 월하륜 -50\n" +
+           "(금액 부호: + 지급 / - 차감)";
+  }
+  var amountTok = String(parts[parts.length - 1]).trim();
+  if (!/^[+-]?\d+$/.test(amountTok)) return "마지막 인자는 금액(정수)이어야 합니다: " + amountTok;
+  var amount = Number(amountTok);
+  if (amount === 0) return "금액이 0입니다.";
+
+  var aliases = parts.slice(1, parts.length - 1).map(function (t) { return String(t).trim(); }).filter(Boolean);
+  if (aliases.length === 0) return "대상 캐릭터를 1명 이상 지정하세요.";
+
+  var lines = [];
+  aliases.forEach(function (a) {
+    var ch = findCharacterByAlias(a);
+    if (!ch) { lines.push("✗ " + a + ": 캐릭터 없음"); return; }
+    var canonical = String(ch["별명"] || a).trim();
+    var r = addSilver(canonical, amount);
+    if (!r.ok) { lines.push("✗ " + canonical + ": " + (r.error || "실패")); return; }
+    lines.push("• " + canonical + ": " + r.before + " → " + r.after + " (" + formatSigned(amount) + ")");
+  });
+
+  return "[은화 " + (amount >= 0 ? "지급" : "차감") + "]\n" + lines.join("\n");
+}
+
+// ── 명령어: !교환 (즉시 일방 양도) ─────────────────────────────────
+// !교환 <상대> <아이템명> [수량]   |   !교환 <상대> 은화 <금액>
+function tradeCommand(parts, displayName) {
+  if (!parts || parts.length < 3) {
+    return "사용법:\n!교환 <상대> <아이템명> [수량]\n!교환 <상대> 은화 <금액>\n" +
+           "예: !교환 아르 회복약 2   /   !교환 아르 은화 30";
+  }
+  var giver = findCharacter(displayName);
+  if (!giver) return "캐릭터를 찾을 수 없습니다. 디스코드 별명: " + displayName;
+  var giverAlias = String(giver["별명"] || "").trim();
+
+  var resolved = _resolveAliasFromTokens(parts, 1, 1);
+  var toAlias = resolved.alias;
+  var toChar = findCharacterByAlias(toAlias);
+  if (!toChar) return "상대 캐릭터를 찾을 수 없습니다: " + toAlias;
+  toAlias = String(toChar["별명"] || toAlias).trim();
+  if (toAlias === giverAlias) return "자기 자신과는 교환할 수 없습니다.";
+
+  var rest = resolved.rest.slice();
+  if (rest.length === 0) return "교환할 아이템명 또는 '은화'를 입력하세요.";
+
+  // 은화 교환
+  if (rest[0] === "은화") {
+    var amt = Math.floor(Number(rest[1]) || 0);
+    if (amt <= 0) return "교환할 은화 금액을 양수로 입력하세요.";
+    var bal = getSilverByAlias(giverAlias);
+    if (bal < amt) return "은화가 부족합니다. 보유: " + bal;
+    addSilver(giverAlias, -amt);
+    var rr = addSilver(toAlias, amt);
+    return "[은화 교환]\n" + giverAlias + " → " + toAlias + "\n금액: " + amt +
+           "\n" + giverAlias + " 잔액: " + getSilverByAlias(giverAlias) +
+           "\n" + toAlias + " 잔액: " + rr.after;
+  }
+
+  // 아이템 교환
+  var qty = 1;
+  if (rest.length > 1 && /^\d+$/.test(String(rest[rest.length - 1]))) {
+    qty = Math.max(1, Number(rest.pop()));
+  }
+  var itemName = rest.join(" ").trim();
+  if (!itemName) return "교환할 아이템명을 입력하세요.";
+
+  var invRow = getInventoryRows(giverAlias).find(function (r) {
+    return String(r["아이템명"] || "").trim() === itemName;
+  });
+  if (!invRow) return "인벤토리에 없는 아이템입니다: " + itemName;
+  var have = Number(invRow["수량"] || 0);
+  if (have < qty) return "수량이 부족합니다. 보유: " + have + " / 요청: " + qty;
+
+  var newQty = have - qty;
+  if (newQty <= 0) updateRowById(SHEET_INVENTORY_DB, "id", String(invRow["id"]), { 수량: 0, 상태: "REMOVED" });
+  else updateRowById(SHEET_INVENTORY_DB, "id", String(invRow["id"]), { 수량: newQty });
+  _addToInventory(toAlias, itemName, qty);
+
+  return "[아이템 교환]\n" + giverAlias + " → " + toAlias + "\n아이템: " + itemName + " × " + qty +
+         "\n" + giverAlias + " 남은 수량: " + Math.max(0, newQty);
+}
+
+// ── 퀵슬롯/단축 사용 ───────────────────────────────────────────────
+// slotRef: 숫자(1~3, 퀵슬롯 번호) 또는 문자열(아이템명). [대상:XXX] 또는 첫 토큰을 대상으로.
+function quickslotUseCommand(parts, displayName, slotRef) {
+  var self = findCharacter(displayName);
+  if (!self) return "캐릭터를 찾을 수 없습니다. 디스코드 별명: " + displayName;
+  var alias = String(self["별명"] || "").trim();
+
+  var target = "";
+  var tail = (parts || []).slice(1);
+  tail.forEach(function (t) {
+    t = String(t || "").trim();
+    if (t.indexOf("대상:") === 0 || t.indexOf("대상=") === 0) target = t.replace(/^대상[:=]/, "").trim();
+  });
+  if (!target && tail.length > 0 && tail[0].indexOf("대상") !== 0) target = tail[0];
+
+  var itemName = "";
+  if (typeof slotRef === "number") {
+    var col = QUICKSLOT_FIELDS[slotRef - 1];
+    itemName = String(self[col] || "").trim();
+    if (!itemName) return "퀵슬롯" + slotRef + "에 등록된 아이템이 없습니다. 빌더 캐릭터 관리에서 등록하세요.";
+  } else {
+    itemName = String(slotRef || "").trim();
+  }
+
+  var r = useInventoryItemByName(alias, itemName, target);
+  if (!r.ok) return r.message || "사용 실패";
+  return "[" + itemName + " 사용]\n" + r.message;
+}
+
+// =====================================================================
 // 내 캐릭터 관리 API (웹 빌더 전용)
 // doGet ?api=mychar&secret=... 로 진입. Vercel이 JWT 검증 후 호출.
 // =====================================================================
 
 function handleMyCharApi(e) {
   try {
-    var action = String((e && e.parameter && e.parameter.action) || "").trim();
-    var alias  = String((e && e.parameter && e.parameter.alias)  || "").trim();
-    var field  = String((e && e.parameter && e.parameter.field)  || "").trim();
-    var invId  = String((e && e.parameter && e.parameter.invId)  || "").trim();
-    var slot   = String((e && e.parameter && e.parameter.slot)   || "").trim();
+    var action   = String((e && e.parameter && e.parameter.action) || "").trim();
+    var alias    = String((e && e.parameter && e.parameter.alias)  || "").trim();
+    var field    = String((e && e.parameter && e.parameter.field)  || "").trim();
+    var invId    = String((e && e.parameter && e.parameter.invId)  || "").trim();
+    var slot     = String((e && e.parameter && e.parameter.slot)   || "").trim();
+    var itemName = String((e && e.parameter && e.parameter.itemName) || "").trim();
+    var qty      = Math.max(1, Math.floor(Number((e && e.parameter && e.parameter.qty) || 1)));
+    var slotIndex = Math.floor(Number((e && e.parameter && e.parameter.slotIndex) || 0));
 
     if (!alias) return { ok: false, error: "alias가 필요합니다." };
     var charRow = findCharacterByAlias(alias);
     if (!charRow) return { ok: false, error: "캐릭터를 찾을 수 없습니다: " + alias };
     alias = String(charRow["별명"] || alias).trim();
 
-    if (action === "view")    return _myCharViewCached(alias);
-    if (action === "grow")    return _myCharGrow(alias, field);
-    if (action === "equip")   return _myCharEquip(alias, invId);
-    if (action === "unequip") return _myCharUnequip(alias, slot || invId);
+    if (action === "view")      return _myCharViewCached(alias);
+    if (action === "grow")      return _myCharGrow(alias, field);
+    if (action === "equip")     return _myCharEquip(alias, invId);
+    if (action === "unequip")   return _myCharUnequip(alias, slot || invId);
+    if (action === "buy")       return _myCharBuy(alias, itemName, qty);
+    if (action === "quickslot") return _myCharSetQuickslot(alias, slotIndex, itemName);
 
     return { ok: false, error: "알 수 없는 action: " + action };
   } catch (err) {
@@ -13048,6 +13353,10 @@ function _myCharView(alias) {
   // 인벤토리 / 장비 (인벤토리 API 재사용)
   var view = _invApiView(alias);
 
+  // 은화 + 퀵슬롯 (BOT_DB 열)
+  var silver = Math.max(0, Math.floor(Number(character[SILVER_FIELD] || 0)));
+  var quickslots = QUICKSLOT_FIELDS.map(function (f) { return String(character[f] || "").trim(); });
+
   return {
     ok: true,
     alias: alias,
@@ -13060,7 +13369,9 @@ function _myCharView(alias) {
     skills: skills,
     passives: passives,
     items: view.items || [],
-    equipment: view.equipment || []
+    equipment: view.equipment || [],
+    silver: silver,
+    quickslots: quickslots
   };
 }
 
@@ -13090,6 +13401,69 @@ function _myCharUnequip(alias, slotOrInvId) {
   if (!r.ok) return r;
   _invalidateMyCharCache(alias);
   return Object.assign(_myCharView(alias), { ok: true, message: r.message });
+}
+
+// 상점 구매 — 본인 은화로 결제 후 인벤토리 지급.
+function _myCharBuy(alias, itemName, qty) {
+  itemName = String(itemName || "").trim();
+  qty = Math.max(1, Math.floor(Number(qty) || 1));
+  if (!itemName) return { ok: false, error: "구매할 아이템명이 필요합니다." };
+
+  var shopRow = getShopList().find(function (s) { return s.name === itemName; });
+  if (!shopRow) return { ok: false, error: "상점에 없는 아이템입니다: " + itemName };
+  if (!shopRow.isPublic) return { ok: false, error: "현재 판매하지 않는 아이템입니다: " + itemName };
+
+  var unit = Math.max(0, Math.floor(Number(shopRow.price) || 0));
+  var total = unit * qty;
+  var silver = getSilverByAlias(alias);
+  if (silver < total) {
+    return { ok: false, error: "은화가 부족합니다. 필요: " + total + " / 보유: " + silver };
+  }
+
+  var pay = addSilver(alias, -total);
+  if (!pay.ok) return pay;
+  _addToInventory(alias, itemName, qty);
+
+  _invalidateMyCharCache(alias);
+  return Object.assign(_myCharView(alias), {
+    ok: true,
+    message: "[구매] " + itemName + " × " + qty + " (−" + total + " 은화, 잔액 " + pay.after + ")"
+  });
+}
+
+// 퀵슬롯 지정/해제. slotIndex 1~3, itemName 빈 값이면 해제.
+function _myCharSetQuickslot(alias, slotIndex, itemName) {
+  slotIndex = Math.floor(Number(slotIndex) || 0);
+  if (slotIndex < 1 || slotIndex > QUICKSLOT_FIELDS.length) {
+    return { ok: false, error: "퀵슬롯 번호는 1~" + QUICKSLOT_FIELDS.length + " 입니다." };
+  }
+  itemName = String(itemName || "").trim();
+
+  // 지정 시 인벤토리 보유 + 소모품/효과 아이템만 허용.
+  if (itemName) {
+    var inInv = getInventoryRows(alias).some(function (r) {
+      return String(r["아이템명"] || "").trim() === itemName;
+    });
+    if (!inInv) return { ok: false, error: "인벤토리에 없는 아이템입니다: " + itemName };
+    var def = getItemByName(itemName);
+    if (!def) return { ok: false, error: "ITEM_DB에 없는 아이템입니다: " + itemName };
+    if (String(def["분류"] || "").trim() !== "소모품") {
+      return { ok: false, error: "퀵슬롯에는 소모품만 등록할 수 있습니다: " + itemName };
+    }
+  }
+
+  ensureEconomySheets();
+  var rowInfo = findCharacterRowByAlias(alias);
+  if (!rowInfo) return { ok: false, error: "캐릭터를 찾을 수 없습니다: " + alias };
+  var col = QUICKSLOT_FIELDS[slotIndex - 1];
+  if (rowInfo.headers.indexOf(col) < 0) return { ok: false, error: "BOT_DB에 '" + col + "' 열이 없습니다." };
+  setCellByHeader(rowInfo, col, itemName);
+
+  _invalidateMyCharCache(alias);
+  return Object.assign(_myCharView(alias), {
+    ok: true,
+    message: itemName ? ("퀵슬롯" + slotIndex + " → " + itemName) : ("퀵슬롯" + slotIndex + " 해제")
+  });
 }
 
 // ── 세부조건/세부효과 파서 단위 테스트 (시트 쓰기 없음) ─────────────────

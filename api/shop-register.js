@@ -27,8 +27,6 @@ async function readJsonBody(req) {
   });
 }
 
-const ALLOWED_ACTIONS = new Set(['view', 'grow', 'equip', 'unequip', 'buy', 'quickslot']);
-
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') {
@@ -56,10 +54,6 @@ export default async function handler(req, res) {
     if (!body || typeof body !== 'object') {
       return sendJson(res, 400, { ok: false, error: '요청 본문을 해석할 수 없습니다.' });
     }
-    const action = String(body.action || '').trim();
-    if (!ALLOWED_ACTIONS.has(action)) {
-      return sendJson(res, 400, { ok: false, error: '허용되지 않은 action: ' + action });
-    }
 
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -72,46 +66,48 @@ export default async function handler(req, res) {
 
     const { data: profile, error: profErr } = await admin
       .from('profiles')
-      .select('character_alias')
+      .select('role')
       .eq('id', userResp.user.id)
       .maybeSingle();
     if (profErr) {
       return sendJson(res, 500, { ok: false, error: 'profiles 조회 실패: ' + (profErr.message || '') });
     }
-
-    const alias = String(profile?.character_alias || '').trim();
-    if (!alias) {
-      return sendJson(res, 400, { ok: false, error: 'NO_ALIAS', message: '먼저 캐릭터 별명을 등록하세요.' });
+    if (!profile || profile.role !== 'admin') {
+      return sendJson(res, 403, { ok: false, error: '관리자 권한이 필요합니다.' });
     }
 
-    // Apps Script mychar API 호출 (서버가 alias를 강제 — 클라이언트 값 무시)
-    const params = new URLSearchParams();
-    params.set('api', 'mychar');
-    params.set('secret', webhookSecret);
-    params.set('action', action);
-    params.set('alias', alias);
-    if (body.field) params.set('field', String(body.field));
-    if (body.invId) params.set('invId', String(body.invId));
-    if (body.slot)  params.set('slot',  String(body.slot));
-    if (body.itemName) params.set('itemName', String(body.itemName));
-    if (body.qty != null) params.set('qty', String(body.qty));
-    if (body.slotIndex != null) params.set('slotIndex', String(body.slotIndex));
+    // 삭제 요청 vs 등록 요청 분기
+    const isDelete = !!body.delete;
+    const webhookBody = isDelete
+      ? { source: 'aporia-portal', secret: webhookSecret, action: 'delete_shop_item', name: String(body.delete) }
+      : { source: 'aporia-portal', secret: webhookSecret, action: 'register_shop_item', shopItem: body.shopItem };
 
-    const url = webhookUrl + '?' + params.toString();
+    if (!isDelete && (!body.shopItem || typeof body.shopItem !== 'object')) {
+      return sendJson(res, 400, { ok: false, error: 'shopItem 데이터가 필요합니다.' });
+    }
 
-    let json = null;
+    let webhookJson = null;
     try {
-      const resp = await fetch(url, { redirect: 'follow' });
-      const text = await resp.text();
-      try { json = JSON.parse(text); }
+      const webhookResp = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(webhookBody),
+        redirect: 'follow',
+      });
+      const text = await webhookResp.text();
+      try { webhookJson = JSON.parse(text); }
       catch {
-        return sendJson(res, 502, { ok: false, error: 'Apps Script 응답 파싱 실패: ' + text.slice(0, 300) });
+        return sendJson(res, 502, { ok: false, error: 'Apps Script 응답을 JSON으로 해석할 수 없습니다: ' + text.slice(0, 300) });
       }
     } catch (e) {
       return sendJson(res, 502, { ok: false, error: 'Apps Script 호출 실패: ' + (e?.message || String(e)) });
     }
 
-    return sendJson(res, 200, json);
+    if (!webhookJson || webhookJson.ok !== true) {
+      return sendJson(res, 422, { ok: false, error: 'Apps Script 처리 실패: ' + (webhookJson?.error || '알 수 없는 오류') });
+    }
+
+    return sendJson(res, 200, webhookJson);
   } catch (e) {
     return sendJson(res, 500, { ok: false, error: '서버 오류: ' + (e?.message || String(e)) });
   }

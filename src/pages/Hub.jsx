@@ -69,6 +69,7 @@ function SiteHeader({ user, isAdmin, displayName, loading, signOut }) {
     { to: '/builder', label: '캐릭터 빌더' },
     { to: '/characters', label: '캐릭터 일람' },
     { to: '/my-character', label: '내 캐릭터' },
+    { to: '/shop', label: '상점' },
     { to: '/enemy', label: '에너미 신청' },
     { to: '/items', label: '아이템 제작', adminHighlight: true },
     { to: '/my', label: '내 신청' },
@@ -299,6 +300,13 @@ const MENU = [
     desc: '성장예산으로 스탯·기능·숙련을 강화하고 장비를 장착합니다.',
     cta: '내 캐릭터',
     needsAuth: true,
+  },
+  {
+    key: 'shop',
+    to: '/shop',
+    title: '상점',
+    desc: '은화로 아이템을 구매합니다. 관리자는 판매 품목을 등록합니다.',
+    cta: '상점 열기',
   },
   {
     key: 'enemy',

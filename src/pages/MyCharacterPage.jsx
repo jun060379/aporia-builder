@@ -152,6 +152,16 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
     finally { setBusy(''); }
   };
 
+  const setQuickslot = async (slotIndex, itemName) => {
+    setBusy('qs:' + slotIndex); setError(''); setNotice('');
+    try {
+      const r = await callMyChar('quickslot', { slotIndex, itemName });
+      if (r.ok) afterWrite(r, r.message || '퀵슬롯 변경 완료');
+      else setError(r.error || r.message || '퀵슬롯 변경에 실패했습니다.');
+    } catch (e) { setError(e.message); }
+    finally { setBusy(''); }
+  };
+
   const equipBySlot = {};
   (data.equipment || []).forEach(e => { equipBySlot[e.slot] = e; });
   const gearItems = (data.items || []).filter(i => i.category === '장비');
@@ -165,6 +175,7 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
             <span className="text-lg font-bold text-slate-800">{data.alias}</span>
             {data.name && data.name !== data.alias && <span className="text-sm text-slate-400">({data.name})</span>}
             <span className="text-[11px] px-2 py-0.5 bg-amber-50 text-amber-600 border border-amber-200 rounded">Lv.{data.level || '?'}</span>
+            <span className="text-[11px] px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded font-mono">{Number(data.silver || 0).toLocaleString()} 은화</span>
           </div>
           <div className="text-xs text-slate-400 mt-0.5">{data.race} · {data.faction}</div>
         </div>
@@ -280,6 +291,33 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
             ))}
           </div>
         )}
+      </section>
+
+      {/* 퀵슬롯 */}
+      <section>
+        <SectionTitle>퀵슬롯 <span className="text-[10px] text-slate-400 font-normal">(소모품 단축 사용 · !퀵슬롯1~3 또는 !아이템명)</span></SectionTitle>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {[0, 1, 2].map(i => {
+            const cur = (data.quickslots || [])[i] || '';
+            const consumables = (data.items || []).filter(it => it.category === '소모품');
+            const hasCur = !cur || consumables.some(c => c.name === cur);
+            return (
+              <div key={i} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
+                <div className="text-[10px] text-slate-400 mb-1">퀵슬롯{i + 1}</div>
+                <select
+                  className={`${inputCls} text-xs`}
+                  value={cur}
+                  disabled={busy === 'qs:' + (i + 1)}
+                  onChange={(e) => setQuickslot(i + 1, e.target.value)}
+                >
+                  <option value="">— 비어 있음 —</option>
+                  {consumables.map(it => <option key={it.invId} value={it.name}>{it.name} ×{it.quantity}</option>)}
+                  {!hasCur && <option value={cur}>{cur} (보유 없음)</option>}
+                </select>
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       {/* 스킬 */}

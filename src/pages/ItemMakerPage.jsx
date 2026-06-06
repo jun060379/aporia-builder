@@ -69,6 +69,9 @@ function ItemMaker() {
   const [error, setError] = useState('');
   const [items, setItems] = useState([]);
   const [itemsLoading, setItemsLoading] = useState(true);
+  const [lastDeployed, setLastDeployed] = useState('');
+  const [shopPrice, setShopPrice] = useState('');
+  const [shopMsg, setShopMsg] = useState('');
 
   const kind = EFFECT_KINDS.find(k => k.id === row.effectKind) || EFFECT_KINDS[0];
   const effectCode = buildEffectCode(row);
@@ -145,11 +148,33 @@ function ItemMaker() {
         return;
       }
       setNotice(`${json.mode === 'updated' ? '갱신' : '등록'}됨: ${json.name} (${json.id})`);
+      setLastDeployed(json.name);
+      setShopMsg('');
       loadItems();
     } catch (e) {
       setError(e?.message || '배포 중 오류가 발생했습니다.');
     } finally {
       setDeploying(false);
+    }
+  }
+
+  async function registerToShop() {
+    setShopMsg('');
+    try {
+      if (!supabase) { setShopMsg('Supabase가 설정되지 않았습니다.'); return; }
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) { setShopMsg('로그인이 필요합니다.'); return; }
+      const resp = await fetch('/api/shop-register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ shopItem: { 아이템명: lastDeployed, 가격: Math.max(0, Math.floor(Number(shopPrice) || 0)), 공개: true } }),
+      });
+      const json = await resp.json().catch(() => null);
+      if (!resp.ok || json?.ok !== true) { setShopMsg(json?.error || `상점 등록 실패 (HTTP ${resp.status})`); return; }
+      setShopMsg(`상점 등록됨: ${lastDeployed} (${json.price} 은화)`);
+    } catch (e) {
+      setShopMsg(e?.message || '상점 등록 중 오류가 발생했습니다.');
     }
   }
 
@@ -329,6 +354,19 @@ function ItemMaker() {
 
       {error && <p className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">{error}</p>}
       {notice && <p className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-700">{notice}</p>}
+
+      {/* 배포 후 상점 등록 */}
+      {lastDeployed && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 space-y-2">
+          <p className="text-xs text-amber-800">방금 배포한 <strong>{lastDeployed}</strong> 을(를) 상점 판매 품목으로 등록합니다.</p>
+          <div className="flex items-center gap-2">
+            <input className={`${inputCls} w-32 font-mono`} value={shopPrice} onChange={(e) => setShopPrice(e.target.value)} placeholder="가격(은화)" />
+            <button onClick={registerToShop} className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-semibold transition-colors">상점 등록</button>
+            <Link to="/shop" className="text-[11px] text-amber-700 underline">상점 관리 →</Link>
+          </div>
+          {shopMsg && <p className="text-[11px] text-amber-700">{shopMsg}</p>}
+        </div>
+      )}
 
       {/* 기존 아이템 목록 */}
       <div className="space-y-2 border-t border-slate-100 pt-4">
