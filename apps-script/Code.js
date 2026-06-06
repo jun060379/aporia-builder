@@ -1602,7 +1602,7 @@ function _applyPassiveDamageModifier(alias, damage) {
       }
     });
 
-    damage = Math.max(0, Math.floor(damage * multFactor) + addDelta);
+    damage = Math.max(0, Math.round(damage * multFactor) + addDelta);
   } catch (_e) { debugLogs.push("오류: " + _e.message); }
 
   return { damage, logs, debugLogs };
@@ -1665,7 +1665,7 @@ function _applyPassiveHealingModifier(alias, amount) {
       }
     });
 
-    amount = Math.max(0, Math.floor(amount * multFactor) + addDelta);
+    amount = Math.max(0, Math.round(amount * multFactor) + addDelta);
   } catch (_e) { /* 무시 */ }
 
   return { amount, logs };
@@ -1693,7 +1693,7 @@ function _applyStatusDamageModifier(alias, damage) {
         if (v) { addDelta += v; logs.push("[상태: " + nm + "]\n피해 보정: " + formatSigned(v)); }
       }
     });
-    damage = Math.max(0, Math.floor(damage * multFactor) + addDelta);
+    damage = Math.max(0, Math.round(damage * multFactor) + addDelta);
   } catch (_e) { /* 무시 */ }
   return { damage, logs };
 }
@@ -1719,7 +1719,7 @@ function _applyStatusHealingModifier(alias, amount) {
         if (v) { addDelta += v; logs.push("[상태: " + nm + "]\n회복 보정: " + formatSigned(v)); }
       }
     });
-    amount = Math.max(0, Math.floor(amount * multFactor) + addDelta);
+    amount = Math.max(0, Math.round(amount * multFactor) + addDelta);
   } catch (_e) { /* 무시 */ }
   return { amount, logs };
 }
