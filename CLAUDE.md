@@ -136,10 +136,10 @@ Google Apps Script that acts as the authoritative data-registration layer. It wr
 Everything deploys from a **push to `main`**. No local machine required.
 
 - **Web (React)** → **Vercel auto-deploys** on every push to `main`. Nothing else to do.
-- **Bot (`apps-script/Code.js`)** → GitHub Action **`.github/workflows/clasp-deploy.yml`** runs `clasp push --force` whenever `apps-script/**` changes on `main` (auth via the `CLASPRC_JSON` repo secret; clasp pinned to **3.x** to match the token format). A local `.git/hooks/post-commit` may ALSO push from a dev machine — harmless overlap, but never rely on it; the Action is the source of truth.
+- **Bot (`apps-script/Code.js`)** → GitHub Action **`.github/workflows/clasp-deploy.yml`** runs `clasp push --force` **AND `clasp deploy -i <DEPLOYMENT_ID>`** whenever `apps-script/**` changes on `main` (auth via `CLASPRC_JSON` secret; clasp pinned to **3.x**). A local `.git/hooks/post-commit` may push from a dev machine but it only runs `clasp push` (not deploy) — never rely on it; the Action is the source of truth.
 - **`@claude` on GitHub** → **`.github/workflows/claude.yml`** runs Claude Code in Actions when an issue/PR/comment contains `@claude` (auth: `CLAUDE_CODE_OAUTH_TOKEN` secret + the Claude GitHub App installed on the repo). This is the cloud/mobile path.
 
-To verify a change shipped: confirm the relevant workflow run is green in the Actions tab. `clasp push` alone deploys the bot (the webhook is served from the HEAD deployment).
+⚠️ **`clasp push` ≠ live for the bot.** The Discord bot calls a **fixed versioned Web App `/exec` deployment** (id `AKfycbx1Idgg…242P`, also in `package.json` `deploy:script`). `clasp push` only updates the script source; you MUST also `clasp deploy -i <id>` to publish a new version to that URL. The Action does both. Locally, run `npm run deploy:script` (not just a commit) after changing `apps-script/`. To verify: the `clasp-deploy` Actions run is green AND shows a new deploy version.
 
 ## Working conventions (apply these on every change)
 

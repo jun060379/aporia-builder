@@ -29,10 +29,13 @@ jobs:
       - name: Install clasp
         run: npm install -g @google/clasp@3.3.0
 
-      - name: clasp push
+      - name: clasp push + deploy
         working-directory: apps-script
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          # 디스코드 봇이 호출하는 고정 Web App 배포 ID (package.json deploy:script와 동일).
+          # ⚠️ clasp push만으론 라이브 반영 안 됨 — 이 deployment를 재배포해야 새 버전이 /exec에 적용된다.
+          DEPLOYMENT_ID: AKfycbx1IdggVhDAwKriaoO3Ac33M81QiPsvo4tLvyiH2YV8ApKaN6zorz2Y5iyU-e7Q242P
         run: |
           if [ -z "${CLASPRC_JSON}" ]; then
             echo "::error::CLASPRC_JSON 시크릿이 없습니다. 저장소 Settings → Secrets and variables → Actions 에 추가하세요."
@@ -42,3 +45,4 @@ jobs:
           printf '%s' "${CLASPRC_JSON}" > "${HOME}/.clasprc.json"
           export clasp_config_auth="${HOME}/.clasprc.json"
           clasp push --force
+          clasp deploy -i "${DEPLOYMENT_ID}" --description "CI: ${GITHUB_SHA::7}"
