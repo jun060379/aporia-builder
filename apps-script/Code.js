@@ -517,6 +517,7 @@ function handleCommand(utterance, displayName) {
 
   if (command === "!fin") return finishSession(parts, displayName);
   if (command === "!패시브목록") return passiveListCommand(parts, displayName);
+  if (command === "!패시브등록") return passiveRegisterCommand(utterance, displayName);
 
   if (command === "!닉네임목록")  return nicknameList(parts);
   if (command === "!닉네임추가")  return nicknameAdd(parts);
@@ -657,6 +658,7 @@ function commandListCommand() {
     "",
     "[ 패시브 ]",
     "  !패시브목록 [캐릭터별명/에너미ID·별명]",
+    "  !패시브등록  (멀티라인 필드:값 — key/이름/소유타입/소유키/…/효과/설명)",
     "",
     "[ 닉네임 ]",
     "  !닉네임목록 [별명]        등록된 닉네임 확인",
@@ -9500,6 +9502,70 @@ function firePassiveTriggerEffects(character, trigger, ctxOpts) {
   });
 
   return logs.join("\n\n");
+}
+
+// ── !패시브등록 ──────────────────────────────────────────────────────
+// 멀티라인 "필드: 값" 형식을 PASSIVE_SKILLS 행으로 upsert(key 기준).
+// 라벨(PASSIVE_HEADERS)로 시작하지 않는 줄은 직전 필드에 이어붙임 → 효과/설명 여러 줄 지원.
+function passiveRegisterCommand(utterance, displayName) {
+  var body = String(utterance || "").replace(/^\s*!패시브등록[ \t]*\r?\n?/, "");
+  if (!body.trim()) {
+    return "사용법: !패시브등록 (다음 줄부터 '필드: 값')\n\n" +
+      "key: 고유키(공백 불가)\n이름: 표시 이름\n" +
+      "소유타입: global|character|faction|species|enemy|template\n" +
+      "소유키: (global이면 * 또는 생략, 그 외엔 대상 식별자)\n" +
+      "해금레벨: 0\n분류: 판정보정|피해보정|회복보정|저항|트리거효과|기타\n" +
+      "효과코드: 판정보정|상태부여|스택증가|… \n수치: \n최대: \n" +
+      "발동: 항상|판정시작|액션사용후[:액션명,…]|피해후|가해후|… \n" +
+      "판정: 전체\n조건: \n효과: (DSL, 여러 줄 가능)\n설명: (여러 줄 가능)\n메모: ";
+  }
+
+  var labels = PASSIVE_HEADERS; // ["key","이름",...,"메모"]
+  var fields = {};
+  var current = null;
+  body.split(/\r?\n/).forEach(function (line) {
+    var m = line.match(/^[ \t]*([^:：]+)[:：][ \t]?(.*)$/);
+    if (m && labels.indexOf(m[1].trim()) >= 0) {
+      current = m[1].trim();
+      fields[current] = m[2];
+    } else if (current !== null) {
+      fields[current] += "\n" + line;  // 직전 필드의 이어지는 줄(효과/설명 멀티라인)
+    }
+  });
+
+  function fv(k) { return (fields[k] === undefined ? "" : String(fields[k]).trim()); }
+
+  var key       = fv("key");
+  var name      = fv("이름");
+  var ownerType = fv("소유타입") || "global";
+  var ownerKey  = fv("소유키");
+
+  if (!key)            return "[패시브 등록 오류] key는 필수입니다.";
+  if (/\s/.test(key))  return "[패시브 등록 오류] key에 공백을 쓸 수 없습니다: " + key;
+  if (!name)           return "[패시브 등록 오류] 이름은 필수입니다.";
+  if (ownerType === "global" && !ownerKey) ownerKey = "*";
+  if (ownerType !== "global" && !ownerKey) {
+    return "[패시브 등록 오류] 소유타입이 '" + ownerType + "'이면 소유키가 필요합니다.";
+  }
+
+  ensurePassiveSheet();
+  var row = {};
+  labels.forEach(function (h) { row[h] = fv(h); });
+  row["key"]     = key;
+  row["이름"]    = name;
+  row["소유타입"] = ownerType;
+  row["소유키"]  = ownerKey;
+
+  var mode = upsertRowByKey(SHEET_PASSIVE_SKILLS, "key", key, row);
+  invalidateSheetCache(SHEET_PASSIVE_SKILLS);
+  invalidateGameDataCache();
+
+  return "[패시브 " + (mode === "updated" ? "갱신" : "등록") + "]\n" +
+    "key: " + key + "\n이름: " + name + "\n" +
+    "소유: " + ownerType + (ownerKey ? " / " + ownerKey : "") + "  Lv." + (fv("해금레벨") || "0") + "\n" +
+    "분류: " + (fv("분류") || "-") + " / 효과코드: " + (fv("효과코드") || "-") + "\n" +
+    "발동: " + (fv("발동") || "-") + "\n" +
+    "효과: " + (fv("효과") || "(없음)");
 }
 
 // ── !패시브목록 명령어 ──────────────────────────────────────────────
