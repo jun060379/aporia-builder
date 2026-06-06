@@ -127,4 +127,34 @@ The server-side vars (`SUPABASE_SERVICE_ROLE_KEY`, `APPS_SCRIPT_WEBHOOK_URL`, `A
 
 ### Apps Script (`apps-script/`)
 
-Google Apps Script that acts as the authoritative data-registration layer. It writes approved applications into named sheets (`BOT_DB`, `SKILL_DB`, `ENEMY_TEMPLATES`, `ENEMY_SKILLS`, `COMMON_SKILLS`, `PASSIVE_SKILLS`, etc.). Deployed separately via `clasp` (see `apps-script/.clasp.json`).
+Google Apps Script that acts as the authoritative data-registration layer. It writes approved applications into named sheets (`BOT_DB`, `SKILL_DB`, `ENEMY_TEMPLATES`, `ENEMY_SKILLS`, `COMMON_SKILLS`, `PASSIVE_SKILLS`, etc.). Deployed via `clasp` (see `apps-script/.clasp.json`).
+
+---
+
+## Deployment & CI (IMPORTANT — read before assuming how to ship)
+
+Everything deploys from a **push to `main`**. No local machine required.
+
+- **Web (React)** → **Vercel auto-deploys** on every push to `main`. Nothing else to do.
+- **Bot (`apps-script/Code.js`)** → GitHub Action **`.github/workflows/clasp-deploy.yml`** runs `clasp push --force` whenever `apps-script/**` changes on `main` (auth via the `CLASPRC_JSON` repo secret; clasp pinned to **3.x** to match the token format). A local `.git/hooks/post-commit` may ALSO push from a dev machine — harmless overlap, but never rely on it; the Action is the source of truth.
+- **`@claude` on GitHub** → **`.github/workflows/claude.yml`** runs Claude Code in Actions when an issue/PR/comment contains `@claude` (auth: `CLAUDE_CODE_OAUTH_TOKEN` secret + the Claude GitHub App installed on the repo). This is the cloud/mobile path.
+
+To verify a change shipped: confirm the relevant workflow run is green in the Actions tab. `clasp push` alone deploys the bot (the webhook is served from the HEAD deployment).
+
+## Working conventions (apply these on every change)
+
+1. **Keep the builder UI in sync with Apps Script.** If you change a bot rule/format in `apps-script/Code.js`, update the matching authoring UI in the **same commit** — skill/passive makers (`SkillMaker.jsx`, `PassiveMaker.jsx`), item maker (`ItemMakerPage.jsx`), enemy makers, `src/lib/enemyText.js`. The web builder must never let users author something the bot rejects, and vice versa.
+2. **Active/passive effect parity.** Active skills and passives share the same effect DSL via `processSkillEffects`. Setting/modifier effects (판정/피해/회복 보정) must actually apply on the bot side AND be authorable in the builder (conditions + set-effects). When extending one, extend the other.
+3. **Discord bot is a SEPARATE repo** (`git@github.com:jun060379/discord-bot.git`, discord.js). This repo has no bot code. The bot renders interactive UI for `!인벤토리` only; **all other `!commands` are forwarded verbatim** to this Apps Script `doGet` `?q=` endpoint. Inventory/character data is served as JSON (`?api=inventory`, `?api=mychar`). So new text commands work without touching the bot repo, but new interactive (button) UI needs the bot repo too.
+4. **Some game numbers live in Sheets, not code.** Action coefficients (e.g. 저항 = 내구×0.75 + 지능×0.75) are in `src/data/actions.js` for the **web**, but the **bot** reads them from the `ACTION_COMPONENTS` sheet. Changing one does not change the other — update both (the sheet edit is manual, by the operator).
+5. **Action 보정/장비 → final value.** In `actionCheck` / `rollActionValueForCharacter`, command modifiers (`+N`/`-N`/`*N`) and equipment bonuses are added to the **rolled final value**, not folded into the pre-dice coefficient. (Stat/power/skill checks already worked this way.)
+6. **Effect DSL nuances.** `수치:*N` (or `×N`) means a **multiplicative** modifier (판정값 ×N); plain numbers / coefficient expressions are **additive**. Passive `효과` column rows may be `조건 => 효과` (arrow-gated set-effects).
+
+## Subsystems added recently (pointers; details in code/git history)
+
+- **Enemy passives & status** — `PASSIVE_SKILLS` 소유타입 supports `enemy`/`template` (besides global/character/faction/species). Enemies flow through the same damage/heal/trigger pipeline as PCs. Enemy status/stack keys are normalized to a **canonical alias** (`alias → name → enemy_id`) via `enemyCanonicalAlias` / `_canonStatusTarget` so STATUS_DB writes and combat/passive reads agree. Enemy skills (`enemySkillUse`) and PC→enemy effects apply real statuses.
+- **Economy** — currency `은화` is a **BOT_DB column** (auto-ensured); quickslots are BOT_DB columns `퀵슬롯1~3`; shop catalog is the **`SHOP_DB`** sheet (joined to `ITEM_DB`). Commands: `!은화` (GM grant/deduct, multi-target), `!교환` (instant transfer of items or 은화), `!퀵슬롯1~3` + dynamic `!<아이템명>` (consume a quickslotted item). Web: **`/shop`** (`src/pages/ShopPage.jsx`) for player purchase + admin shop management; quickslot assignment in `MyCharacterPage.jsx`. APIs: `/api/my-character` actions `buy`/`quickslot`, `/api/shop-register` (admin). Helpers in `Code.js`: `ensureEconomySheets`, `addSilver`, `getShopList`, `_addToInventory`, `useInventoryItemByName`.
+
+## Sheets the operator maintains (not auto-created from code unless noted)
+
+`BOT_DB` (adds `은화`, `퀵슬롯1~3` auto if missing), `ACTION_COMPONENTS` (action coefficients — manual), `STAT_SCALE`, `RANK_SCALE`, `LEVEL_TABLE`, `ITEM_DB`/`INVENTORY_DB`/`EQUIPMENT_DB`/`SHOP_DB` (auto), `STATUS_DB`/`STACK_DB`, `NICKNAME_DB`. Most are auto-created by their `ensure*Sheets()` helpers; coefficient/scale tables are seeded by the operator.
