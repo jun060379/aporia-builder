@@ -1,0 +1,42 @@
+name: Claude Code
+
+# GitHub 이슈/PR 댓글에 "@claude ..." 멘션하면 클라우드(GitHub Actions)에서 Claude Code 실행.
+# 폰 GitHub 앱만으로 컴퓨터 꺼진 상태에서 작업 지시 가능.
+# 필요 시크릿: CLAUDE_CODE_OAUTH_TOKEN  (맥 터미널 `claude setup-token`으로 발급)
+#   또는 ANTHROPIC_API_KEY 를 쓰려면 아래 with: 에서 키를 바꾸세요.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # API 키를 대신 쓰려면 위 줄을 지우고:
+          # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
