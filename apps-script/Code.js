@@ -4595,7 +4595,7 @@ function _formatJudgeModDetail(statusMod, equipMod) {
     var steps = ["적용 전: " + v];
     // 적용 순서: 적용 전 × 곱셈버프합 + 정수보정, 그 뒤 장비 보정.
     if (mult !== 1) {
-      v = Math.floor(v * mult);
+      v = Math.round(v * mult);
       steps.push("곱셈버프 합산: ×" + mult + " → " + v);
     }
     if (delta) {
@@ -8658,7 +8658,8 @@ function applyStatusModifierToValue(alias, value, checkTypes, targetAlias) {
   const combinedMult = Math.round((1 + (multSum - multCount)) * 1e6) / 1e6;
   // 정수보정(+N)은 곱셈 바깥에 더한다: 결과값 × 곱버프배율 + 정수보정합.
   // 이면침식 등 추가 배율은 호출부에서 이 결과(+장비)에 다시 곱한다.
-  const after = Math.floor(before * combinedMult) + totalDelta;
+  // 곱 보정은 반올림(내림 시 ×1.08 같은 소폭 버프가 작은 판정값에서 통째로 사라짐).
+  const after = Math.round(before * combinedMult) + totalDelta;
 
   var combinedText = modifier.text || "";
   if (passiveText) combinedText = combinedText ? (combinedText + "\n\n" + passiveText) : passiveText;
