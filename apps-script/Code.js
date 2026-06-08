@@ -3953,6 +3953,8 @@ function characterSubmit(utterance, displayName) {
     처리메모: ""
   };
 
+  // 소속 컬럼이 없으면 종족 뒤에 자동 추가
+  try { _ensureSheetColumn(SHEET_CHAR_PENDING, "소속", "종족"); } catch (_e) {}
   appendRowByHeaders(SHEET_CHAR_PENDING, row);
 
   return (
@@ -3991,6 +3993,9 @@ function characterApprove(parts, displayName) {
       "별명: " + pending["별명"]
     );
   }
+
+  // 소속 컬럼이 없으면 종족 뒤에 자동 추가
+  try { _ensureSheetColumn(SHEET_BOT_DB, "소속", "종족"); } catch (_e) {}
 
   const headers = getSheetHeaders(SHEET_BOT_DB);
   const rowObj = {};
@@ -11846,12 +11851,20 @@ function registerPortalCharacterData(payload, outputText, application) {
     for (var j = 0; j < passives.length; j++) {
       var p = passives[j];
       var pName = String(p["이름"] || p["key"] || ("(패시브 " + (j + 1) + ")"));
+      // 캐릭터 빌더에서 온 패시브는 기본 소유타입이 'global'/*이므로,
+      // 등록 시 해당 캐릭터 전용(character/charName)으로 자동 교정한다.
+      var ownerType = String(p["소유타입"] || "global");
+      var ownerKey  = String(p["소유키"]   || "*");
+      if (ownerType === "global") {
+        ownerType = "character";
+        ownerKey  = charName;
+      }
       try {
         appendRowByHeaders(SHEET_PASSIVE_SKILLS, {
           key:      String(p["key"]      || ""),
           이름:     String(p["이름"]     || ""),
-          소유타입: String(p["소유타입"] || "global"),
-          소유키:   String(p["소유키"]   || "*"),
+          소유타입: ownerType,
+          소유키:   ownerKey,
           해금레벨: String(p["해금레벨"] || "1"),
           분류:     String(p["분류"]     || ""),
           효과코드: String(p["효과코드"] || ""),
