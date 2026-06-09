@@ -79,7 +79,12 @@ function buildEffectBody(type, params) {
   if (type === 'set') {
     const v = params.setVar || '판정보정';
     if (params.value === undefined || String(params.value).trim() === '') return '';
-    return `${v} = ${String(params.value).trim()}`;
+    const isMod = ['판정보정','피해보정','피해감소','회복보정'].includes(v);
+    const checkTypePart = (v === '판정보정' && params.checkType && params.checkType.trim()) ? ` ${params.checkType.trim()}` : '';
+    let base = `${v}${checkTypePart} = ${String(params.value).trim()}`;
+    if (isMod && params.count && String(params.count).trim()) base += ` 횟수:${String(params.count).trim()}`;
+    if (v === '판정보정' && params.consumeType && String(params.consumeType).trim()) base += ` 소비:${String(params.consumeType).trim()}`;
+    return base;
   }
   if (type === 'template') {
     const name = params.templateName === '직접입력' ? (params.customTemplateName || '') : (params.templateName || '');
@@ -475,15 +480,66 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
                   ))}
                 </div>
               </div>
+
+              {/* 적용 판정 유형 (판정보정 전용) */}
+              {(params.setVar || '판정보정') === '판정보정' && (
+                <div className="space-y-1">
+                  <span className="text-[11px] text-slate-500">적용 판정 유형 <span className="text-slate-400">(비우면 모든 판정)</span></span>
+                  <input className={`${inputCls} font-mono`} value={params.checkType || ''} onChange={e => setParam('checkType', e.target.value)}
+                    placeholder="예: 저항  /  참격,관통  /  비우면 전체" />
+                  <div className="flex flex-wrap gap-1 pt-0.5">
+                    {['전체', '저항', '참격', '관통', '타격', '사격', '격투', '화력', '스탯', '액션', '스킬'].map(t => (
+                      <button key={t} type="button"
+                        onClick={() => setParam('checkType', t === '전체' ? '' : t)}
+                        className={`text-[10px] px-1.5 py-0.5 rounded border font-mono transition-colors ${
+                          (params.checkType || '') === (t === '전체' ? '' : t)
+                            ? 'bg-violet-100 text-violet-700 border-violet-300'
+                            : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-200'
+                        }`}>{t}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] text-slate-500">값</span>
                 <input className={`${inputCls} font-mono`} value={params.value || ''} onChange={e => setParam('value', e.target.value)}
                   placeholder={(SET_VARS.find(s => s.v === (params.setVar || '판정보정')) || {}).ph || ''} />
               </label>
               <NumTokenBar onInsert={t => setParam('value', (params.value || '') + t)} />
+
+              {/* 유지 횟수 (modifier 변수 전용) */}
+              {['판정보정','피해보정','피해감소','회복보정'].includes(params.setVar || '판정보정') && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">유지 횟수 <span className="text-slate-400">(비우면 장면 동안)</span></span>
+                  <input className={`${inputCls} font-mono`} value={params.count || ''} onChange={e => setParam('count', e.target.value)}
+                    placeholder="예: 3 (해당 판정 3회 후 소멸)" />
+                </label>
+              )}
+
+              {/* 횟수 소비 판정 (판정보정 + 횟수 지정 시) */}
+              {(params.setVar || '판정보정') === '판정보정' && params.count && (
+                <div className="space-y-1">
+                  <span className="text-[11px] text-slate-500">횟수 소비 판정 <span className="text-slate-400">(비우면 적용 판정과 동일)</span></span>
+                  <input className={`${inputCls} font-mono`} value={params.consumeType || ''} onChange={e => setParam('consumeType', e.target.value)}
+                    placeholder="예: 행동 (행동 판정마다 횟수 차감)" />
+                  <div className="flex flex-wrap gap-1 pt-0.5">
+                    {['저항', '참격', '관통', '타격', '사격', '격투', '화력', '액션', '스킬', '스탯'].map(t => (
+                      <button key={t} type="button"
+                        onClick={() => setParam('consumeType', params.consumeType === t ? '' : t)}
+                        className={`text-[10px] px-1.5 py-0.5 rounded border font-mono transition-colors ${
+                          params.consumeType === t
+                            ? 'bg-amber-100 text-amber-700 border-amber-300'
+                            : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200'
+                        }`}>{t}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <p className="text-[10px] text-slate-400 leading-snug">
                 {['판정보정','피해보정','피해감소','회복보정'].includes(params.setVar || '판정보정')
-                  ? '장면 동안 임시 보정 상태로 적용됩니다(덮어쓰기). 자신 기준. *N 으로 배율도 가능.'
+                  ? '임시 보정 상태로 적용됩니다(덮어쓰기). 자신 기준. *N 으로 배율도 가능. 횟수 미지정 시 장면 동안 유지.'
                   : 'DB 값을 직접 설정합니다(자신 기준).'}
               </p>
             </div>

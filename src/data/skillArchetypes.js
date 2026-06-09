@@ -105,7 +105,7 @@ export const SKILL_ARCHETYPES = [
       { key: 'kind', label: '버프 종류', type: 'select', options: BUFF_KINDS.map(k => k.value), optionLabels: BUFF_KINDS },
       { key: 'judgeType', label: '적용 판정 유형', type: 'select', options: JUDGMENT_TYPES, when: m => m.kind === 'judgment' },
       { key: 'value', label: '수치', type: 'text' },
-      { key: 'count', label: '지속 횟수', type: 'text', when: m => m.kind === 'enhance' },
+      { key: 'count', label: '지속 횟수', type: 'text' },
     ],
     buildFormula: () => simpleRollFormula('지능'),
     buildEffects: (m) => {
@@ -113,7 +113,9 @@ export const SKILL_ARCHETYPES = [
         return templateLine('자신', '강화', { value: m.value, count: m.count });
       }
       const type = (m.judgeType && m.judgeType !== '전체') ? ` ${m.judgeType}` : '';
-      return `판정보정${type} = ${m.value || '3'}`;
+      let line = `판정보정${type} = ${m.value || '3'}`;
+      if (m.count) line += ` 횟수:${m.count}`;
+      return line;
     },
   },
   {
