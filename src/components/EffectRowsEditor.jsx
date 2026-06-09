@@ -206,7 +206,7 @@ export default function EffectRowsEditor({ value, onChange }) {
         <p className="font-semibold mb-0.5">문법</p>
         <p>조건 연산자: <code>&lt;= &gt;= &lt; &gt; == !=</code> · 설정 효과: <code>변수 = 값</code> (또는 <code>==</code>)</p>
         <p>설정 가능 변수: 이면침식 · 현재체력 · 일상점 · 피해감소 · 회복보정 · 판정보정</p>
-        <p><code>판정보정 참격,관통 = 3</code> — 변수와 <code>=</code> 사이에 콤마로 판정 유형을 넣으면 해당 유형 판정에만 보정(비우면 전체). <code>*N</code> 으로 배율도 가능.</p>
+        <p><code>판정보정 참격,관통 = 3</code> — 변수와 <code>=</code> 사이에 콤마로 판정 유형을 넣으면 해당 유형 판정에만 보정(비우면 전체). <code>*N</code> 으로 배율도 가능. 액티브 스킬에서는 <code>횟수:N</code>(N회 후 소멸)·<code>소비:TYPE</code>(횟수 차감 판정 분리) 추가 가능. 예: <code>판정보정 저항 = 120 횟수:3 소비:액션</code></p>
         <p>기존 효과(<code>상태부여</code>·<code>스택증가</code> 등)도 그대로 입력 가능. 조건을 비우면 항상 실행됩니다.</p>
         <p className="mt-1"><code>랜덤상태부여 자신 지정 참격,관통,타격,사격,격투</code> — 목록 중 무작위 1개로 <code>지정_OO</code> 상태 부여(나머지 제거). 수치 옵션 주면 해당 액션 판정 버프도 함께.</p>
         <p>조건에서 <code>사용액션</code>(방금 쓴 액션·스킬명) · <code>상태접미_지정</code>(현재 지정된 항목)을 비교 가능. 예: <code>사용액션 == 상태접미_지정</code></p>

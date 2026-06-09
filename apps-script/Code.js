@@ -7319,9 +7319,16 @@ function _parseSetEffect(effPart) {
   var s = String(effPart == null ? "" : effPart);
   // 모디파이어 변수(판정보정/피해보정/피해감소/회복보정)는 변수와 = 사이에
   // 콤마 판정 유형 목록을 가질 수 있다. 예: "판정보정 참격,관통 = 3" → checkType="참격,관통".
+  // 값 뒤에 "횟수:N"(유지 횟수)·"소비:TYPE"(판정보정 전용: 횟수를 소비할 판정 유형)을 추가 가능.
   var mod = s.match(/^\s*(판정보정|피해보정|피해감소|회복보정)\s*([^=<>!]*?)\s*(==|=)\s*(.+?)\s*$/);
   if (mod) {
-    return { variable: mod[1].trim(), checkType: (mod[2] || "").trim(), value: mod[4].trim() };
+    var rawValue = mod[4].trim();
+    var count = null;
+    var consumeType = null;
+    rawValue = rawValue.replace(/\s+횟수:(\d+)/g, function(_, n) { count = parseInt(n, 10); return ""; })
+                       .replace(/\s+소비:([^\s]+)/g, function(_, t) { consumeType = t; return ""; })
+                       .trim();
+    return { variable: mod[1].trim(), checkType: (mod[2] || "").trim(), value: rawValue, count: count, consumeType: consumeType };
   }
   var m = s.match(/^\s*([^\s=<>!]+)\s*(==|=)\s*(.+?)\s*$/);
   if (!m) return null;
@@ -7333,8 +7340,9 @@ function _parseSetEffect(effPart) {
 // 모디파이어 개념 변수(피해감소/피해보정/회복보정/판정보정)는 이번 단계에서는
 //   로그/반환값까지만 (실제 전투 합산 연동은 후속).
 // 그 외 변수는 오류 메시지 반환.
-function applySetEffect(variable, valueExpr, context, checkType) {
+function applySetEffect(variable, valueExpr, context, checkType, extraOpts) {
   context = context || {};
+  extraOpts = extraOpts || {};
   var v = String(variable).trim();
   var checkTypeStr = String(checkType || "").trim() || "전체";
 
@@ -7399,10 +7407,14 @@ function applySetEffect(variable, valueExpr, context, checkType) {
     if (v === "판정보정") {
       var jBuff = isMult ? (multFactor >= 1) : (num >= 0);
       var jVal  = isMult ? ("*" + multFactor) : num;
-      return addStatusToCharacter(modTarget, "판정보정", jBuff ? "강화" : "약화",
+      var jMemo = extraOpts.consumeType ? ("소비:" + String(extraOpts.consumeType).trim()) : "";
+      var jCount = (extraOpts.count != null && !isNaN(Number(extraOpts.count))) ? Number(extraOpts.count) : undefined;
+      var jResult = addStatusToCharacter(modTarget, "판정보정", jBuff ? "강화" : "약화",
         jBuff ? "buff" : "debuff",
         { value: jVal, trigger: "판정시작", checkType: checkTypeStr, stackMode: "덮어쓰기",
-          source: context.skillName || "판정보정", memo: "" });
+          count: jCount, source: context.skillName || "판정보정", memo: jMemo });
+      if (extraOpts.consumeType) jResult += "\n소비판정: " + extraOpts.consumeType;
+      return jResult;
     }
     if (v === "피해보정" || v === "피해감소") {
       // 곱셈(*N)은 그대로 배율 저장. 덧셈은 피해감소=음수(경감)/피해보정=그대로.
@@ -7519,7 +7531,7 @@ function processSkillEffects(effectText, context) {
     // ── 값 설정 효과: "변수 = 값" / "변수 == 값" ──
     const setEff = _parseSetEffect(effPart);
     if (setEff) {
-      logs.push(applySetEffect(setEff.variable, setEff.value, context, setEff.checkType));
+      logs.push(applySetEffect(setEff.variable, setEff.value, context, setEff.checkType, { count: setEff.count, consumeType: setEff.consumeType }));
       return;
     }
 
@@ -8603,7 +8615,18 @@ function getStatusValueModifier(alias, checkTypes) {
     const trigger = String(status["발동타이밍"] || "").trim();
 
     if (trigger && trigger !== "판정시작" && trigger !== "판정계산전" && trigger !== "판정계산후" && trigger !== "전체") return;
-    if (!statusMatchesAnyCheckType(status, checkTypes)) return;
+
+    // 메모에 "소비:TYPE" 이 있으면 해당 판정 유형 발생 시 횟수 차감(적용 판정과 별도 설정 가능).
+    const memo = String(status["메모"] || "").trim();
+    const consumeTypeMatch = memo.match(/(?:^|;)\s*소비:([^\s;]+)/);
+    const consumeType = consumeTypeMatch ? consumeTypeMatch[1] : null;
+
+    const appliesHere = statusMatchesAnyCheckType(status, checkTypes);
+    const consumesHere = consumeType
+      ? checkTypes.some(function(t) { return consumeType.split(/[,，、]/).map(function(s) { return s.trim(); }).filter(Boolean).indexOf(t) >= 0; })
+      : appliesHere;
+
+    if (!appliesHere && !consumesHere) return;
 
     const rawCell = status["수치"];
 
@@ -8634,41 +8657,38 @@ function getStatusValueModifier(alias, checkTypes) {
     // 쇠약강화 전용 분류이거나 효과코드/카테고리가 버프/디버프면 처리
     if (category !== "쇠약강화" && !isBuff && !isDebuff) return;
 
-    // 곱셈 보정 마커("*N")는 덧셈이 아니라 판정값 배율로 적용 — 단, 배율끼리는 합산한다.
-    if (_isMultValue(rawCell)) {
-      const factor = _multFactor(rawCell);
-      if (factor === 1) return;
-      multSum += factor;
-      multCount++;
-      logs.push(
-        "[상태 보정: " + name + "]\n" +
-        "대상판정: " + (status["대상판정"] || "전체") + "\n" +
-        "보정: ×" + factor
-      );
+    if (appliesHere) {
+      // 버프/디버프 값 적용
+      if (_isMultValue(rawCell)) {
+        const factor = _multFactor(rawCell);
+        if (factor !== 1) {
+          multSum += factor;
+          multCount++;
+          logs.push(
+            "[상태 보정: " + name + "]\n" +
+            "대상판정: " + (status["대상판정"] || "전체") + "\n" +
+            "보정: ×" + factor
+          );
+        }
+      } else {
+        const rawValue = Math.floor(Number(rawCell || 0));
+        if (rawValue !== 0) {
+          let modValue = rawValue;
+          if (isDebuff) modValue = -Math.abs(rawValue);
+          else if (isBuff) modValue = Math.abs(rawValue);
+          delta += modValue;
+          logs.push(
+            "[상태 보정: " + name + "]\n" +
+            "대상판정: " + (status["대상판정"] || "전체") + "\n" +
+            "보정: " + formatSigned(modValue)
+          );
+        }
+      }
+      if (consumesHere) consumeStatusCount(status);
+    } else {
+      // 적용 판정은 아니지만 소비 판정에 해당 → 횟수만 차감
       consumeStatusCount(status);
-      return;
     }
-
-    const rawValue = Math.floor(Number(rawCell || 0));
-    if (rawValue === 0) return;
-
-    let modValue = rawValue;
-
-    if (isDebuff) {
-      modValue = -Math.abs(rawValue);
-    } else if (isBuff) {
-      modValue = Math.abs(rawValue);
-    }
-
-    delta += modValue;
-
-    logs.push(
-      "[상태 보정: " + name + "]\n" +
-      "대상판정: " + (status["대상판정"] || "전체") + "\n" +
-      "보정: " + formatSigned(modValue)
-    );
-
-    consumeStatusCount(status);
   });
 
   return {
