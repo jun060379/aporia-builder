@@ -2130,22 +2130,26 @@ function statCheck(parts, displayName) {
 
   const judged = getDifficultyResultText(finalValue, difficulty);
 
+  // summary: 상태 처리(패시브 제외) + 핵심 결과만
   const statusPrefix = statusResult.text
     ? statusResult.text + "\n\n"
+    : "";
+  // detail: 패시브 포함 전체 상태 처리
+  const detailStatusPrefix = statusResult.fullText
+    ? statusResult.fullText + "\n\n"
     : "";
 
   const summary =
     statusPrefix +
     "[스탯 판정]\n" +
     character["이름"] + " - " + statName + "\n\n" +
-    _statusModSummaryLine(statusMod) +
     "최종값: " + finalValue + "\n" +
     "난이도: " + difficulty + "\n" +
     "차이: " + formatSigned(judged.diff) + "\n" +
     judged.text;
 
   const detail =
-    statusPrefix +
+    detailStatusPrefix +
     "[스탯 판정 상세]\n" +
     character["이름"] + " - " + statName + "\n\n" +
     "난수: " + dice + "\n" +
@@ -2154,6 +2158,7 @@ function statCheck(parts, displayName) {
     "보정: " + (mods.join(" ") || "없음") + "\n\n" +
     (_formatJudgeModDetail(statusMod, _statEquipMod)
       ? _formatJudgeModDetail(statusMod, _statEquipMod) + "\n\n" : "") +
+    _statusModSummaryLine(statusMod) +
     "최종값: " + finalValue + "\n" +
     "난이도: " + difficulty + "\n" +
     "차이: " + formatSigned(judged.diff) + "\n" +
@@ -2386,8 +2391,12 @@ function actionCheck(parts, displayName) {
       "\n" + judged.text
     : "";
 
+  // summary: 상태 처리(패시브 제외), detail: 패시브 포함 전체
   const statusPrefix = statusResult.text
     ? statusResult.text + "\n\n"
+    : "";
+  const detailStatusPrefix = statusResult.fullText
+    ? statusResult.fullText + "\n\n"
     : "";
 
   // 액션사용후 패시브 트리거. "액션사용후"(모든 액션) 또는 "액션사용후:액션명"(특정 액션).
@@ -2408,11 +2417,10 @@ function actionCheck(parts, displayName) {
     "주사위: " + diceCount + "d" + ACTION_DICE_SIDES + "\n" +
     "합계: " + sum +
     judgeSummary +
-    combatText +
-    actionPostBlock;
+    combatText;
 
   const detail =
-    statusPrefix +
+    detailStatusPrefix +
     "[액션 판정 상세]\n" +
     character["이름"] + " - " + actionName + "\n\n" +
     detailLines.join("\n") + "\n\n" +
@@ -2528,8 +2536,12 @@ function powerCheck(parts, type, displayName) {
     }
   }
 
+  // summary: 상태 처리(패시브 제외), detail: 패시브 포함 전체
   const statusPrefix = statusResult.text
     ? statusResult.text + "\n\n"
+    : "";
+  const detailStatusPrefix = statusResult.fullText
+    ? statusResult.fullText + "\n\n"
     : "";
 
   const summary =
@@ -2543,7 +2555,7 @@ function powerCheck(parts, type, displayName) {
     combatText;
 
   const detail =
-    statusPrefix +
+    detailStatusPrefix +
     "[" + type + " 판정 상세]\n\n" +
     "사용자: " + alias + "\n" +
     "난수: " + dice + "\n" +
@@ -3772,7 +3784,7 @@ function skillUse(parts, displayName) {
 
   const detail =
     (conditionHeaderText ? conditionHeaderText + "\n\n" : "") +
-    (statusResult.text ? statusResult.text + "\n\n" : "") +
+    (statusResult.fullText ? statusResult.fullText + "\n\n" : "") +
     "[스킬 사용 상세]\n" +
     alias + " - " + skill["스킬명"] + "\n\n" +
     "계통: " + skill["계통"] + "\n" +
@@ -4528,6 +4540,13 @@ function makeFoldedResponse(summary, detail) {
   );
 }
 
+var NAMED_DIFFICULTY_MAP = {
+  "쉬움": 5,
+  "보통": 15,
+  "어려움": 25,
+  "매우어려움": 35
+};
+
 function parseDifficultyAndMods(tokens) {
   let difficulty = DEFAULT_DIFFICULTY;
   const mods = [];
@@ -4536,6 +4555,11 @@ function parseDifficultyAndMods(tokens) {
     token = String(token || "").trim();
 
     if (!token) return;
+
+    if (token in NAMED_DIFFICULTY_MAP) {
+      difficulty = NAMED_DIFFICULTY_MAP[token];
+      return;
+    }
 
     if (/^\d+$/.test(token)) {
       difficulty = Number(token);
@@ -5610,7 +5634,7 @@ function _resolveCombatStatusBlocked(attack, attackValue, attackerAlias, targetA
     (attackEffectText ? "\n효과: 저항 자동 실패 / 강제 적용" : "");
 
   const detail =
-    statusResult.text + "\n\n" +
+    (statusResult.fullText || statusResult.text) + "\n\n" +
     "[대응 불가 상세]\n" +
     "공격번호: " + attack["id"] + "\n" +
     "공격자: " + attackerAlias + "\n" +
@@ -6014,8 +6038,8 @@ function combatResponse(parts, displayName) {
     return _resolveCombatStatusBlocked(attack, attackValue, attackerAlias, targetAlias, statusResult);
   }
 
-  const statusDetailPrefix = statusResult.text ? statusResult.text + "\n\n" : "";
-  const statusSummaryLine  = statusResult.text ? "상태 처리: 상세보기 참고\n" : "";
+  const statusDetailPrefix = (statusResult.fullText || statusResult.text) ? (statusResult.fullText || statusResult.text) + "\n\n" : "";
+  const statusSummaryLine  = (statusResult.fullText || statusResult.text) ? "상태 처리: 상세보기 참고\n" : "";
 
   if (mode === "방어")   return _resolveCombatDefend (attack, character, rest, selfAlias, attackValue, attackerAlias, targetAlias, statusDetailPrefix, statusSummaryLine);
   if (mode === "회피")   return _resolveCombatEvade  (attack, character, rest, selfAlias, attackValue, attackerAlias, targetAlias, statusDetailPrefix, statusSummaryLine);
@@ -7964,19 +7988,26 @@ function processStatusBeforeCheck(alias, checkTypeOrTypes) {
   });
 
   // 패시브 발동: 판정시작
+  var passiveLogs = [];
   try {
     var charForPassive = findCharacterByAlias(alias);
     if (charForPassive) {
-      var passiveText = firePassiveTriggerEffects(charForPassive, "판정시작", { resistanceMode: RESIST_NONE });
-      if (passiveText) logs.push(passiveText);
+      var passiveFireText = firePassiveTriggerEffects(charForPassive, "판정시작", { resistanceMode: RESIST_NONE });
+      if (passiveFireText) passiveLogs.push(passiveFireText);
     }
   } catch (e) {
     // 패시브 시트 없거나 오류 → 무시.
   }
 
+  var statusOnlyText = logs.length > 0 ? "[상태 처리]\n" + logs.join("\n\n") : "";
+  var allLogs = logs.concat(passiveLogs);
+  var fullText = allLogs.length > 0 ? "[상태 처리]\n" + allLogs.join("\n\n") : "";
+
   return {
     blocked: blocked,
-    text: logs.length > 0 ? "[상태 처리]\n" + logs.join("\n\n") : ""
+    text: statusOnlyText,
+    passiveText: passiveLogs.join("\n\n"),
+    fullText: fullText
   };
 }
 
@@ -12416,7 +12447,7 @@ function commonSkillUseCommand(parts, displayName) {
 
   const detail =
     (conditionHeaderText ? conditionHeaderText + "\n\n" : "") +
-    (statusResult.text ? statusResult.text + "\n\n" : "") +
+    (statusResult.fullText ? statusResult.fullText + "\n\n" : "") +
     "[공용 스킬 사용 상세]\n" +
     alias + " - " + displaySkillName + "\n\n" +
     "유형: " + status.type + "\n" +
