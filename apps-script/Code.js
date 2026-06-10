@@ -6919,8 +6919,8 @@ function resolveEffectTarget(token, context) {
 function readEffectNumber(value, context, fallback) {
   value = String(value || "").trim();
 
-  if (!value) return fallback || 0;
-  if (value === "최종값") return (context && context.finalValue != null) ? context.finalValue : (fallback || 0);
+  if (!value) return fallback !== undefined ? fallback : 0;
+  if (value === "최종값") return (context && context.finalValue != null) ? context.finalValue : (fallback !== undefined ? fallback : 0);
 
   const n = Number(value);
   if (!isNaN(n)) return n;
@@ -6934,7 +6934,7 @@ function readEffectNumber(value, context, fallback) {
     if (!isNaN(v)) return v;
   } catch (_e) { /* 수식 평가 실패 시 fallback */ }
 
-  return fallback || 0;
+  return fallback !== undefined ? fallback : 0;
 }
 
 function parseResistanceMods(value) {
