@@ -1886,6 +1886,12 @@ function applyDamageToCharacter(alias, damageAmount, opts) {
     ? "\n\n[공격 후 패시브: " + attackerAlias + "]\n" + passiveDealtText
     : "";
 
+  const shortText =
+    "[피해 적용]\n" +
+    "대상: " + alias + "\n" +
+    "현재체력: " + before + " → " + after + " / " + hp.maxHp +
+    downText;
+
   const mainText =
     "[피해 적용]\n" +
     "대상: " + alias + "\n" +
@@ -1911,6 +1917,7 @@ function applyDamageToCharacter(alias, damageAmount, opts) {
     damage: damage,
     modifierText: preDamage.text,
     text: mainText,
+    shortText: shortText,
     detailText: detailText,
     // 공격 후 패시브(랜덤지정 메시지 등) — 요약에도 노출하기 위해 분리 제공.
     dealtText: passiveDealtText,
@@ -7868,6 +7875,7 @@ function processStatusBeforeCheck(alias, checkTypeOrTypes) {
   var checkTypes = Array.isArray(checkTypeOrTypes) ? checkTypeOrTypes : [checkTypeOrTypes];
   const rows = getActiveStatusRows(alias);
   const logs = [];
+  const detailLogs = [];
   let blocked = false;
 
   rows.forEach(status => {
@@ -7880,12 +7888,10 @@ function processStatusBeforeCheck(alias, checkTypeOrTypes) {
     if (category === "지속피해") {
       const damage = Math.max(0, Math.floor(Number(status["수치"] || 0)));
       const damageResult = applyDamageToCharacter(alias, damage);
+      const statusPrefix = "[상태 발동: " + status["상태명"] + "]\n" + "지속피해: " + damage + "\n";
 
-      logs.push(
-        "[상태 발동: " + status["상태명"] + "]\n" +
-        "지속피해: " + damage + "\n" +
-        damageResult.text
-      );
+      logs.push(statusPrefix + damageResult.shortText);
+      detailLogs.push(statusPrefix + damageResult.text);
 
       consumeStatusCount(status);
       return;
@@ -7911,14 +7917,15 @@ function processStatusBeforeCheck(alias, checkTypeOrTypes) {
           메모: "구속 해제 성공"
         });
 
-        logs.push(
+        var bindSuccessEntry =
           "[상태 판정: 구속]\n" +
           "해제 확률: " + currentChance + "%\n" +
           "굴림: " + roll + "\n" +
           "결과: 구속 해제 성공.\n" +
           "구속 상태가 해제됩니다.\n" +
-          "이번 행동은 가능합니다."
-        );
+          "이번 행동은 가능합니다.";
+        logs.push(bindSuccessEntry);
+        detailLogs.push(bindSuccessEntry);
 
       } else {
         // 해제 실패: 행동 불가
@@ -7935,15 +7942,16 @@ function processStatusBeforeCheck(alias, checkTypeOrTypes) {
           누적확률: nextAccum
         });
 
-        logs.push(
+        var bindFailEntry =
           "[상태 판정: 구속]\n" +
           "해제 확률: " + currentChance + "%\n" +
           "굴림: " + roll + "\n" +
           "결과: 구속 해제 실패.\n" +
           "이번 행동은 불가능합니다.\n" +
           "구속 상태는 유지됩니다.\n" +
-          "다음 해제 확률: " + nextChance + "%"
-        );
+          "다음 해제 확률: " + nextChance + "%";
+        logs.push(bindFailEntry);
+        detailLogs.push(bindFailEntry);
       }
 
       return;
@@ -7958,19 +7966,21 @@ function processStatusBeforeCheck(alias, checkTypeOrTypes) {
       if (roll <= chance) {
         blocked = true;
 
-        logs.push(
+        var hbBlockEntry =
           "[상태 발동: " + status["상태명"] + "]\n" +
           "확률: " + chance + "%\n" +
           "굴림: " + roll + "\n" +
-          "결과: 행동이 저지됩니다."
-        );
+          "결과: 행동이 저지됩니다.";
+        logs.push(hbBlockEntry);
+        detailLogs.push(hbBlockEntry);
       } else {
-        logs.push(
+        var hbMissEntry =
           "[상태 판정: " + status["상태명"] + "]\n" +
           "확률: " + chance + "%\n" +
           "굴림: " + roll + "\n" +
-          "결과: 발동하지 않았습니다."
-        );
+          "결과: 발동하지 않았습니다.";
+        logs.push(hbMissEntry);
+        detailLogs.push(hbMissEntry);
       }
 
       consumeStatusCount(status);
@@ -8000,9 +8010,9 @@ function processStatusBeforeCheck(alias, checkTypeOrTypes) {
     // 패시브 시트 없거나 오류 → 무시.
   }
 
-  var statusOnlyText = logs.length > 0 ? "[상태 처리]\n" + logs.join("\n\n") : "";
-  var allLogs = logs.concat(passiveLogs);
-  var fullText = allLogs.length > 0 ? "[상태 처리]\n" + allLogs.join("\n\n") : "";
+  var statusOnlyText = logs.length > 0 ? logs.join("\n\n") : "";
+  var allDetailLogs = detailLogs.concat(passiveLogs);
+  var fullText = allDetailLogs.length > 0 ? "[상태 처리]\n" + allDetailLogs.join("\n\n") : "";
 
   return {
     blocked: blocked,
