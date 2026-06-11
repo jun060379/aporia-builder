@@ -7522,8 +7522,9 @@ function processSkillEffects(effectText, context) {
     }
   }
 
-  // 줄 구분: 개행 또는 ';' (TSV 한 셀에 여러 효과를 넣는 경우 ';' 로 구분).
-  const lines = effectText.split(/[\n;]/).map(l => l.trim()).filter(Boolean);
+  // 줄 구분: 개행, ';', ' / ' (공백+슬래시+공백).
+  // 주의: ' / '는 수치 계수식 안에 나눗셈 공백이 있으면 잘못 분리될 수 있으므로 반드시 양측 공백 필요.
+  const lines = effectText.split(/[\n;]| \/ /).map(l => l.trim()).filter(Boolean);
   const logs = [];
 
   lines.forEach(line => {
