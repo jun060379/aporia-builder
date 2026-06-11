@@ -9333,8 +9333,19 @@ function evaluateRecognizedCondition(rawCond, ctx) {
     if (/^대상/.test(varName) && !ctx.hasTarget) {
       return { recognized: true, ok: false, message: cond + " (대상 조건을 확인할 수 없습니다)" };
     }
-    // 변수가 vars에 없으면 0으로 간주 (상태_X_존재처럼 자동 fallback).
-    var lhs = (varName in vars) ? vars[varName] : 0;
+    // 변수가 vars에 없으면 산술식으로 평가 시도 (예: 상태_A_수치 + 상태_B_수치).
+    // 평가 실패 시 0으로 fallback (기존 동작 유지).
+    var lhs;
+    if (varName in vars) {
+      lhs = vars[varName];
+    } else {
+      try {
+        var _exprResult = safeEvalFormula(varName, vars);
+        lhs = (_exprResult && _exprResult.rawValue !== undefined) ? _exprResult.rawValue : 0;
+      } catch (_e) {
+        lhs = 0;
+      }
+    }
     // 우변도 변수명이면 치환 (예: 사용액션 == 상태접미_지정). 변수가 아니면 리터럴.
     // 문자열 비교는 _compareNumeric이 NaN일 때 String 비교로 자동 처리.
     var rhs = (cmp.value in vars) ? vars[cmp.value] : cmp.value;
