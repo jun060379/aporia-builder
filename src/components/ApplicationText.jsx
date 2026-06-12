@@ -80,6 +80,7 @@ export default function ApplicationText({ char, stats, abilities, proficiencies,
   const charText = [
     '!캐릭터신청',
     `이름: ${char.name}`,
+    ...(char.fullName ? [`풀네임: ${char.fullName}`] : []),
     `종족: ${char.race}`,
     `소속: ${char.faction || '무소속'}`,
     ...STAT_NAMES.map(s => `${s}: ${stats[s]}`),

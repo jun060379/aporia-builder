@@ -1,11 +1,27 @@
+import { useState } from 'react';
 import { LEVEL_TABLE } from '../data/levels';
 import { FACTION_OPTIONS, DEFAULT_FACTION } from '../data/factions';
+
+const RACE_OPTIONS = ['인간', '마녀', '흡혈귀', '요괴'];
 
 const inputCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors";
 const selectCls = "w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none transition-colors cursor-pointer";
 
 export default function CharacterForm({ char, onChange }) {
+  const [nameSpaceWarning, setNameSpaceWarning] = useState(false);
+
   const field = (key) => (e) => onChange({ ...char, [key]: e.target.value });
+
+  const handleNameChange = (e) => {
+    const val = e.target.value;
+    if (/\s/.test(val)) {
+      setNameSpaceWarning(true);
+      onChange({ ...char, name: val.replace(/\s/g, '') });
+    } else {
+      setNameSpaceWarning(false);
+      onChange({ ...char, name: val });
+    }
+  };
 
   return (
     <div className="bg-white/85 backdrop-blur-sm rounded-2xl border border-slate-200/70 shadow-lg shadow-violet-100/20 p-5">
@@ -17,12 +33,36 @@ export default function CharacterForm({ char, onChange }) {
 
       <div className="grid grid-cols-2 gap-2.5">
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] text-slate-500 tracking-wide">이름</span>
-          <input className={inputCls} value={char.name} onChange={field('name')} placeholder="캐릭터 이름" />
+          <span className="text-[11px] text-slate-500 tracking-wide">이름 <span className="text-slate-400 font-normal">(별명 대응, 띄어쓰기 불가)</span></span>
+          <input
+            className={inputCls}
+            value={char.name}
+            onChange={handleNameChange}
+            placeholder="별명 (띄어쓰기 없이)"
+          />
+          {nameSpaceWarning && (
+            <span className="text-[11px] text-amber-600 leading-relaxed">
+              이름칸에는 띄어쓰기 없는 대표명을 입력하고, 풀네임은 풀네임칸에 넣어주세요.
+            </span>
+          )}
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-slate-500 tracking-wide">풀네임 <span className="text-slate-400 font-normal">(닉네임 DB 등록)</span></span>
+          <input
+            className={inputCls}
+            value={char.fullName ?? ''}
+            onChange={field('fullName')}
+            placeholder="풀네임 (선택사항)"
+          />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[11px] text-slate-500 tracking-wide">종족</span>
-          <input className={inputCls} value={char.race} onChange={field('race')} placeholder="종족" />
+          <select className={selectCls} value={char.race ?? ''} onChange={field('race')}>
+            <option value="" disabled>종족 선택</option>
+            {RACE_OPTIONS.map(r => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[11px] text-slate-500 tracking-wide">소속</span>

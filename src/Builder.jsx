@@ -43,7 +43,7 @@ function buildSaveData(char, stats, abilities, proficiencies, skills, passives) 
   };
 }
 
-const DEFAULT_CHAR = { name: '', race: '', faction: '무소속', level: '1', erosion: '0' };
+const DEFAULT_CHAR = { name: '', fullName: '', race: '', faction: '무소속', level: '1', erosion: '0' };
 
 // ── tabs ─────────────────────────────────────────────────
 const TABS_LEFT  = ['캐릭터', '기능/숙련', '스킬'];
