@@ -700,7 +700,7 @@ function commandListCommand(parts) {
       "  ※ 상점 구매·퀵슬롯 등록은 웹 빌더에서",
       "",
       "[ 세션 ]",
-      "  !fin                극/세션 종료 (전체 임시 상태/스택 정리)"
+      "  !fin                극/세션 종료 (전체 임시 상태/스택 정리 + 체력 최대 회복)"
     ].join("\n")
   ];
 
@@ -8851,6 +8851,44 @@ function _finAppendMemo(oldMemo) {
 }
 
 // aliasSet: {별명: true} 형태의 필터. 주면 해당 대상만 정리. 없으면 전체.
+// BOT_DB의 현재체력을 최대체력으로 회복.
+function _finRestoreHp(aliasSet) {
+  var ss = _getSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_BOT_DB);
+  if (!sheet) return { restored: 0, logs: [] };
+
+  var values = sheet.getDataRange().getValues();
+  if (values.length < 2) return { restored: 0, logs: [] };
+
+  var headers = values[0].map(function(h) { return String(h).trim(); });
+  var idxAlias = headers.indexOf("별명");
+  var idxMax   = headers.indexOf("최대체력");
+  var idxCur   = headers.indexOf("현재체력");
+  if (idxAlias < 0 || idxMax < 0 || idxCur < 0) return { restored: 0, logs: [] };
+
+  var restored = 0;
+  var logs = [];
+
+  for (var r = 1; r < values.length; r++) {
+    var alias = String(values[r][idxAlias] || "").trim();
+    if (!alias) continue;
+    if (aliasSet && !aliasSet[alias]) continue;
+
+    var maxHp = Math.floor(Number(values[r][idxMax] || 0));
+    var curHp = Math.floor(Number(values[r][idxCur] || 0));
+    if (isNaN(maxHp) || maxHp <= 0) continue;
+    if (curHp >= maxHp) continue;
+
+    sheet.getRange(r + 1, idxCur + 1).setValue(maxHp);
+    logs.push(alias + ": " + curHp + " → " + maxHp);
+    restored++;
+  }
+
+  if (restored > 0) invalidateSheetCache(SHEET_BOT_DB);
+  return { restored: restored, logs: logs };
+}
+
+// aliasSet: {별명: true} 형태의 필터. 주면 해당 대상만 정리. 없으면 전체.
 function clearTemporaryStatuses(aliasSet) {
   var rows;
   try {
@@ -8991,6 +9029,7 @@ function finishSession(parts, displayName) {
 
   var statusResult = keepStatus ? { cleared: 0, kept: 0 } : clearTemporaryStatuses(aliasSet);
   var stackResult  = keepStack  ? { cleared: 0, kept: 0 } : clearTemporaryStacks(aliasSet);
+  var hpResult     = _finRestoreHp(aliasSet);
 
   // ── 접힌 요약: 종료 메시지만 ──
   var summaryLines = ["[극/세션 종료]"];
@@ -9011,6 +9050,8 @@ function finishSession(parts, displayName) {
   if (!keepStatus) lines.push("상태 유지: " + statusResult.kept + "개");
   lines.push("스택 초기화: " + stackResult.cleared + "개");
   if (!keepStack) lines.push("스택 유지: " + stackResult.kept + "개");
+  lines.push("체력 회복: " + hpResult.restored + "명");
+  if (hpResult.logs.length > 0) lines.push(hpResult.logs.join(", "));
   lines.push("");
   lines.push("옵션:");
   lines.push("상태 정리: " + (keepStatus ? "OFF" : "ON"));
