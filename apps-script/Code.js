@@ -5702,14 +5702,18 @@ function _resolveCombatDefend(attack, character, rest, selfAlias, attackValue, a
 
   const summary =
     "[방어 대응]\n" + statusSummaryLine +
-    "공격번호: " + attack["id"] + "\n" + methodLine +
+    "공격번호: " + attack["id"] + "\n" + methodLine + "\n" +
     "공격값: " + attackValue + "\n" +
-    "방어값: " + defenseValue + foldNote + "\n" +
+    "방어값: " + defenseValue + foldNote + "\n\n" +
     "결과: " + (defenseSuccess ? "방어 성공" : "방어 실패") + "\n" +
     "최종피해: " + damage + "\n" +
     compactDamageText(damageResult) +
     (attackEffectText ? "\n효과: " + (defenseSuccess ? "무효" : "저항 판정 / 상세보기") : "") +
     (defenseSkillEffectText ? "\n방어 스킬 효과: 적용 / 상세보기" : "");
+
+  const defenseDealtBlock = (defenseSuccess && damageResult.dealtText)
+    ? "\n\n[공격 후 패시브: " + attackerAlias + "]\n" + damageResult.dealtText
+    : "";
 
   const detail =
     statusDetailPrefix +
@@ -5721,7 +5725,7 @@ function _resolveCombatDefend(attack, character, rest, selfAlias, attackValue, a
     response.detailText + "\n\n" +
     "결과: " + (defenseSuccess ? "방어 성공" : "방어 실패") + "\n" +
     "최종피해: " + damage + "\n\n" +
-    damageResult.text + attackEffectText + defenseSkillBlock;
+    damageResult.text + defenseDealtBlock + attackEffectText + defenseSkillBlock;
 
   return makeFoldedResponse(summary, detail);
 }
@@ -5770,15 +5774,19 @@ function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, at
 
   const summary =
     "[회피 대응]\n" + statusSummaryLine +
-    "공격번호: " + attack["id"] + "\n" + methodLine +
+    "공격번호: " + attack["id"] + "\n" + methodLine + "\n" +
     "공격값: " + attackValue + "\n" +
-    "회피값: " + evadeValue + foldNote + "\n" +
+    "회피값: " + evadeValue + foldNote + "\n\n" +
     "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
     "최종피해: " + damage + "\n" +
     compactDamageText(damageResult) +
     (attackEffectText ? "\n효과: " + (success ? "무효" : "저항 판정 / 상세보기") : "") +
     (evadeSkillEffectText ? "\n회피 스킬 효과: 적용 / 상세보기" : "") +
     (success ? "\n추가: 다음 판정에 이득 가능" : "");
+
+  const evadeDealtBlock = (success && damageResult.dealtText)
+    ? "\n\n[공격 후 패시브: " + attackerAlias + "]\n" + damageResult.dealtText
+    : "";
 
   const detail =
     statusDetailPrefix +
@@ -5790,7 +5798,7 @@ function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, at
     response.detailText + "\n\n" +
     "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
     "최종피해: " + damage + "\n\n" +
-    damageResult.text + attackEffectText + evadeSkillBlock +
+    damageResult.text + evadeDealtBlock + attackEffectText + evadeSkillBlock +
     (success ? "\n\n다음 판정에 추가 이득을 얻을 수 있습니다." : "");
 
   return makeFoldedResponse(summary, detail);
@@ -5850,12 +5858,11 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
       "[맞대응]\n" + statusSummaryLine +
       "공격번호: " + attack["id"] + "\n" +
       "공격값: " + attackValue + " (성공 기준: " + threshold + ")\n" +
-      "맞대응값: " + counterValue + "\n" +
+      "맞대응값: " + counterValue + "\n\n" +
       "결과: 맞대응 성공\n" + "반격피해: " + damage + "\n" +
       compactDamageText(damageResult) +
       (attackEffectInvalidText ? "\n공격 효과: 무효" : "") +
-      (counterEffectText ? "\n맞대응 효과: 강제 적용 / 상세보기" : "") +
-      _atkResolvedBlock;
+      (counterEffectText ? "\n맞대응 효과: 강제 적용 / 상세보기" : "");
 
     const detail =
       statusDetailPrefix +
@@ -5864,7 +5871,7 @@ function _resolveCombatCounter(attack, character, rest, selfAlias, attackValue, 
       "공격값: " + attackValue + "  (성공 기준: 공격값 × 1.5 = " + threshold + " 이상)\n\n" +
       response.detailText + "\n\n" +
       "결과: 맞대응 성공\n공격자의 공격은 무효화됩니다.\n공격자에게 맞대응값 전체 피해를 적용합니다.\n\n" +
-      "반격피해: " + damage + "\n\n" + damageResult.text + attackEffectInvalidText + counterEffectText;
+      "반격피해: " + damage + "\n\n" + damageResult.text + attackEffectInvalidText + counterEffectText + _atkResolvedBlock;
 
     return makeFoldedResponse(summary, detail);
   }
@@ -8038,12 +8045,6 @@ function compactDamageText(damageResult) {
       damageResult.maxHp;
   } else if (damageResult.text) {
     base = String(damageResult.text).split("\n")[0];
-  }
-
-  // 공격 후 패시브(랜덤지정 메시지·스택 변경 등)를 요약(상세 밖)에도 노출 →
-  // 상세를 펼치지 못하는 공격자도 채널에서 바로 확인 가능.
-  if (damageResult.dealtText) {
-    base += "\n\n[공격 후 패시브: " + (damageResult.attackerAlias || "") + "]\n" + damageResult.dealtText;
   }
 
   return base;
