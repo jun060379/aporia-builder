@@ -72,16 +72,41 @@ export default async function handler(req, res) {
 
     const { data: profile, error: profErr } = await admin
       .from('profiles')
-      .select('character_alias')
+      .select('character_alias, character_aliases')
       .eq('id', userResp.user.id)
       .maybeSingle();
     if (profErr) {
       return sendJson(res, 500, { ok: false, error: 'profiles 조회 실패: ' + (profErr.message || '') });
     }
 
-    const alias = String(profile?.character_alias || '').trim();
-    if (!alias) {
+    // Build allowed aliases list (character_aliases array takes priority; fall back to character_alias)
+    let allowedAliases = [];
+    try {
+      const arr = profile?.character_aliases;
+      if (Array.isArray(arr)) {
+        allowedAliases = arr.map(String).map(s => s.trim()).filter(Boolean);
+      } else if (typeof arr === 'string' && arr.trim().startsWith('[')) {
+        allowedAliases = JSON.parse(arr).map(String).map(s => s.trim()).filter(Boolean);
+      }
+    } catch {}
+    if (allowedAliases.length === 0) {
+      const a = String(profile?.character_alias || '').trim();
+      if (a) allowedAliases = [a];
+    }
+
+    if (allowedAliases.length === 0) {
       return sendJson(res, 400, { ok: false, error: 'NO_ALIAS', message: '먼저 캐릭터 별명을 등록하세요.' });
+    }
+
+    // Determine which alias to use: client-provided alias (validated) or first allowed
+    let alias;
+    if (body.alias) {
+      alias = String(body.alias).trim();
+      if (!allowedAliases.includes(alias)) {
+        return sendJson(res, 403, { ok: false, error: '허용되지 않은 캐릭터입니다.' });
+      }
+    } else {
+      alias = allowedAliases[0];
     }
 
     // Apps Script mychar API 호출 (서버가 alias를 강제 — 클라이언트 값 무시)

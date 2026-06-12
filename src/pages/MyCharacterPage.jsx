@@ -13,7 +13,7 @@ const EQUIP_SLOTS   = ['무기', '방어구', '장신구1', '장신구2'];
 
 const inputCls = 'w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors';
 
-async function callMyChar(action, extra = {}) {
+async function callMyChar(action, extra = {}, alias) {
   if (!supabase) throw new Error('Supabase가 설정되지 않았습니다.');
   const { data: sess } = await supabase.auth.getSession();
   const token = sess?.session?.access_token;
@@ -21,11 +21,67 @@ async function callMyChar(action, extra = {}) {
   const resp = await fetch('/api/my-character', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ action, ...extra }),
+    body: JSON.stringify({ action, ...(alias ? { alias } : {}), ...extra }),
   });
   return resp.json();
 }
 
+function extractAliases(prof) {
+  if (!prof) return [];
+  let list = [];
+  try {
+    const arr = prof.character_aliases;
+    if (Array.isArray(arr)) {
+      list = arr.filter(a => a && typeof a === 'string' && a.trim());
+    } else if (typeof arr === 'string' && arr.trim().startsWith('[')) {
+      list = JSON.parse(arr).filter(a => a && typeof a === 'string' && a.trim());
+    }
+  } catch {}
+  if (list.length === 0 && prof.character_alias) {
+    const a = String(prof.character_alias).trim();
+    if (a) list = [a];
+  }
+  return [...new Set(list)];
+}
+
+// ── sessionStorage cache helpers ──────────────────────────────────────
+const ALIASES_LIST_KEY = 'aporia-mychar-aliases-v1';
+const SELECTED_KEY     = 'aporia-mychar-selected-v1';
+const DATA_TTL         = 30_000;
+
+function readAliasesCache() {
+  try {
+    const raw = sessionStorage.getItem(ALIASES_LIST_KEY);
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : null;
+  } catch { return null; }
+}
+function writeAliasesCache(arr) { try { sessionStorage.setItem(ALIASES_LIST_KEY, JSON.stringify(arr)); } catch {} }
+function clearAliasesCache()    { try { sessionStorage.removeItem(ALIASES_LIST_KEY); sessionStorage.removeItem(SELECTED_KEY); } catch {} }
+function readSelectedCache()    { try { return sessionStorage.getItem(SELECTED_KEY) || null; } catch { return null; } }
+function writeSelectedCache(a)  { try { sessionStorage.setItem(SELECTED_KEY, a); } catch {} }
+
+function dataKey(alias) { return `aporia-mychar-data-v1-${alias}`; }
+function readDataCache(alias) {
+  if (!alias) return null;
+  try {
+    const raw = sessionStorage.getItem(dataKey(alias));
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    return Date.now() - ts < DATA_TTL ? data : null;
+  } catch { return null; }
+}
+function writeDataCache(alias, d) {
+  if (!alias) return;
+  try { sessionStorage.setItem(dataKey(alias), JSON.stringify({ ts: Date.now(), data: d })); } catch {}
+}
+function clearDataCache(alias) {
+  if (!alias) return;
+  try { sessionStorage.removeItem(dataKey(alias)); } catch {}
+}
+
+// ── SectionTitle ──
 function SectionTitle({ children, extra }) {
   return (
     <div className="flex items-center justify-between mb-2">
@@ -38,7 +94,7 @@ function SectionTitle({ children, extra }) {
   );
 }
 
-// 성장 가능한 항목 한 칸
+// ── GrowCell ──
 function GrowCell({ label, info, remain, busy, onGrow }) {
   const canGrow = !info.isMax && info.cost != null && info.cost <= remain;
   return (
@@ -67,9 +123,10 @@ function GrowCell({ label, info, remain, busy, onGrow }) {
   );
 }
 
+// ── PassiveEditForm ──
 function PassiveEditForm({ passive, onClose }) {
-  const [cond, setCond]   = useState(passive.condition || '');
-  const [eff, setEff]     = useState(passive.effect    || '');
+  const [cond, setCond]     = useState(passive.condition || '');
+  const [eff, setEff]       = useState(passive.effect    || '');
   const [copied, setCopied] = useState(false);
 
   const text = [
@@ -112,7 +169,8 @@ function PassiveEditForm({ passive, onClose }) {
   );
 }
 
-function ManageView({ data, alias, onReload, onChangeAlias }) {
+// ── ManageView ──
+function ManageView({ data, selectedAlias, hasMultiple, onBack, onReload, onChangeAlias }) {
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -120,12 +178,17 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
 
   const remain = data.remain ?? 0;
 
-  const afterWrite = (r, notice) => { clearDataCache(); writeDataCache(r); onReload(r); setNotice(notice); };
+  const afterWrite = (r, msg) => {
+    clearDataCache(selectedAlias);
+    writeDataCache(selectedAlias, r);
+    onReload(r);
+    setNotice(msg);
+  };
 
   const grow = async (field) => {
     setBusy(field); setError(''); setNotice('');
     try {
-      const r = await callMyChar('grow', { field });
+      const r = await callMyChar('grow', { field }, selectedAlias);
       if (r.ok) afterWrite(r, `${field} 성장 완료`);
       else setError(r.error || r.message || '성장에 실패했습니다.');
     } catch (e) { setError(e.message); }
@@ -135,7 +198,7 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
   const equip = async (invId) => {
     setBusy('eq:' + invId); setError(''); setNotice('');
     try {
-      const r = await callMyChar('equip', { invId });
+      const r = await callMyChar('equip', { invId }, selectedAlias);
       if (r.ok) afterWrite(r, r.message || '장착 완료');
       else setError(r.error || r.message || '장착에 실패했습니다.');
     } catch (e) { setError(e.message); }
@@ -145,7 +208,7 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
   const unequip = async (slot) => {
     setBusy('uneq:' + slot); setError(''); setNotice('');
     try {
-      const r = await callMyChar('unequip', { slot });
+      const r = await callMyChar('unequip', { slot }, selectedAlias);
       if (r.ok) afterWrite(r, r.message || '해제 완료');
       else setError(r.error || r.message || '해제에 실패했습니다.');
     } catch (e) { setError(e.message); }
@@ -155,7 +218,7 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
   const setQuickslot = async (slotIndex, itemName) => {
     setBusy('qs:' + slotIndex); setError(''); setNotice('');
     try {
-      const r = await callMyChar('quickslot', { slotIndex, itemName });
+      const r = await callMyChar('quickslot', { slotIndex, itemName }, selectedAlias);
       if (r.ok) afterWrite(r, r.message || '퀵슬롯 변경 완료');
       else setError(r.error || r.message || '퀵슬롯 변경에 실패했습니다.');
     } catch (e) { setError(e.message); }
@@ -171,6 +234,14 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
       {/* 헤더 정보 */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
+          {hasMultiple && (
+            <button
+              onClick={onBack}
+              className="text-[11px] text-violet-500 hover:text-violet-700 flex items-center gap-1 mb-1.5 transition-colors"
+            >
+              ← 캐릭터 선택으로
+            </button>
+          )}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-lg font-bold text-slate-800">{data.alias}</span>
             {data.name && data.name !== data.alias && <span className="text-sm text-slate-400">({data.name})</span>}
@@ -179,8 +250,11 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
           </div>
           <div className="text-xs text-slate-400 mt-0.5">{data.race} · {data.faction}</div>
         </div>
-        <button onClick={onChangeAlias} className="text-[11px] px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-slate-500 transition-colors">
-          별명 변경
+        <button
+          onClick={onChangeAlias}
+          className="text-[11px] px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-slate-500 transition-colors"
+        >
+          {hasMultiple ? '캐릭터 추가/삭제' : '별명 변경'}
         </button>
       </div>
 
@@ -389,144 +463,300 @@ function ManageView({ data, alias, onReload, onChangeAlias }) {
   );
 }
 
-function AliasRegister({ initial, onSaved }) {
-  const { user } = useAuth();
-  const [alias, setAlias] = useState(initial || '');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-
-  const save = async () => {
-    const a = alias.trim();
-    if (!a) { setError('별명을 입력하세요.'); return; }
-    setSaving(true); setError('');
-    try {
-      const { error: err } = await supabase
-        .from('profiles')
-        .update({ character_alias: a })
-        .eq('id', user.id);
-      if (err) {
-        if (/column .*character_alias.* does not exist/i.test(err.message)) {
-          setError('profiles 테이블에 character_alias 컬럼이 없습니다. 관리자에게 문의하세요.');
-        } else {
-          setError(err.message);
-        }
-        return;
-      }
-      onSaved(a);
-    } catch (e) { setError(e.message); }
-    finally { setSaving(false); }
-  };
-
+// ── CharacterPicker ──
+function CharacterPicker({ aliases, onSelect, onManageAliases }) {
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-slate-500">관리할 캐릭터의 <strong>별명</strong>(BOT_DB 등록명)을 입력하세요. 인게임에서 사용하는 캐릭터 별명과 같아야 합니다.</p>
-      <div className="flex gap-2">
-        <input className={inputCls} value={alias} onChange={e => setAlias(e.target.value)} placeholder="예: 월하륜" onKeyDown={e => e.key === 'Enter' && save()} />
-        <button onClick={save} disabled={saving}
-          className="shrink-0 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-sm font-medium transition-colors">
-          {saving ? '저장 중…' : '연결'}
-        </button>
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-base font-semibold text-slate-700 mb-1">캐릭터 선택</h2>
+        <p className="text-xs text-slate-400">관리할 캐릭터를 선택하세요.</p>
       </div>
-      {error && <p className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">{error}</p>}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {aliases.map(alias => (
+          <button
+            key={alias}
+            onClick={() => onSelect(alias)}
+            className="flex items-center justify-center py-6 px-3 bg-slate-50 hover:bg-violet-50 border border-slate-200 hover:border-violet-300 rounded-xl text-sm font-semibold text-slate-700 hover:text-violet-700 transition-all active:scale-[0.97] shadow-sm"
+          >
+            {alias}
+          </button>
+        ))}
+      </div>
+      <button
+        onClick={onManageAliases}
+        className="text-[12px] text-slate-400 hover:text-slate-600 underline underline-offset-2 transition-colors"
+      >
+        캐릭터 추가 / 삭제
+      </button>
     </div>
   );
 }
 
-// ── sessionStorage SWR 헬퍼 ──────────────────────────────────
-const ALIAS_CACHE_KEY   = 'aporia-mychar-alias-v1';
-const MYDATA_CACHE_KEY  = 'aporia-mychar-data-v1';
-const MYDATA_CACHE_TTL  = 30 * 1000; // 30초 (HP 등 변동 고려)
+// ── AliasRegister ──
+function AliasRegister({ aliases, onSaved, onBack }) {
+  const { user } = useAuth();
+  const [newAlias, setNewAlias] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
-function readAliasCache()  { try { return sessionStorage.getItem(ALIAS_CACHE_KEY) || null; } catch { return null; } }
-function writeAliasCache(a){ try { sessionStorage.setItem(ALIAS_CACHE_KEY, a); } catch {} }
-function clearAliasCache() { try { sessionStorage.removeItem(ALIAS_CACHE_KEY); } catch {} }
+  const saveAliases = async (updated) => {
+    setSaving(true); setError('');
+    try {
+      const primary = updated[0] || '';
+      const { error: err } = await supabase
+        .from('profiles')
+        .update({ character_alias: primary, character_aliases: updated })
+        .eq('id', user.id);
+      if (err) {
+        if (/column|does not exist/i.test(err.message || '')) {
+          // character_aliases column not yet created — fall back to character_alias only
+          const { error: err2 } = await supabase
+            .from('profiles')
+            .update({ character_alias: updated[updated.length - 1] || primary })
+            .eq('id', user.id);
+          if (err2) { setError(err2.message); return; }
+        } else {
+          setError(err.message); return;
+        }
+      }
+      setNewAlias('');
+      onSaved(updated);
+    } catch (e) { setError(e.message); }
+    finally { setSaving(false); }
+  };
 
-function readDataCache() {
-  try {
-    const raw = sessionStorage.getItem(MYDATA_CACHE_KEY);
-    if (!raw) return null;
-    const { ts, data } = JSON.parse(raw);
-    return Date.now() - ts < MYDATA_CACHE_TTL ? data : null;
-  } catch { return null; }
+  const addAlias = async () => {
+    const a = newAlias.trim();
+    if (!a) { setError('별명을 입력하세요.'); return; }
+    if (aliases.includes(a)) { setError('이미 등록된 별명입니다.'); return; }
+    await saveAliases([...aliases, a]);
+  };
+
+  const removeAlias = async (alias) => {
+    await saveAliases(aliases.filter(a => a !== alias));
+  };
+
+  return (
+    <div className="space-y-4">
+      {aliases.length === 0 && (
+        <p className="text-xs text-slate-500">
+          관리할 캐릭터의 <strong>별명</strong>(BOT_DB 등록명)을 입력하세요. 인게임에서 사용하는 캐릭터 별명과 같아야 합니다.
+        </p>
+      )}
+
+      {aliases.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold text-slate-600">등록된 캐릭터</p>
+          {aliases.map(a => (
+            <div key={a} className="flex items-center justify-between bg-slate-50 rounded-lg border border-slate-100 px-3 py-2">
+              <span className="text-sm text-slate-700">{a}</span>
+              <button
+                onClick={() => removeAlias(a)}
+                disabled={saving}
+                className="text-[11px] px-2 py-0.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 rounded transition-colors disabled:opacity-40"
+              >
+                삭제
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <p className="text-[11px] text-slate-500 mb-1.5">
+          {aliases.length === 0 ? '캐릭터 별명 입력' : '캐릭터 추가'}
+        </p>
+        <div className="flex gap-2">
+          <input
+            className={inputCls}
+            value={newAlias}
+            onChange={e => setNewAlias(e.target.value)}
+            placeholder="예: 월하륜"
+            onKeyDown={e => e.key === 'Enter' && addAlias()}
+          />
+          <button
+            onClick={addAlias}
+            disabled={saving}
+            className="shrink-0 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            {saving ? '저장 중…' : '추가'}
+          </button>
+        </div>
+      </div>
+
+      {error && <p className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">{error}</p>}
+
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="text-[12px] text-slate-400 hover:text-slate-600 transition-colors"
+        >
+          ← 뒤로
+        </button>
+      )}
+    </div>
+  );
 }
-function writeDataCache(d) { try { sessionStorage.setItem(MYDATA_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: d })); } catch {} }
-function clearDataCache()  { try { sessionStorage.removeItem(MYDATA_CACHE_KEY); } catch {} }
 
+// ── Main Page ──────────────────────────────────────────────────────────
 export default function MyCharacterPage() {
   const { user, loading } = useAuth();
 
-  const cachedAlias = readAliasCache();
-  const cachedData  = readDataCache();
+  const [aliases, setAliases]                 = useState(null);   // null = still loading
+  const [selectedAlias, setSelectedAlias]     = useState(null);
+  const [data, setData]                       = useState(null);
+  const [pageLoading, setPageLoading]         = useState(true);
+  const [refreshing, setRefreshing]           = useState(false);
+  const [error, setError]                     = useState('');
+  const [managingAliases, setManagingAliases] = useState(false);
 
-  const [alias, setAlias]           = useState(cachedAlias);  // null=미확인, ''=미등록
-  const [data, setData]             = useState(cachedData);
-  const [pageLoading, setPageLoading] = useState(!cachedAlias); // 캐시 있으면 스피너 스킵
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError]           = useState('');
-  const [editingAlias, setEditingAlias] = useState(false);
-
-  // 캐릭터 데이터 로드 (background=true 이면 스피너 없이 백그라운드 갱신)
-  const loadChar = useCallback(async (background = false) => {
+  const loadChar = useCallback(async (alias, background = false) => {
+    if (!alias) return;
     if (background) setRefreshing(true);
+    else setData(null);
     setError('');
     try {
-      const r = await callMyChar('view');
-      if (r.ok) { writeDataCache(r); setData(r); }
-      else if (r.error === 'NO_ALIAS') { clearAliasCache(); setAlias(''); }
+      const r = await callMyChar('view', {}, alias);
+      if (r.ok) { writeDataCache(alias, r); setData(r); }
       else setError(r.error || r.message || '캐릭터 조회 실패');
     } catch (e) { if (!background) setError(e.message); }
-    finally { setRefreshing(false); }
+    finally { if (background) setRefreshing(false); }
   }, []);
 
-  // alias 확보 — 캐시 있으면 Supabase 호출 생략
+  // Load aliases list from Supabase profile
   useEffect(() => {
     if (!user || !supabase) { setPageLoading(false); return; }
-    if (cachedAlias !== null) {
-      // 캐시 alias 사용 — 백그라운드에서 Supabase 검증 후 갱신
+
+    const cachedList = readAliasesCache();
+    if (cachedList !== null) {
+      setAliases(cachedList);
       setPageLoading(false);
+      const cachedSel = readSelectedCache();
+      if (cachedList.length === 1) {
+        setSelectedAlias(cachedList[0]);
+      } else if (cachedSel && cachedList.includes(cachedSel)) {
+        setSelectedAlias(cachedSel);
+      }
+      // Background refresh from Supabase
       (async () => {
         try {
           const { data: prof } = await supabase
-            .from('profiles').select('character_alias').eq('id', user.id).maybeSingle();
-          const fresh = String(prof?.character_alias || '');
-          if (fresh !== cachedAlias) { writeAliasCache(fresh); setAlias(fresh); clearDataCache(); setData(null); }
+            .from('profiles').select('character_alias, character_aliases').eq('id', user.id).maybeSingle();
+          const fresh = extractAliases(prof);
+          if (JSON.stringify(fresh) !== JSON.stringify(cachedList)) {
+            writeAliasesCache(fresh);
+            setAliases(fresh);
+          }
         } catch {}
       })();
       return;
     }
-    // 캐시 없음 — Supabase 로 alias 확인
+
+    // No cache — fetch fresh from Supabase
     let cancelled = false;
     (async () => {
       try {
-        const { data: prof, error: err } = await supabase
-          .from('profiles').select('character_alias').eq('id', user.id).maybeSingle();
+        // Try with character_aliases column; fall back if it doesn't exist yet
+        let prof = null;
+        const { data: d1, error: e1 } = await supabase
+          .from('profiles').select('character_alias, character_aliases').eq('id', user.id).maybeSingle();
+        if (e1 && /column|does not exist/i.test(e1.message || '')) {
+          const { data: d2, error: e2 } = await supabase
+            .from('profiles').select('character_alias').eq('id', user.id).maybeSingle();
+          if (e2) { if (!cancelled) setError('프로필 조회 실패: ' + e2.message); }
+          else prof = d2;
+        } else if (e1) {
+          if (!cancelled) setError('프로필 조회 실패: ' + e1.message);
+        } else {
+          prof = d1;
+        }
         if (cancelled) return;
-        if (err) { setError('프로필 조회 실패: ' + err.message); setAlias(''); }
-        else { const a = String(prof?.character_alias || ''); writeAliasCache(a); setAlias(a); }
-      } catch (e) { if (!cancelled) { setError(e.message); setAlias(''); } }
+        const list = extractAliases(prof);
+        writeAliasesCache(list);
+        setAliases(list);
+        if (list.length === 1) {
+          setSelectedAlias(list[0]);
+          writeSelectedCache(list[0]);
+        }
+      } catch (e) { if (!cancelled) setError(e.message); }
       finally { if (!cancelled) setPageLoading(false); }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // alias 확보 후 데이터 로드
+  // Load character data when selectedAlias changes
   useEffect(() => {
-    if (!alias) return;
-    if (cachedData) {
-      // 캐시 있으면 즉시 표시 후 백그라운드 갱신
-      loadChar(true);
+    if (!selectedAlias) return;
+    writeSelectedCache(selectedAlias);
+    const cached = readDataCache(selectedAlias);
+    if (cached) {
+      setData(cached);
+      loadChar(selectedAlias, true);
     } else {
-      loadChar(false);
+      loadChar(selectedAlias, false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alias]);
+  }, [selectedAlias]);
 
-  if (loading || pageLoading) return <PlaceholderPage title="내 캐릭터" body="불러오는 중입니다…" />;
+  // ── Auth guards ──
+  if (loading || pageLoading || aliases === null) {
+    return <PlaceholderPage title="내 캐릭터" body="불러오는 중입니다…" />;
+  }
   if (!user) {
     return (
-      <PlaceholderPage title="내 캐릭터" body="이 페이지는 로그인 후 이용할 수 있습니다."
-        extra={<Link to="/login" className="inline-flex items-center rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:from-violet-700 hover:to-indigo-700 transition">로그인하기</Link>}
+      <PlaceholderPage
+        title="내 캐릭터"
+        body="이 페이지는 로그인 후 이용할 수 있습니다."
+        extra={
+          <Link to="/login" className="inline-flex items-center rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:from-violet-700 hover:to-indigo-700 transition">
+            로그인하기
+          </Link>
+        }
+      />
+    );
+  }
+
+  const hasMultiple = aliases.length > 1;
+
+  // ── Content logic ──
+  let content;
+  if (managingAliases || aliases.length === 0) {
+    content = (
+      <AliasRegister
+        aliases={aliases}
+        onSaved={(updated) => {
+          setAliases(updated);
+          writeAliasesCache(updated);
+          setManagingAliases(false);
+          if (updated.length === 0) {
+            setSelectedAlias(null);
+            setData(null);
+          } else if (updated.length === 1 && !selectedAlias) {
+            setSelectedAlias(updated[0]);
+          }
+        }}
+        onBack={aliases.length > 0 ? () => setManagingAliases(false) : null}
+      />
+    );
+  } else if (!selectedAlias && hasMultiple) {
+    content = (
+      <CharacterPicker
+        aliases={aliases}
+        onSelect={(a) => setSelectedAlias(a)}
+        onManageAliases={() => setManagingAliases(true)}
+      />
+    );
+  } else if (!data) {
+    content = <p className="text-sm text-slate-400 py-8 text-center">캐릭터 데이터를 불러오는 중…</p>;
+  } else {
+    content = (
+      <ManageView
+        data={data}
+        selectedAlias={selectedAlias}
+        hasMultiple={hasMultiple}
+        onBack={() => { setSelectedAlias(null); setData(null); }}
+        onReload={(r) => setData(r)}
+        onChangeAlias={() => setManagingAliases(true)}
       />
     );
   }
@@ -551,9 +781,9 @@ export default function MyCharacterPage() {
                 갱신 중
               </span>
             )}
-            {data && !editingAlias && (
+            {data && !managingAliases && selectedAlias && (
               <button
-                onClick={() => { clearDataCache(); loadChar(false); }}
+                onClick={() => { clearDataCache(selectedAlias); loadChar(selectedAlias, false); }}
                 disabled={refreshing}
                 className="text-[11px] px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-500 rounded-lg transition disabled:opacity-40"
               >새로고침</button>
@@ -572,13 +802,7 @@ export default function MyCharacterPage() {
 
           {error && <p className="mb-4 rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700 whitespace-pre-wrap">{error}</p>}
 
-          {(!alias || editingAlias) ? (
-            <AliasRegister initial={alias} onSaved={(a) => { setAlias(a); setEditingAlias(false); setData(null); }} />
-          ) : !data ? (
-            <p className="text-sm text-slate-400 py-8 text-center">캐릭터 데이터를 불러오는 중…</p>
-          ) : (
-            <ManageView data={data} alias={alias} onReload={(r) => setData(r)} onChangeAlias={() => setEditingAlias(true)} />
-          )}
+          {content}
         </div>
       </main>
     </div>
