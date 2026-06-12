@@ -11901,6 +11901,31 @@ function registerPortalCharacterData(payload, outputText, application) {
   // BOT_DB 쓰기가 즉시 반영되도록 flush
   try { SpreadsheetApp.flush(); } catch (_e) {}
 
+  // 2-b) 풀네임이 있으면 NICKNAME_DB에 등록
+  var fullName = "";
+  try {
+    fullName = String((payload && payload.char && payload.char.fullName) || "").trim();
+  } catch (_) { fullName = ""; }
+  if (fullName) {
+    try {
+      ensureNicknameSheet();
+      var existingNick = _findNicknameRow(charName);
+      if (existingNick) {
+        var nickCol = existingNick.headers.indexOf("닉네임");
+        if (nickCol >= 0) {
+          var curRaw = String(existingNick.values[nickCol] || "").trim();
+          var curList = curRaw ? curRaw.split(/[,，]+/).map(function(n){ return n.trim(); }).filter(Boolean) : [];
+          if (curList.indexOf(fullName) < 0) {
+            curList.push(fullName);
+            existingNick.sheet.getRange(existingNick.rowIndex, nickCol + 1).setValue(curList.join(", "));
+          }
+        }
+      } else {
+        appendRowByHeaders(SHEET_NICKNAME_DB, { 별명: charName, 닉네임: fullName });
+      }
+    } catch (_e) { /* 닉네임 등록 실패는 경고만 */ }
+  }
+
   // 3) 플레이어 스킬들 신청 + 승인 (개별 실패는 경고로만 누적)
   var skillResults = [];
   var skillWarnings = [];
