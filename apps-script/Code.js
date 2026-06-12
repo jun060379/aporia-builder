@@ -700,7 +700,7 @@ function commandListCommand(parts) {
       "  ※ 상점 구매·퀵슬롯 등록은 웹 빌더에서",
       "",
       "[ 세션 ]",
-      "  !fin                극/세션 종료 (전체 임시 상태/스택 정리 + 체력 최대 회복)"
+      "  !fin                극/세션 종료 (시전자 임시 상태/스택 정리 + 체력 최대 회복)\n  !fin 캐릭터1 캐릭터2  지정 대상만 초기화"
     ].join("\n")
   ];
 
@@ -9006,6 +9006,15 @@ function finishSession(parts, displayName) {
       aliasSet = {};
       resolved.forEach(function (a) { if (!aliasSet[a]) { aliasSet[a] = true; targetAliases.push(a); } });
     }
+  } else {
+    // 대상 미지정 → 시전자의 캐릭터만
+    var invokerChar = findCharacterByAlias(displayName);
+    if (invokerChar) {
+      var invokerAlias = String(invokerChar["별명"] || displayName).trim();
+      aliasSet = {};
+      aliasSet[invokerAlias] = true;
+      targetAliases.push(invokerAlias);
+    }
   }
   var targeted = !!aliasSet;
 
@@ -9043,7 +9052,7 @@ function finishSession(parts, displayName) {
   lines.push("[극/세션 종료 상세]");
   lines.push(targeted
     ? "초기화 대상: " + targetAliases.join(", ") + " (" + targetAliases.length + "명)"
-    : "초기화 범위: 전체 캐릭터");
+    : "초기화 범위: 전체 캐릭터 (시전자 캐릭터 미등록)");
   lines.push("");
   lines.push("정리 결과:");
   lines.push("상태 초기화: " + statusResult.cleared + "개");
