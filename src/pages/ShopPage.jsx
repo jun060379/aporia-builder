@@ -3,6 +3,24 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
 import { supabase } from '../lib/supabaseClient';
 
+function extractAliases(prof) {
+  if (!prof) return [];
+  let list = [];
+  try {
+    const arr = prof.character_aliases;
+    if (Array.isArray(arr)) {
+      list = arr.filter(a => a && typeof a === 'string' && a.trim());
+    } else if (typeof arr === 'string' && arr.trim().startsWith('[')) {
+      list = JSON.parse(arr).filter(a => a && typeof a === 'string' && a.trim());
+    }
+  } catch {}
+  if (list.length === 0 && prof.character_alias) {
+    const a = String(prof.character_alias).trim();
+    if (a) list = [a];
+  }
+  return [...new Set(list)];
+}
+
 const inputCls  = 'w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors';
 const selectCls = 'w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 outline-none transition-colors';
 
@@ -13,12 +31,12 @@ async function authToken() {
   if (!token) throw new Error('로그인이 필요합니다.');
   return token;
 }
-async function callMyChar(action, extra = {}) {
+async function callMyChar(action, extra = {}, alias) {
   const token = await authToken();
   const resp = await fetch('/api/my-character', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ action, ...extra }),
+    body: JSON.stringify({ action, ...(alias ? { alias } : {}), ...extra }),
   });
   return resp.json();
 }
@@ -188,6 +206,8 @@ function ShopBody() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const [aliases, setAliases] = useState([]);
+  const [selectedAlias, setSelectedAlias] = useState(null);
 
   const loadGameData = useCallback((bust) => {
     setLoading(true);
@@ -198,15 +218,30 @@ function ShopBody() {
       .finally(() => setLoading(false));
   }, []);
 
-  const loadMy = useCallback(() => {
+  // 유저 aliases 로드
+  useEffect(() => {
+    if (!user || !supabase) { setAliases([]); return; }
+    (async () => {
+      try {
+        const { data: prof } = await supabase
+          .from('profiles').select('character_alias, character_aliases').eq('id', user.id).maybeSingle();
+        const list = extractAliases(prof);
+        setAliases(list);
+        if (!selectedAlias && list.length > 0) setSelectedAlias(list[0]);
+      } catch {}
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  const loadMy = useCallback((alias) => {
     if (!user) { setMy(null); return; }
-    callMyChar('view')
+    callMyChar('view', {}, alias || undefined)
       .then((r) => setMy(r))
       .catch(() => setMy(null));
   }, [user]);
 
   useEffect(() => { loadGameData(false); }, [loadGameData]);
-  useEffect(() => { loadMy(); }, [loadMy]);
+  useEffect(() => { loadMy(selectedAlias); }, [loadMy, selectedAlias]);
 
   const silver = my?.ok ? Number(my.silver || 0) : 0;
   const noAlias = my && my.ok !== true && (my.error === 'NO_ALIAS' || /별명/.test(my.message || ''));
@@ -216,10 +251,16 @@ function ShopBody() {
     [data.shop, isAdmin]
   );
 
+  function handleAliasChange(alias) {
+    setSelectedAlias(alias);
+    setMy(null);
+    setMsg(''); setErr('');
+  }
+
   async function buy(itemName, qty) {
     setBusy(true); setMsg(''); setErr('');
     try {
-      const r = await callMyChar('buy', { itemName, qty });
+      const r = await callMyChar('buy', { itemName, qty }, selectedAlias || undefined);
       if (r?.ok !== true) { setErr(r?.error || '구매 실패'); return; }
       setMy(r);
       setMsg(r.message || '구매 완료');
@@ -229,12 +270,30 @@ function ShopBody() {
 
   return (
     <div className="space-y-5">
-      {/* 잔액 / 안내 */}
-      <div className="flex items-center justify-between gap-2 rounded-xl border border-amber-100 bg-amber-50/50 px-4 py-3">
-        <span className="text-xs text-amber-800">
-          {user ? (my?.ok ? <>보유 잔액 · <Coin n={silver} /> <span className="text-amber-700/70">({my.alias})</span></> : noAlias ? '먼저 캐릭터 별명을 등록하세요.' : '잔액 불러오는 중…') : '구매하려면 로그인하세요.'}
-        </span>
-        <button onClick={() => { loadGameData(true); loadMy(); }} className="text-[11px] px-2 py-1 bg-white hover:bg-slate-50 border border-amber-200 rounded text-amber-700">새로고침</button>
+      {/* 잔액 / 캐릭터 선택 */}
+      <div className="rounded-xl border border-amber-100 bg-amber-50/50 px-4 py-3 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-amber-800">
+            {user ? (my?.ok ? <>보유 잔액 · <Coin n={silver} /> <span className="text-amber-700/70">({my.alias})</span></> : noAlias ? '먼저 캐릭터 별명을 등록하세요.' : '잔액 불러오는 중…') : '구매하려면 로그인하세요.'}
+          </span>
+          <button onClick={() => { loadGameData(true); loadMy(selectedAlias); }} className="text-[11px] px-2 py-1 bg-white hover:bg-slate-50 border border-amber-200 rounded text-amber-700">새로고침</button>
+        </div>
+        {user && aliases.length > 1 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] text-amber-700/70 shrink-0">구매 캐릭터:</span>
+            {aliases.map(a => (
+              <button
+                key={a}
+                onClick={() => handleAliasChange(a)}
+                className={`text-[11px] px-2.5 py-1 rounded-lg border transition-colors ${
+                  (selectedAlias || aliases[0]) === a
+                    ? 'bg-amber-500 text-white border-amber-500'
+                    : 'bg-white hover:bg-amber-50 text-amber-700 border-amber-200'
+                }`}
+              >{a}</button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 탭 (관리자) */}

@@ -159,6 +159,42 @@ export default async function handler(req, res) {
       });
     }
 
+    // 캐릭터 신청 승인 시 신청자의 character_aliases에 자동 추가
+    if (application.type === 'character_data' && application.user_id) {
+      const newAlias = String(application.payload?.char?.name || '').trim();
+      if (newAlias) {
+        try {
+          const { data: prof } = await admin
+            .from('profiles')
+            .select('character_alias, character_aliases')
+            .eq('id', application.user_id)
+            .maybeSingle();
+
+          let currentAliases = [];
+          try {
+            const arr = prof?.character_aliases;
+            if (Array.isArray(arr)) {
+              currentAliases = arr.map(String).map(s => s.trim()).filter(Boolean);
+            } else if (typeof arr === 'string' && arr.trim().startsWith('[')) {
+              currentAliases = JSON.parse(arr).map(String).map(s => s.trim()).filter(Boolean);
+            }
+          } catch {}
+          if (currentAliases.length === 0) {
+            const a = String(prof?.character_alias || '').trim();
+            if (a) currentAliases = [a];
+          }
+
+          if (!currentAliases.includes(newAlias)) {
+            const updated = [...currentAliases, newAlias];
+            await admin
+              .from('profiles')
+              .update({ character_alias: updated[0], character_aliases: updated })
+              .eq('id', application.user_id);
+          }
+        } catch { /* 프로필 업데이트 실패는 승인 자체를 막지 않음 */ }
+      }
+    }
+
     return sendJson(res, 200, {
       ok: true,
       message: '승인 및 등록이 완료되었습니다.',
