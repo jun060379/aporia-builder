@@ -188,6 +188,30 @@ function ShopBody() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
+  const [aliases, setAliases] = useState([]);
+  const [selectedAlias, setSelectedAlias] = useState(null);
+
+  // 유저 캐릭터 별명 목록 로드
+  useEffect(() => {
+    if (!user || !supabase) { setAliases([]); setSelectedAlias(null); return; }
+    supabase.from('profiles')
+      .select('character_alias, character_aliases')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data: prof }) => {
+        if (!prof) return;
+        let arr = [];
+        try {
+          const raw = prof.character_aliases;
+          if (Array.isArray(raw)) arr = raw.map(String).filter(Boolean);
+          else if (typeof raw === 'string' && raw.trim().startsWith('[')) arr = JSON.parse(raw).map(String).filter(Boolean);
+        } catch {}
+        if (arr.length === 0 && prof.character_alias) arr = [String(prof.character_alias).trim()].filter(Boolean);
+        setAliases(arr);
+        setSelectedAlias((prev) => (prev && arr.includes(prev) ? prev : (arr[0] || null)));
+      })
+      .catch(() => {});
+  }, [user]);
 
   const loadGameData = useCallback((bust) => {
     setLoading(true);
@@ -200,10 +224,11 @@ function ShopBody() {
 
   const loadMy = useCallback(() => {
     if (!user) { setMy(null); return; }
-    callMyChar('view')
+    const extra = selectedAlias ? { alias: selectedAlias } : {};
+    callMyChar('view', extra)
       .then((r) => setMy(r))
       .catch(() => setMy(null));
-  }, [user]);
+  }, [user, selectedAlias]);
 
   useEffect(() => { loadGameData(false); }, [loadGameData]);
   useEffect(() => { loadMy(); }, [loadMy]);
@@ -219,7 +244,9 @@ function ShopBody() {
   async function buy(itemName, qty) {
     setBusy(true); setMsg(''); setErr('');
     try {
-      const r = await callMyChar('buy', { itemName, qty });
+      const extra = { itemName, qty };
+      if (selectedAlias) extra.alias = selectedAlias;
+      const r = await callMyChar('buy', extra);
       if (r?.ok !== true) { setErr(r?.error || '구매 실패'); return; }
       setMy(r);
       setMsg(r.message || '구매 완료');
@@ -229,12 +256,28 @@ function ShopBody() {
 
   return (
     <div className="space-y-5">
-      {/* 잔액 / 안내 */}
-      <div className="flex items-center justify-between gap-2 rounded-xl border border-amber-100 bg-amber-50/50 px-4 py-3">
-        <span className="text-xs text-amber-800">
-          {user ? (my?.ok ? <>보유 잔액 · <Coin n={silver} /> <span className="text-amber-700/70">({my.alias})</span></> : noAlias ? '먼저 캐릭터 별명을 등록하세요.' : '잔액 불러오는 중…') : '구매하려면 로그인하세요.'}
-        </span>
-        <button onClick={() => { loadGameData(true); loadMy(); }} className="text-[11px] px-2 py-1 bg-white hover:bg-slate-50 border border-amber-200 rounded text-amber-700">새로고침</button>
+      {/* 잔액 / 캐릭터 전환 / 안내 */}
+      <div className="rounded-xl border border-amber-100 bg-amber-50/50 px-4 py-3 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-amber-800">
+            {user ? (my?.ok ? <>보유 잔액 · <Coin n={silver} /> <span className="text-amber-700/70">({my.alias || selectedAlias})</span></> : noAlias ? '먼저 캐릭터 별명을 등록하세요.' : '잔액 불러오는 중…') : '구매하려면 로그인하세요.'}
+          </span>
+          <button onClick={() => { loadGameData(true); loadMy(); }} className="text-[11px] px-2 py-1 bg-white hover:bg-slate-50 border border-amber-200 rounded text-amber-700">새로고침</button>
+        </div>
+        {user && aliases.length > 1 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] text-amber-700/70 shrink-0">캐릭터:</span>
+            {aliases.map((a) => (
+              <button
+                key={a}
+                onClick={() => { setSelectedAlias(a); setMy(null); }}
+                className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${selectedAlias === a ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-amber-700 border-amber-300 hover:border-amber-500'}`}
+              >
+                {a}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 탭 (관리자) */}

@@ -159,6 +159,44 @@ export default async function handler(req, res) {
       });
     }
 
+    // character_data 승인 시 신청자의 character_aliases에 자동 추가
+    if (application.type === 'character_data') {
+      try {
+        const charName = String((application.payload?.char?.name) || '').trim();
+        const applicantId = application.user_id;
+        if (charName && applicantId) {
+          const { data: applicantProfile } = await admin
+            .from('profiles')
+            .select('character_alias, character_aliases')
+            .eq('id', applicantId)
+            .maybeSingle();
+
+          if (applicantProfile) {
+            let aliases = [];
+            try {
+              const raw = applicantProfile.character_aliases;
+              if (Array.isArray(raw)) {
+                aliases = raw.map(String).map(s => s.trim()).filter(Boolean);
+              } else if (typeof raw === 'string' && raw.trim().startsWith('[')) {
+                aliases = JSON.parse(raw).map(String).map(s => s.trim()).filter(Boolean);
+              }
+            } catch {}
+            if (aliases.length === 0) {
+              const a = String(applicantProfile.character_alias || '').trim();
+              if (a) aliases = [a];
+            }
+            if (!aliases.includes(charName)) {
+              aliases.push(charName);
+              await admin.from('profiles').update({ character_aliases: aliases }).eq('id', applicantId);
+            }
+          }
+        }
+      } catch (profileErr) {
+        // 비치명적 — 승인 자체는 이미 완료됨
+        console.warn('멀티 프로필 업데이트 실패:', profileErr?.message);
+      }
+    }
+
     return sendJson(res, 200, {
       ok: true,
       message: '승인 및 등록이 완료되었습니다.',
