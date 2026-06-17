@@ -18,6 +18,7 @@ const ALLOWED_TOKEN_RE = new RegExp(
     'd\\d+',                                // dY  (d6, d20, d100)
     '\\d+(\\.\\d+)?',                       // numbers
     '랭크',
+    '레벨',
     '대상상태_[가-힣a-zA-Z0-9_]+',
     '대상스택_[가-힣a-zA-Z0-9_]+',
     '상태_[가-힣a-zA-Z0-9_]+',
@@ -80,7 +81,7 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-export function previewFormula(formula, stats, rank, dbOverrides = {}, abilities = {}, proficiencies = {}) {
+export function previewFormula(formula, stats, rank, dbOverrides = {}, abilities = {}, proficiencies = {}, level = 1) {
   if (!formula.trim()) return { value: null, warnings: [], infos: [] };
 
   const warnings = [];
@@ -97,8 +98,12 @@ export function previewFormula(formula, stats, rank, dbOverrides = {}, abilities
     String((Number(y) + 1) / 2)
   );
 
-  // 3. 랭크
+  // 3. 랭크, 레벨
   expr = expr.replace(/랭크/g, String(getRankValue(rank)));
+  if (/레벨/.test(expr)) {
+    expr = expr.replace(/레벨/g, String(toNumber(level, 1)));
+    infos.push('레벨은 캐릭터의 현재 레벨을 참조합니다.');
+  }
 
   // 4. 스탯/기능/숙련 — 변수명 길이 내림차순으로 치환해 부분일치 사고 방지
   //    (예: '해석숙련'을 '해석'보다 먼저 치환)

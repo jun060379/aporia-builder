@@ -88,7 +88,7 @@ export function describeEffectLine(line) {
 // 스킬 전체 평문 요약.
 export function buildSkillSummary(skill, ctx = {}) {
   if (!skill) return '';
-  const { stats = {}, abilities = {}, proficiencies = {} } = ctx;
+  const { stats = {}, abilities = {}, proficiencies = {}, level = 1 } = ctx;
   const parts = [];
 
   // 판정
@@ -96,7 +96,7 @@ export function buildSkillSummary(skill, ctx = {}) {
   if (formula) {
     let exp = null;
     try {
-      const r = previewFormula(formula, stats, skill.rank, {}, abilities, proficiencies);
+      const r = previewFormula(formula, stats, skill.rank, {}, abilities, proficiencies, level);
       exp = r && r.value !== null ? r.value : null;
     } catch { exp = null; }
     const actionLabel = skill.meta?.archetype === 'attack' && skill.meta?.action
