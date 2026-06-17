@@ -515,7 +515,7 @@ function handleCommand(utterance, displayName) {
   if (command === "!에너미템플릿등록")   return enemyTemplateRegister(utterance, displayName);
   if (command === "!에너미템플릿삭제")   return enemyTemplateDelete(parts, displayName);
 
-  if (command === "!fin") return finishSession(parts, displayName);
+  if (command === "!fin" || command === "!세션종료") return finishSession(parts, displayName);
   if (command === "!패시브목록") return passiveListCommand(parts, displayName);
   if (command === "!패시브등록") return passiveRegisterCommand(utterance, displayName);
 
@@ -700,8 +700,8 @@ function commandListCommand(parts) {
       "  ※ 상점 구매·퀵슬롯 등록은 웹 빌더에서",
       "",
       "[ 세션 ]",
-      "  !fin                극/세션 종료 (본인 캐릭터만 초기화)",
-      "  !fin 캐릭터1 캐릭터2  지정한 캐릭터만 임시 상태/스택 정리 + 체력 회복"
+      "  !fin / !세션종료        극/세션 종료 (본인 캐릭터만 초기화, 세션종료 패시브는 전체 발동)",
+      "  !fin 캐릭터1 캐릭터2    지정한 캐릭터만 임시 상태/스택 정리 + 체력 회복"
     ].join("\n")
   ];
 
@@ -9025,14 +9025,13 @@ function finishSession(parts, displayName) {
   var message = targeted ? "" : rest.join(" ").trim();
   if (!message) message = "...다음 시간에 계속.";
 
-  // 세션종료 패시브 효과 (대상 지정 시 해당 캐릭터만, 아니면 전체)
+  // 세션종료 패시브 효과 — 항상 전체 캐릭터 대상 (개별 !fin이라도 세션 레벨 이벤트)
   var passiveLogs = [];
   try {
     var allChars = getSheetData(SHEET_BOT_DB);
     allChars.forEach(function (ch) {
       var aliasV = String(ch["별명"] || "").trim();
       if (!aliasV) return;
-      if (aliasSet && !aliasSet[aliasV]) return;
       var out = firePassiveTriggerEffects(ch, "세션종료", { resistanceMode: RESIST_NONE });
       if (out) passiveLogs.push("[" + aliasV + "]\n" + out);
     });
