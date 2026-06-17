@@ -700,7 +700,8 @@ function commandListCommand(parts) {
       "  ※ 상점 구매·퀵슬롯 등록은 웹 빌더에서",
       "",
       "[ 세션 ]",
-      "  !fin                극/세션 종료 (전체 임시 상태/스택 정리 + 체력 최대 회복)"
+      "  !fin                극/세션 종료 (본인 캐릭터만 초기화)",
+      "  !fin 캐릭터1 캐릭터2  지정한 캐릭터만 임시 상태/스택 정리 + 체력 회복"
     ].join("\n")
   ];
 
@@ -8995,6 +8996,7 @@ function finishSession(parts, displayName) {
 
   // 비-플래그 토큰이 전부 캐릭터 별명으로 해석되면 → 그 캐릭터들만 초기화.
   //   (!fin 캐릭터1 캐릭터2 ...)
+  // 토큰 없으면 → 명령어 친 사람(displayName)의 캐릭터만 초기화.
   // 하나라도 별명이 아니면 → 전체 토큰을 종료 메시지로 취급(기존 동작).
   var targetAliases = [];
   var aliasSet = null;
@@ -9007,6 +9009,16 @@ function finishSession(parts, displayName) {
       aliasSet = {};
       resolved.forEach(function (a) { if (!aliasSet[a]) { aliasSet[a] = true; targetAliases.push(a); } });
     }
+  } else {
+    // 인수 없이 !fin 사용 → 명령어 친 사람의 캐릭터만 초기화
+    var selfChar = findCharacter(displayName);
+    if (!selfChar) {
+      return "캐릭터를 찾을 수 없습니다: " + displayName + "\n특정 캐릭터를 초기화하려면 !fin 캐릭터별명 으로 지정해 주세요.";
+    }
+    var selfAlias = String(selfChar["별명"] || "").trim();
+    aliasSet = {};
+    aliasSet[selfAlias] = true;
+    targetAliases.push(selfAlias);
   }
   var targeted = !!aliasSet;
 
