@@ -43,7 +43,7 @@ const FORMULA_CATEGORIES = [
   { id: '기능',      tokens: ABILITY_NAMES },
   { id: '숙련',      tokens: PROFICIENCY_NAMES },
   { id: '상태/스택', tokens: ['상태_출혈_수치', '대상상태_출혈_수치', '스택_혈인', '대상스택_표식'] },
-  { id: '고급',      tokens: ['현재체력', '최대체력', '현재체력비율', '이면침식', '일상점'] },
+  { id: '고급',      tokens: ['레벨', '현재체력', '최대체력', '현재체력비율', '이면침식', '일상점'] },
 ];
 
 // ── 패시브 전용 상수 (Code.js PASSIVE_SKILLS 시트 컬럼 기준) ───────────
@@ -147,6 +147,7 @@ const PASSIVE_EFFECT_CODES = [
 const PASSIVE_VALUE_TOKENS = [
   { label: '근력', token: '근력' }, { label: '민첩', token: '민첩' },
   { label: '내구', token: '내구' }, { label: '감각', token: '감각' }, { label: '지능', token: '지능' },
+  { label: '레벨', token: '레벨' },
   { label: 'HP%', token: '현재체력비율' }, { label: '침식', token: '이면침식' },
   { label: '현재HP', token: '현재체력' }, { label: '최대HP', token: '최대체력' },
 ];
@@ -185,13 +186,13 @@ function buildPassivePreview(row, catInfo) {
 
 // ── 공통 서브 컴포넌트 ──────────────────────────────────────────────────
 
-function FormulaPreview({ formula, stats, rank, abilities, proficiencies }) {
+function FormulaPreview({ formula, stats, rank, abilities, proficiencies, level = 1 }) {
   if (!formula.trim()) return null;
-  const base = previewFormula(formula, stats, rank, {}, abilities, proficiencies);
+  const base = previewFormula(formula, stats, rank, {}, abilities, proficiencies, level);
   const hasDbVar = /이면침식/.test(formula);
-  const 침식0 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 0 }, abilities, proficiencies) : null;
-  const 침식6 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 6 }, abilities, proficiencies) : null;
-  const 침식9 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 9 }, abilities, proficiencies) : null;
+  const 침식0 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 0 }, abilities, proficiencies, level) : null;
+  const 침식6 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 6 }, abilities, proficiencies, level) : null;
+  const 침식9 = hasDbVar ? previewFormula(formula, stats, rank, { 이면침식: 9 }, abilities, proficiencies, level) : null;
   const show = base.value !== null || base.warnings.length > 0;
   if (!show) return null;
 
@@ -630,7 +631,7 @@ function ArchField({ field: f, meta, onChange }) {
   );
 }
 
-function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCancel, onChange }) {
+function SkillForm({ editingSkill, stats, abilities, proficiencies, level = 1, onSave, onCancel, onChange }) {
   // 효과는 줄=효과 문자열(skill.효과). 레거시 effects[]가 있으면 로드 시 변환.
   const initSkill = (src) => {
     const s = src || defaultSkill();
@@ -809,7 +810,7 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
                   <ArchField key={f.key} field={f} meta={skill.meta} onChange={setMetaField} />
                 ))}
               </div>
-              <FormulaPreview formula={skill.formula} stats={stats} rank={skill.rank} abilities={abilities} proficiencies={proficiencies} />
+              <FormulaPreview formula={skill.formula} stats={stats} rank={skill.rank} abilities={abilities} proficiencies={proficiencies} level={level} />
               <p className="text-[10px] text-slate-400 italic">계산식·효과는 자동 생성된 기본값입니다. 세밀하게 고치려면 위 <strong>고급</strong> 모드로 전환하세요.</p>
             </div>
           )}
@@ -1002,7 +1003,7 @@ function SkillForm({ editingSkill, stats, abilities, proficiencies, onSave, onCa
 
 // ── 메인 export — 모드 탭 포함 ─────────────────────────────────────────
 export default function SkillMaker({
-  editingSkill, stats, abilities, proficiencies, onSave, onCancel,
+  editingSkill, stats, abilities, proficiencies, level = 1, onSave, onCancel,
   editingPassive, onSavePassive, onUpdatePassive, onCancelPassiveEdit,
   onSkillChange,
 }) {
@@ -1068,6 +1069,7 @@ export default function SkillMaker({
           stats={stats}
           abilities={abilities}
           proficiencies={proficiencies}
+          level={level}
           onSave={onSave}
           onCancel={onCancel}
           onChange={onSkillChange}

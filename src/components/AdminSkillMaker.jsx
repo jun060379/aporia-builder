@@ -9,10 +9,11 @@ import { STAT_NAMES } from '../data/stats';
 import { ABILITY_NAMES } from '../data/abilities';
 import { PROFICIENCY_NAMES } from '../data/proficiencies';
 
-// 미리보기/테스트용 기본 스탯(스탯 10 / 기능·숙련 5).
+// 미리보기/테스트용 기본 스탯(스탯 10 / 기능·숙련 5 / 레벨 1).
 const PREVIEW_STATS = Object.fromEntries(STAT_NAMES.map((n) => [n, 10]));
 const PREVIEW_ABILITIES = Object.fromEntries(ABILITY_NAMES.map((n) => [n, 5]));
 const PREVIEW_PROFICIENCIES = Object.fromEntries(PROFICIENCY_NAMES.map((n) => [n, 5]));
+const PREVIEW_LEVEL = 1;
 
 const inputCls = 'w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors';
 
@@ -48,13 +49,13 @@ function LivePreview({ skill }) {
   const hasErosion = /이면침식/.test(formula);
   const exp = useMemo(() => {
     if (!formula) return null;
-    try { return previewFormula(formula, PREVIEW_STATS, skill.rank, {}, PREVIEW_ABILITIES, PREVIEW_PROFICIENCIES); }
+    try { return previewFormula(formula, PREVIEW_STATS, skill.rank, {}, PREVIEW_ABILITIES, PREVIEW_PROFICIENCIES, PREVIEW_LEVEL); }
     catch { return null; }
   }, [formula, skill?.rank]);
   const erosionVariants = useMemo(() => {
     if (!formula || !hasErosion) return null;
     return [0, 6, 9].map((e) => {
-      try { return { e, v: previewFormula(formula, PREVIEW_STATS, skill.rank, { 이면침식: e }, PREVIEW_ABILITIES, PREVIEW_PROFICIENCIES).value }; }
+      try { return { e, v: previewFormula(formula, PREVIEW_STATS, skill.rank, { 이면침식: e }, PREVIEW_ABILITIES, PREVIEW_PROFICIENCIES, PREVIEW_LEVEL).value }; }
       catch { return { e, v: null }; }
     });
   }, [formula, hasErosion, skill?.rank]);
@@ -202,6 +203,7 @@ export default function AdminSkillMaker() {
           stats={PREVIEW_STATS}
           abilities={PREVIEW_ABILITIES}
           proficiencies={PREVIEW_PROFICIENCIES}
+          level={PREVIEW_LEVEL}
           onSave={handleSaveSkill}
           onCancel={() => {}}
           onSavePassive={handleSavePassive}
