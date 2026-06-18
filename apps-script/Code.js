@@ -9726,7 +9726,10 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
 function _passiveTriggerMatches(pTrigger, trigger, triggerArg) {
   pTrigger = String(pTrigger || "").trim();
   if (!pTrigger) return false;
-  if (pTrigger === "항상" || pTrigger === "전체") return true;
+  // 파티 트리거는 명시적으로 지정된 경우만 발동 — 항상/전체로 매칭되지 않음.
+  // 소유자(소라)의 항상 패시브가 파티원 이벤트에서 엉뚱한 대상에게 발동되는 버그 방지.
+  var isPartyTrigger = (trigger === "파티피해시" || trigger === "파티가해시" || trigger === "파티회복시");
+  if (!isPartyTrigger && (pTrigger === "항상" || pTrigger === "전체")) return true;
   if (pTrigger === trigger) return true;
 
   var ci = pTrigger.indexOf(":");
