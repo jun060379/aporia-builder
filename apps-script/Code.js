@@ -9723,10 +9723,16 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
 //  - "트리거:인자" 형태(예: "액션사용후:은신") → base가 일치하고 인자가
 //    현재 사용한 액션/스킬명(triggerArg)과 같을 때 발동.
 //    인자는 콤마로 여러 개 지정 가능(OR): "액션사용후:참격,타격" → 참격 또는 타격.
+// 파티 트리거 목록. 이 트리거들은 항상/전체 패시브를 발동시키지 않는다.
+// (캐릭터 고유 패시브가 파티원 이벤트에 반응하는 버그 방지)
+var _PARTY_TRIGGER_NAMES = ["파티피해시", "파티가해시", "파티회복시"];
+
 function _passiveTriggerMatches(pTrigger, trigger, triggerArg) {
   pTrigger = String(pTrigger || "").trim();
   if (!pTrigger) return false;
-  if (pTrigger === "항상" || pTrigger === "전체") return true;
+  // 파티 트리거는 항상/전체를 허용하지 않음 — 명시적으로 파티 트리거를 지정한 패시브만 발동
+  var isPartyTrigger = _PARTY_TRIGGER_NAMES.indexOf(trigger) >= 0;
+  if (!isPartyTrigger && (pTrigger === "항상" || pTrigger === "전체")) return true;
   if (pTrigger === trigger) return true;
 
   var ci = pTrigger.indexOf(":");
