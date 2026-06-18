@@ -7511,10 +7511,9 @@ function applySetEffect(variable, valueExpr, context, checkType, extraOpts) {
   };
   if (MODIFIER_LABEL.hasOwnProperty(v)) {
     if (!alias) return "[설정 실패]\n변수: " + v + "\n대상 캐릭터를 확인할 수 없습니다.";
-    // 적용 대상: 옵션 대상이 있으면 그쪽, 없으면 자신. 에너미면 정규 별명으로 통일.
-    var modTarget = String(context.targetAlias || "").trim();
-    modTarget = (modTarget && modTarget !== "자신") ? modTarget : alias;
-    modTarget = _canonStatusTarget(modTarget);
+    // 설정 효과(판정보정/피해보정 등)는 DSL에 명시적 대상 지정이 없으므로 항상 시전자에게 적용.
+    // context.targetAlias는 전투 맥락의 공격/피해 대상이지 효과 대상이 아님.
+    var modTarget = _canonStatusTarget(alias);
 
     if (v === "판정보정") {
       var jBuff = isMult ? (multFactor >= 1) : (num >= 0);
