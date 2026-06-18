@@ -8096,14 +8096,21 @@ function processStatusBeforeCheck(alias, checkTypeOrTypes) {
 
   // 패시브 발동: 판정시작
   var passiveLogs = [];
+  var _passiveFiredAny = false;
   try {
     var charForPassive = findCharacterByAlias(alias);
     if (charForPassive) {
       var passiveFireText = firePassiveTriggerEffects(charForPassive, "판정시작", { resistanceMode: RESIST_NONE });
-      if (passiveFireText) passiveLogs.push(passiveFireText);
+      if (passiveFireText) { passiveLogs.push(passiveFireText); _passiveFiredAny = true; }
     }
   } catch (e) {
     // 패시브 시트 없거나 오류 → 무시.
+  }
+  // 패시브가 STATUS_DB에 새 상태를 추가/갱신했을 수 있으므로,
+  // 이후 getStatusValueModifier가 최신 데이터를 볼 수 있도록 flush + 캐시 무효화.
+  if (_passiveFiredAny) {
+    try { SpreadsheetApp.flush(); } catch (_e) {}
+    invalidateSheetCache(SHEET_STATUS_DB);
   }
 
   var statusOnlyText = logs.length > 0 ? logs.join("\n\n") : "";
@@ -9688,14 +9695,20 @@ function getPassiveValueModifier(character, checkTypes, targetAlias) {
     var name   = p["이름"] || p["key"];
 
     // 효과 컬럼의 줄-효과(판정보정 [유형] = 값) 합산. 유형은 checkTypes와 매칭.
-    _collectPassiveEffectModifiers(p, ["판정보정"], ctx, checkTypes).forEach(function (m) {
-      if (m.mode === 'mult') {
-        if (m.value !== 1) { multSum += m.value; multCount++; lines.push("[패시브: " + name + "]\n판정 배율: ×" + m.value); }
-      } else {
-        var mv = Math.floor(m.value);
-        if (mv) { delta += mv; lines.push("[패시브: " + name + "]\n보정: " + formatSigned(mv)); }
-      }
-    });
+    // 단, 발동=항상/전체인 패시브는 firePassiveTriggerEffects(판정시작)에서 이미 효과가
+    // 실행되어 STATUS를 생성하고, 그 STATUS가 getStatusValueModifier에서 처리된다.
+    // 따라서 항상/전체 패시브의 효과 컬럼을 여기서 다시 직접 합산하면 이중 적용이 발생하므로 건너뜀.
+    // 판정계산전 패시브는 트리거로 실행되지 않으므로(판정시작 트리거에 매칭 안 됨) 직접 합산이 필요.
+    if (trigger === "판정계산전") {
+      _collectPassiveEffectModifiers(p, ["판정보정"], ctx, checkTypes).forEach(function (m) {
+        if (m.mode === 'mult') {
+          if (m.value !== 1) { multSum += m.value; multCount++; lines.push("[패시브: " + name + "]\n판정 배율: ×" + m.value); }
+        } else {
+          var mv = Math.floor(m.value);
+          if (mv) { delta += mv; lines.push("[패시브: " + name + "]\n보정: " + formatSigned(mv)); }
+        }
+      });
+    }
 
     var parsed = _parsePassiveSuChi(p["수치"], ctx.vars);
     var dMult  = cond.detailMult  || 1;
