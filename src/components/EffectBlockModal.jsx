@@ -202,10 +202,13 @@ function TargetToggle({ value, onChange }) {
     <div className="space-y-1">
       <span className="text-[11px] text-slate-500">대상</span>
       <div className="flex gap-1">
-        {['대상', '자신'].map(t => (
+        {['대상', '자신', '파티'].map(t => (
           <BtnSel key={t} active={value === t} onClick={() => onChange(t)}>{t}</BtnSel>
         ))}
       </div>
+      {value === '파티' && (
+        <p className="text-[10px] text-violet-600">시전자가 소속된 파티 전원에게 적용됩니다.</p>
+      )}
     </div>
   );
 }

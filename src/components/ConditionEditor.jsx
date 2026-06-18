@@ -67,6 +67,12 @@ const HELP_TEXT = `조건 문법
   예) 사용액션 == 상태접미_지정   (지정된 액션을 썼는지)
   우변에 액션명을 직접 써도 됨: 사용액션 == 참격
 
+파티 트리거 (발동 시점):
+  파티피해시  ← 같은 파티원이 피해를 입었을 때 다른 멤버에게 발동
+  파티가해시  ← 같은 파티원이 피해를 입혔을 때 다른 멤버에게 발동
+  파티회복시  ← 같은 파티원이 회복했을 때 다른 멤버에게 발동
+  이 시점에서 targetAlias = 실제 피해/회복을 받은/입힌 파티원 별명
+
 인식되지 않는 줄은 수동 확인 항목으로 표시됩니다.`;
 
 export default function ConditionEditor({ value, onChange, placeholder, helpInline = false }) {

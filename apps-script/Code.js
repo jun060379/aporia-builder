@@ -23,6 +23,7 @@ const SHEET_ITEM_DB        = "ITEM_DB";
 const SHEET_INVENTORY_DB   = "INVENTORY_DB";
 const SHEET_EQUIPMENT_DB   = "EQUIPMENT_DB";
 const SHEET_SHOP_DB        = "SHOP_DB";
+const SHEET_PARTY_DB       = "PARTY_DB";
 const SILVER_FIELD         = "은화";
 const QUICKSLOT_FIELDS     = ["퀵슬롯1", "퀵슬롯2", "퀵슬롯3"];
 const COMMON_UNLOCK_LEVELS = [1, 2, 4, 6, 8, 12];
@@ -516,6 +517,9 @@ function handleCommand(utterance, displayName) {
   if (command === "!에너미템플릿삭제")   return enemyTemplateDelete(parts, displayName);
 
   if (command === "!fin" || command === "!세션종료") return finishSession(parts, displayName);
+  if (command === "!파티" || command === "!세션시작") return createPartyCommand(parts, displayName);
+  if (command === "!파티목록") return partyListCommand();
+  if (command === "!파티정보") return partyInfoCommand(parts);
   if (command === "!패시브목록") return passiveListCommand(parts, displayName);
   if (command === "!패시브등록") return passiveRegisterCommand(utterance, displayName);
 
@@ -1394,8 +1398,30 @@ function applyHealingToCharacter(alias, healAmount) {
     finally { _HEAL_TRIGGER_ACTIVE = false; }
   }
 
+  // 파티 트리거: 같은 파티원에게 파티회복시 발동
+  var partyHealText = "";
+  if (!_PARTY_TRIGGER_ACTIVE) {
+    _PARTY_TRIGGER_ACTIVE = true;
+    try {
+      var _healPartyMembers = getPartyMembersForAlias(String(alias).trim());
+      var _healPartyLogs = [];
+      _healPartyMembers.forEach(function(_hpm) {
+        if (String(_hpm).trim() === String(alias).trim()) return;
+        var _hpmChar = findCharacterByAlias(_hpm);
+        if (!_hpmChar) return;
+        var _hpt = firePassiveTriggerEffects(_hpmChar, "파티회복시", {
+          targetAlias: alias, finalValue: heal, resistanceMode: RESIST_NONE
+        });
+        if (_hpt) _healPartyLogs.push("[패시브: " + _hpm + "]\n" + _hpt);
+      });
+      if (_healPartyLogs.length > 0) partyHealText = "[파티 트리거 — 회복]\n" + _healPartyLogs.join("\n\n");
+    } catch (_e) {}
+    finally { _PARTY_TRIGGER_ACTIVE = false; }
+  }
+
   const passiveLogs = passiveHealResult.logs.concat(statusHealResult.logs);
   if (passiveHealTriggerText) passiveLogs.push(passiveHealTriggerText);
+  if (partyHealText) passiveLogs.push(partyHealText);
   const passiveBlock = passiveLogs.length > 0
     ? "\n\n" + passiveLogs.join("\n\n")
     : "";
@@ -1784,6 +1810,7 @@ function processPreDamageStatuses(alias, damageAmount) {
 
 // 가해후 트리거 재진입 가드: 가해후 패시브가 또 피해를 입혀 무한 재귀하는 것을 막는다.
 var _DEALT_TRIGGER_ACTIVE = false;
+var _PARTY_TRIGGER_ACTIVE = false;
 
 function applyDamageToCharacter(alias, damageAmount, opts) {
   opts = opts || {};
@@ -1869,6 +1896,48 @@ function applyDamageToCharacter(alias, damageAmount, opts) {
     finally { _DEALT_TRIGGER_ACTIVE = false; }
   }
 
+  // 파티 트리거: 피해받은 캐릭터의 파티원에게 파티피해시 발동
+  var passivePartyDmgText = "";
+  if (!_PARTY_TRIGGER_ACTIVE) {
+    _PARTY_TRIGGER_ACTIVE = true;
+    try {
+      var _dmgPartyMembers = getPartyMembersForAlias(String(alias).trim());
+      var _dmgPartyLogs = [];
+      _dmgPartyMembers.forEach(function(_dpm) {
+        if (String(_dpm).trim() === String(alias).trim()) return;
+        var _dpmChar = findCharacterByAlias(_dpm);
+        if (!_dpmChar) return;
+        var _dpt = firePassiveTriggerEffects(_dpmChar, "파티피해시", {
+          targetAlias: alias, finalValue: damage, resistanceMode: RESIST_NONE
+        });
+        if (_dpt) _dmgPartyLogs.push("[패시브: " + _dpm + "]\n" + _dpt);
+      });
+      if (_dmgPartyLogs.length > 0) passivePartyDmgText = _dmgPartyLogs.join("\n\n");
+    } catch (_e) {}
+    finally { _PARTY_TRIGGER_ACTIVE = false; }
+  }
+
+  // 파티 트리거: 공격자의 파티원에게 파티가해시 발동
+  var passivePartyDealtText = "";
+  if (attackerAlias && damage > 0 && !_PARTY_TRIGGER_ACTIVE) {
+    _PARTY_TRIGGER_ACTIVE = true;
+    try {
+      var _atkerPartyMembers = getPartyMembersForAlias(attackerAlias);
+      var _atkerPartyLogs = [];
+      _atkerPartyMembers.forEach(function(_apm) {
+        if (String(_apm).trim() === String(attackerAlias).trim()) return;
+        var _apmChar = findCharacterByAlias(_apm);
+        if (!_apmChar) return;
+        var _apt = firePassiveTriggerEffects(_apmChar, "파티가해시", {
+          targetAlias: alias, finalValue: damage, resistanceMode: RESIST_NONE
+        });
+        if (_apt) _atkerPartyLogs.push("[패시브: " + _apm + "]\n" + _apt);
+      });
+      if (_atkerPartyLogs.length > 0) passivePartyDealtText = _atkerPartyLogs.join("\n\n");
+    } catch (_e) {}
+    finally { _PARTY_TRIGGER_ACTIVE = false; }
+  }
+
   let downText = "";
 
   if (after <= 0 && before > 0) {
@@ -1886,6 +1955,8 @@ function applyDamageToCharacter(alias, damageAmount, opts) {
   const passiveDealtBlock = passiveDealtText
     ? "\n\n[공격 후 패시브: " + attackerAlias + "]\n" + passiveDealtText
     : "";
+  const passivePartyDmgBlock  = passivePartyDmgText  ? "\n\n[파티 트리거 — 피해]\n" + passivePartyDmgText  : "";
+  const passivePartyDealtBlock = passivePartyDealtText ? "\n\n[파티 트리거 — 가해]\n" + passivePartyDealtText : "";
 
   const shortText =
     "[피해 적용]\n" +
@@ -1903,7 +1974,9 @@ function applyDamageToCharacter(alias, damageAmount, opts) {
     passivePreBlock +
     downText +
     passivePostBlock +
-    passiveDealtBlock;
+    passiveDealtBlock +
+    passivePartyDmgBlock +
+    passivePartyDealtBlock;
 
   const detailText = preDamage.debugText
     ? mainText + "\n\n[패시브 디버그]\n" + preDamage.debugText
@@ -7539,7 +7612,22 @@ function processSkillEffects(effectText, context) {
 
   // 줄 구분: 개행, ';', ' / ' (공백+슬래시+공백).
   // 주의: ' / '는 수치 계수식 안에 나눗셈 공백이 있으면 잘못 분리될 수 있으므로 반드시 양측 공백 필요.
-  const lines = effectText.split(/[\n;]| \/ /).map(l => l.trim()).filter(Boolean);
+  const rawLines = effectText.split(/[\n;]| \/ /).map(l => l.trim()).filter(Boolean);
+  // 파티 대상 확장: "파티"가 두 번째 토큰(대상 위치)인 줄을 각 파티원별 줄로 분리한다.
+  // 조건부 효과(=> 포함)에서는 확장되지 않음 — 단순 직접 효과만 지원.
+  const lines = [];
+  rawLines.forEach(function(rawLine) {
+    var _tks = rawLine.split(/\s+/);
+    if (_tks.length >= 2 && _tks[1] === "파티") {
+      var _ua = String(context.userAlias || "").trim();
+      var _pm = _ua ? getPartyMembersForAlias(_ua) : [];
+      if (_pm.length > 0) {
+        _pm.forEach(function(_m) { var _e = _tks.slice(); _e[1] = _m; lines.push(_e.join(" ")); });
+        return;
+      }
+    }
+    lines.push(rawLine);
+  });
   const logs = [];
 
   lines.forEach(line => {
@@ -9008,6 +9096,17 @@ function finishSession(parts, displayName) {
     if (resolved.every(function (x) { return !!x; })) {
       aliasSet = {};
       resolved.forEach(function (a) { if (!aliasSet[a]) { aliasSet[a] = true; targetAliases.push(a); } });
+    } else if (rest.length === 1) {
+      // 캐릭터 별명이 아닌 단일 토큰 → 파티명으로 해산 시도
+      var _partyRow = null;
+      try { _partyRow = getPartyByName(rest[0]); } catch (_e) {}
+      if (_partyRow) {
+        var _partyMemberList = [];
+        try { _partyMemberList = getPartyMembers(rest[0]); } catch (_e) {}
+        dissolvePartyByName(rest[0]);
+        return "[파티 해산]\n파티명: " + rest[0] + "\n" +
+          "멤버: " + (_partyMemberList.length > 0 ? _partyMemberList.join(", ") : "없음");
+      }
     }
   } else {
     // 인수 없이 !fin 사용 → 명령어 친 사람의 캐릭터만 초기화
@@ -13740,6 +13839,175 @@ function _myCharSetQuickslot(alias, slotIndex, itemName) {
     ok: true,
     message: itemName ? ("퀵슬롯" + slotIndex + " → " + itemName) : ("퀵슬롯" + slotIndex + " 해제")
   });
+}
+
+// =====================================================================
+// PARTY SYSTEM — PARTY_DB
+// =====================================================================
+
+const PARTY_HEADERS = ["파티명", "멤버"];
+
+function ensurePartySheet() {
+  var ss = _getSpreadsheet();
+  var sh = ss.getSheetByName(SHEET_PARTY_DB);
+  if (sh) return sh;
+  sh = ss.insertSheet(SHEET_PARTY_DB);
+  sh.getRange(1, 1, 1, PARTY_HEADERS.length).setValues([PARTY_HEADERS]);
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+function getPartyByName(partyName) {
+  partyName = String(partyName || "").trim();
+  if (!partyName) return null;
+  try {
+    ensurePartySheet();
+    var rows = getSheetData(SHEET_PARTY_DB);
+    for (var i = 0; i < rows.length; i++) {
+      if (String(rows[i]["파티명"] || "").trim() === partyName) return rows[i];
+    }
+  } catch (_e) {}
+  return null;
+}
+
+function getPartyMembers(partyName) {
+  var row = getPartyByName(partyName);
+  if (!row) return [];
+  return String(row["멤버"] || "").split(/[,，、]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+}
+
+// 별명이 속한 파티의 전체 멤버 목록 반환. 파티 미소속이면 빈 배열.
+function getPartyMembersForAlias(alias) {
+  alias = String(alias || "").trim();
+  if (!alias) return [];
+  try {
+    ensurePartySheet();
+    var rows = getSheetData(SHEET_PARTY_DB);
+    for (var i = 0; i < rows.length; i++) {
+      var members = String(rows[i]["멤버"] || "").split(/[,，、]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+      if (members.indexOf(alias) >= 0) return members;
+    }
+  } catch (_e) {}
+  return [];
+}
+
+function getPartyNameForAlias(alias) {
+  alias = String(alias || "").trim();
+  if (!alias) return "";
+  try {
+    ensurePartySheet();
+    var rows = getSheetData(SHEET_PARTY_DB);
+    for (var i = 0; i < rows.length; i++) {
+      var members = String(rows[i]["멤버"] || "").split(/[,，、]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+      if (members.indexOf(alias) >= 0) return String(rows[i]["파티명"] || "").trim();
+    }
+  } catch (_e) {}
+  return "";
+}
+
+function dissolvePartyByName(partyName) {
+  partyName = String(partyName || "").trim();
+  if (!partyName) return false;
+  try {
+    var ss = _getSpreadsheet();
+    var sh = ss.getSheetByName(SHEET_PARTY_DB);
+    if (!sh) return false;
+    var data = sh.getDataRange().getValues();
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).trim() === partyName) {
+        sh.deleteRow(i + 1);
+        invalidateSheetCache(SHEET_PARTY_DB);
+        return true;
+      }
+    }
+  } catch (_e) {}
+  return false;
+}
+
+// !파티 파티명 캐릭터1 캐릭터2 ...
+// !세션시작 파티명 캐릭터1 캐릭터2 ...  (동의어)
+function createPartyCommand(parts, displayName) {
+  if (!parts || parts.length < 3) {
+    return "사용법: !파티 파티명 캐릭터1 캐릭터2 ...\n" +
+      "파티를 구성하려면 파티명과 2명 이상의 캐릭터 별명을 지정하세요.\n" +
+      "파티 해산: !fin 파티명\n" +
+      "파티 목록: !파티목록\n" +
+      "파티 정보: !파티정보 파티명";
+  }
+
+  var partyName = String(parts[1] || "").trim();
+  if (!partyName) return "[파티 오류] 파티명이 비어 있습니다.";
+
+  var memberTokens = parts.slice(2);
+  var resolvedMembers = [];
+  var notFound = [];
+
+  memberTokens.forEach(function(t) {
+    var c = findCharacterByAlias(t);
+    if (c) {
+      resolvedMembers.push(String(c["별명"] || t).trim());
+    } else {
+      notFound.push(t);
+    }
+  });
+
+  if (notFound.length > 0) {
+    return "[파티 오류] 다음 캐릭터 별명을 찾을 수 없습니다: " + notFound.join(", ");
+  }
+  if (resolvedMembers.length < 2) {
+    return "[파티 오류] 파티는 최소 2명이 필요합니다.";
+  }
+
+  ensurePartySheet();
+
+  // 기존 파티가 있으면 멤버 갱신, 없으면 새로 추가
+  var ss = _getSpreadsheet();
+  var sh = ss.getSheetByName(SHEET_PARTY_DB);
+  var data = sh.getDataRange().getValues();
+  var updated = false;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === partyName) {
+      sh.getRange(i + 1, 2).setValue(resolvedMembers.join(", "));
+      updated = true;
+      break;
+    }
+  }
+  if (!updated) {
+    appendRowByHeaders(SHEET_PARTY_DB, { 파티명: partyName, 멤버: resolvedMembers.join(", ") });
+  }
+  invalidateSheetCache(SHEET_PARTY_DB);
+
+  return "[파티 " + (updated ? "갱신" : "구성") + "]\n" +
+    "파티명: " + partyName + "\n" +
+    "멤버 (" + resolvedMembers.length + "명): " + resolvedMembers.join(", ");
+}
+
+function partyListCommand() {
+  try {
+    ensurePartySheet();
+    var rows = getSheetData(SHEET_PARTY_DB);
+    if (!rows || rows.length === 0) return "[파티 목록] 현재 활성 파티가 없습니다.";
+    var lines = ["[파티 목록]"];
+    rows.forEach(function(r) {
+      var name = String(r["파티명"] || "").trim();
+      var members = String(r["멤버"] || "").trim();
+      if (name) lines.push("• " + name + ": " + (members || "(멤버 없음)"));
+    });
+    return lines.join("\n");
+  } catch (_e) {
+    return "[파티 목록] 현재 활성 파티가 없습니다.";
+  }
+}
+
+function partyInfoCommand(parts) {
+  if (!parts || parts.length < 2) {
+    return "사용법: !파티정보 파티명";
+  }
+  var partyName = String(parts[1] || "").trim();
+  var row = getPartyByName(partyName);
+  if (!row) return "[파티 정보] '" + partyName + "' 파티를 찾을 수 없습니다.";
+  var members = getPartyMembers(partyName);
+  return "[파티 정보]\n파티명: " + partyName + "\n멤버 (" + members.length + "명): " + members.join(", ");
 }
 
 // ── 세부조건/세부효과 파서 단위 테스트 (시트 쓰기 없음) ─────────────────
