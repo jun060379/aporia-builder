@@ -6370,7 +6370,7 @@ function _pickMaxCountOption(opts) {
 }
 
 // STATUS_DB에서 같은 대상/상태명의 ACTIVE 행 찾기 (가장 최근 = 가장 아래 행)
-function findActiveStatusRowInfo(targetAlias, statusName) {
+function findActiveStatusRowInfo(targetAlias, statusName, checkType) {
   var ss = _getSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_STATUS_DB);
   if (!sheet) return null;
@@ -6386,12 +6386,19 @@ function findActiveStatusRowInfo(targetAlias, statusName) {
 
   var alias = String(targetAlias || "").trim();
   var name  = String(statusName  || "").trim();
+  // checkType이 지정된 경우 대상판정도 매칭 (예: "저항"과 "전체"를 별도 행으로 구분)
+  var filterCheckType = checkType ? String(checkType).trim() : null;
+  var iCheckType = filterCheckType !== null ? headers.indexOf("대상판정") : -1;
 
   // 가장 최근(아래쪽) ACTIVE 행을 찾는다.
   for (var r = values.length - 1; r >= 1; r--) {
     if (String(values[r][iStatus]).trim() !== "ACTIVE") continue;
     if (String(values[r][iTarget]).trim() !== alias) continue;
     if (String(values[r][iName]).trim()   !== name)  continue;
+    if (filterCheckType !== null && iCheckType >= 0) {
+      var rowCT = String(values[r][iCheckType] || "전체").trim() || "전체";
+      if (rowCT !== filterCheckType) continue;
+    }
 
     var obj = {};
     headers.forEach(function(h, i){ obj[h] = values[r][i]; });
@@ -6432,7 +6439,7 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
   if (optMaxCount === undefined || optMaxCount === null || String(optMaxCount).trim() === "") optMaxCount = "";
   var optMaxCountNum = _statusToNum(optMaxCount);
 
-  var existing = findActiveStatusRowInfo(targetAlias, statusName);
+  var existing = findActiveStatusRowInfo(targetAlias, statusName, options.checkType || null);
 
   // ─── A. 신규 행 ───────────────────────────────────────────────
   if (!existing) {
@@ -6508,11 +6515,17 @@ function addStatusToCharacter(targetAlias, statusName, category, effectCode, opt
   var prevIsMult = _isMultValue(prevValueRaw);
   if (addIsMult || prevIsMult) {
     // 곱셈 보정 마커: 덮어쓰기/기존이 덧셈이면 새 배율로 교체, 누적이면 배율을 곱한다.
-    var newFactor = addIsMult ? _multFactor(options.value) : 1;
-    if (isOverwrite || !prevIsMult) {
-      newValue = "*" + newFactor;
+    if (!addIsMult && isOverwrite) {
+      // 덮어쓰기인데 새 값이 덧셈형이면 mult→additive로 타입 전환
+      newValue = addValue;
+      if (maxCap > 0 && newValue > maxCap) newValue = maxCap;
     } else {
-      newValue = "*" + (Math.round(_multFactor(prevValueRaw) * newFactor * 1e6) / 1e6);
+      var newFactor = addIsMult ? _multFactor(options.value) : 1;
+      if (isOverwrite || !prevIsMult) {
+        newValue = "*" + newFactor;
+      } else {
+        newValue = "*" + (Math.round(_multFactor(prevValueRaw) * newFactor * 1e6) / 1e6);
+      }
     }
   } else if (isOverwrite) {
     newValue = addValue;
