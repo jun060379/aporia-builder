@@ -2685,6 +2685,7 @@ function showMyInfo(displayName) {
 
   const daily = fresh["일상점"] || 0;
   const erosion = fresh["이면침식"] || 0;
+  const silver = Number(fresh["은화"] || 0);
 
   const statBlock =
     "근력 " + safeValue(fresh["근력"]) + "　" +
@@ -2738,6 +2739,7 @@ function showMyInfo(displayName) {
     "성장예산 " + budget + "\n" +
     "사용점수 " + used + "\n" +
     "남은점수 " + remain + "\n" +
+    "소지 은화 " + silver + "\n" +
     "╚════════════════════════════╝\n\n" +
 
     "【기초 스탯】\n" +
@@ -12872,12 +12874,16 @@ function inventoryCommand(parts, displayName) {
     alias = String(self["별명"]).trim();
   }
   if (!findCharacterByAlias(alias)) return "캐릭터를 찾을 수 없습니다: " + alias;
+  var silver = getSilverByAlias(alias);
   var rows = getInventoryRows(alias);
-  if (rows.length === 0) return "[인벤토리: " + alias + "]\n보유 아이템 없음";
-  var lines = ["[인벤토리: " + alias + "]"];
-  rows.forEach(function(r) {
-    lines.push("• " + String(r["id"]) + "  " + String(r["아이템명"]) + "  ×" + String(r["수량"]));
-  });
+  var lines = ["[인벤토리: " + alias + "]", "소지 은화: " + silver + "은화"];
+  if (rows.length === 0) {
+    lines.push("보유 아이템 없음");
+  } else {
+    rows.forEach(function(r) {
+      lines.push("• " + String(r["id"]) + "  " + String(r["아이템명"]) + "  ×" + String(r["수량"]));
+    });
+  }
   return lines.join("\n");
 }
 
