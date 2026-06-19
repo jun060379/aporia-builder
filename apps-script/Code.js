@@ -7111,6 +7111,18 @@ function rollResistanceForStatus(targetAlias, difficulty, mods) {
     throw new Error("저항 대상을 찾을 수 없습니다(캐릭터/에너미 아님): " + targetAlias);
   }
 
+  // 판정시작 패시브 발동: actionCheck와 달리 processStatusBeforeCheck를 거치지 않으므로
+  // 직접 패시브를 발동시켜야 판정보정 저항 같은 항상-트리거 SET-EFFECT 상태가 생성된다.
+  var _resistPassiveLog = "";
+  try {
+    var _rpt = firePassiveTriggerEffects(targetCharacter, "판정시작", { resistanceMode: RESIST_NONE });
+    if (_rpt) {
+      _resistPassiveLog = _rpt;
+      try { SpreadsheetApp.flush(); } catch (_e) {}
+      invalidateSheetCache(SHEET_STATUS_DB);
+    }
+  } catch (_e) { /* 패시브 오류 무시 */ }
+
   const rolled = rollActionValueForCharacter(targetCharacter, "저항", mods);
   const resistanceValue = rolled.sum;
   const diff = Math.floor(Number(difficulty) || 0);
@@ -7127,6 +7139,7 @@ function rollResistanceForStatus(targetAlias, difficulty, mods) {
       "[상태 저항]\n" +
       "대상: " + targetAlias + "\n" +
       "저항난이도: " + diff + "\n\n" +
+      (_resistPassiveLog ? "[패시브]\n" + _resistPassiveLog + "\n\n" : "") +
       "액션: 저항\n" +
       "최종 계수: " + rolled.finalCoef + "\n" +
       "주사위: " + rolled.diceCount + "d" + ACTION_DICE_SIDES + "\n" +
