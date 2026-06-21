@@ -700,7 +700,8 @@ function commandListCommand(parts) {
       "  !교환 <상대> <아이템명> [수량]    (즉시 양도)",
       "  !교환 <상대> 은화 <금액>",
       "  !퀵슬롯1 / !퀵슬롯2 / !퀵슬롯3 [대상:별명]",
-      "  !<아이템명>   (퀵슬롯 등록 아이템 단축 사용)",
+      "  !<아이템명>   (퀵슬롯 등록 아이템 단축 사용·장비 교체)",
+      "  ※ 장비 퀵슬롯: 등록된 아이템이 장비이면 현재 착용 장비와 스왑",
       "  ※ 상점 구매·퀵슬롯 등록은 웹 빌더에서",
       "",
       "[ 세션 ]",
@@ -13455,7 +13456,8 @@ function _invApiUse(alias, invId, target) {
   return Object.assign(_invApiView(alias), { ok: true, message: r.message });
 }
 
-// 이름 기반 소모품 사용 (퀵슬롯/단축 명령). { ok, message } 반환(뷰 미포함).
+// 이름 기반 아이템 사용 (퀵슬롯/단축 명령). { ok, message } 반환(뷰 미포함).
+// 장비 아이템이면 장착 교체(스왑), 소모품이면 소모 처리.
 function useInventoryItemByName(alias, itemName, target) {
   itemName = String(itemName || "").trim();
   if (!itemName) return { ok: false, message: "아이템명이 필요합니다." };
@@ -13463,7 +13465,68 @@ function useInventoryItemByName(alias, itemName, target) {
     return String(r["아이템명"] || "").trim() === itemName;
   });
   if (!invRow) return { ok: false, message: "인벤토리에 없는 아이템입니다: " + itemName };
+  var itemDef = getItemByName(itemName);
+  if (itemDef && String(itemDef["분류"] || "").trim() === "장비") {
+    return _swapEquipmentQuickslot(alias, itemName, itemDef);
+  }
   return _consumeInventoryRow(alias, invRow, target);
+}
+
+// 장비 퀵슬롯 스왑: 퀵슬롯의 장비를 착용하고, 기존 착용 장비를 해당 퀵슬롯으로 이동.
+function _swapEquipmentQuickslot(alias, itemName, itemDef) {
+  var slot = String(itemDef["슬롯"] || "").trim();
+  if (!slot) return { ok: false, message: "슬롯 정보가 없는 아이템입니다." };
+
+  ensureItemSheets();
+
+  // 현재 해당 슬롯의 착용 장비 확인
+  var existing = getEquipmentRows(alias).find(function (r) {
+    return String(r["슬롯"] || "").trim() === slot;
+  });
+  var oldItemName = existing ? String(existing["아이템명"] || "").trim() : "";
+
+  // 장비 교체 또는 신규 착용
+  if (existing) {
+    updateRowById(SHEET_EQUIPMENT_DB, "id", String(existing["id"]), {
+      아이템명: itemName, 장착일: getNowText()
+    });
+  } else {
+    appendRowByHeaders(SHEET_EQUIPMENT_DB, {
+      id: _makeEqId(), 소유자: alias, 슬롯: slot, 아이템명: itemName, 장착일: getNowText()
+    });
+  }
+
+  // 이전 착용 장비를 해당 퀵슬롯 칸으로 교체 (스왑)
+  var rowInfo = findCharacterRowByAlias(alias);
+  if (rowInfo) {
+    for (var i = 0; i < QUICKSLOT_FIELDS.length; i++) {
+      if (String(rowInfo.character[QUICKSLOT_FIELDS[i]] || "").trim() === itemName) {
+        setCellByHeader(rowInfo, QUICKSLOT_FIELDS[i], oldItemName);
+        break;
+      }
+    }
+  }
+
+  // 무기 슬롯 교체 시 무기교체 상태 부여 (택티컬 시프트 등 연동용)
+  if (slot === "무기") {
+    try {
+      appendRowByHeaders(SHEET_STATUS_DB, {
+        id: makeStatusId(), 상태: "ACTIVE", 대상: alias,
+        상태명: "무기교체", 분류: "지정", 효과코드: "기타",
+        수치: 0, 확률: 100, 누적확률: 0, 증가확률: 0, 최대확률: 100,
+        발동타이밍: "판정시작", 대상판정: "전체",
+        남은횟수: 1, 중복방식: "덮어쓰기",
+        출처: "장비교체:" + itemName, 메모: "", 생성일: getNowText(), 처리일: ""
+      });
+    } catch (_e) {}
+  }
+
+  _invalidateMyCharCache(alias);
+
+  var lines = ["[장비 교체] " + slot + ": " + (oldItemName || "없음") + " → " + itemName];
+  if (oldItemName) lines.push(oldItemName + " → 퀵슬롯으로 이동");
+  if (slot === "무기") lines.push("무기교체 상태 부여됨 (1회)");
+  return { ok: true, message: lines.join("\n") };
 }
 
 // ── 아이템 등록 (웹 빌더 배포용, 관리자 전용) ─────────────────────────
@@ -14053,7 +14116,7 @@ function _myCharSetQuickslot(alias, slotIndex, itemName) {
   }
   itemName = String(itemName || "").trim();
 
-  // 지정 시 인벤토리 보유 + 소모품/효과 아이템만 허용.
+  // 지정 시 인벤토리 보유 + 소모품/장비 아이템만 허용.
   if (itemName) {
     var inInv = getInventoryRows(alias).some(function (r) {
       return String(r["아이템명"] || "").trim() === itemName;
@@ -14061,8 +14124,9 @@ function _myCharSetQuickslot(alias, slotIndex, itemName) {
     if (!inInv) return { ok: false, error: "인벤토리에 없는 아이템입니다: " + itemName };
     var def = getItemByName(itemName);
     if (!def) return { ok: false, error: "ITEM_DB에 없는 아이템입니다: " + itemName };
-    if (String(def["분류"] || "").trim() !== "소모품") {
-      return { ok: false, error: "퀵슬롯에는 소모품만 등록할 수 있습니다: " + itemName };
+    var cat = String(def["분류"] || "").trim();
+    if (cat !== "소모품" && cat !== "장비") {
+      return { ok: false, error: "퀵슬롯에는 소모품 또는 장비만 등록할 수 있습니다: " + itemName };
     }
   }
 

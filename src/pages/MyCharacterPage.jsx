@@ -369,12 +369,14 @@ function ManageView({ data, selectedAlias, hasMultiple, onBack, onReload, onChan
 
       {/* 퀵슬롯 */}
       <section>
-        <SectionTitle>퀵슬롯 <span className="text-[10px] text-slate-400 font-normal">(소모품 단축 사용 · !퀵슬롯1~3 또는 !아이템명)</span></SectionTitle>
+        <SectionTitle>퀵슬롯 <span className="text-[10px] text-slate-400 font-normal">(소모품 사용·장비 교체 · !퀵슬롯1~3 또는 !아이템명)</span></SectionTitle>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           {[0, 1, 2].map(i => {
             const cur = (data.quickslots || [])[i] || '';
             const consumables = (data.items || []).filter(it => it.category === '소모품');
-            const hasCur = !cur || consumables.some(c => c.name === cur);
+            const equipment = (data.items || []).filter(it => it.category === '장비');
+            const allQuickslotable = [...consumables, ...equipment];
+            const hasCur = !cur || allQuickslotable.some(c => c.name === cur);
             return (
               <div key={i} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
                 <div className="text-[10px] text-slate-400 mb-1">퀵슬롯{i + 1}</div>
@@ -385,13 +387,19 @@ function ManageView({ data, selectedAlias, hasMultiple, onBack, onReload, onChan
                   onChange={(e) => setQuickslot(i + 1, e.target.value)}
                 >
                   <option value="">— 비어 있음 —</option>
-                  {consumables.map(it => <option key={it.invId} value={it.name}>{it.name} ×{it.quantity}</option>)}
+                  {consumables.length > 0 && <optgroup label="소모품">
+                    {consumables.map(it => <option key={it.invId} value={it.name}>{it.name} ×{it.quantity}</option>)}
+                  </optgroup>}
+                  {equipment.length > 0 && <optgroup label="장비 (교체용)">
+                    {equipment.map(it => <option key={it.invId} value={it.name}>{it.name}{it.slot ? ` [${it.slot}]` : ''}</option>)}
+                  </optgroup>}
                   {!hasCur && <option value={cur}>{cur} (보유 없음)</option>}
                 </select>
               </div>
             );
           })}
         </div>
+        <p className="text-[10px] text-slate-400 mt-1.5">장비를 등록하면 <code className="bg-slate-100 px-0.5 rounded">!아이템명</code>으로 현재 착용 장비와 즉시 교체됩니다.</p>
       </section>
 
       {/* 스킬 */}
