@@ -10824,8 +10824,20 @@ function enemyAttack(parts, displayName, utterance) {
     }
   });
 
-  const result      = rollEnemyAction(enemy, actionName, bonus);
-  const enemyLabel  = enemy["alias"] || enemy["name"];
+  const enemyAlias   = enemyCanonicalAlias(enemy);
+  const statusResult = processStatusBeforeCheck(enemyAlias, [KIND_ACTION, actionName]);
+  const enemyLabel   = enemy["alias"] || enemy["name"];
+
+  if (statusResult.blocked) {
+    return (
+      "[에너미 행동 불가]\n" +
+      "공격자: " + enemyLabel + " (" + enemy["enemy_id"] + ")\n" +
+      "액션: " + actionName + "\n\n" +
+      (statusResult.text || "상태이상으로 행동이 저지됐습니다.")
+    );
+  }
+
+  const result    = rollEnemyAction(enemy, actionName, bonus);
 
   var combatText = "";
 
@@ -10851,6 +10863,7 @@ function enemyAttack(parts, displayName, utterance) {
   }
 
   return (
+    (statusResult.text ? statusResult.text + "\n\n" : "") +
     "[에너미 공격]\n" +
     "공격자: " + enemyLabel  + " (" + enemy["enemy_id"] + ")\n" +
     "액션: "   + actionName  + "\n" +
@@ -10891,6 +10904,25 @@ function _fireAttackerResolvedOnEnemy(attack, damage) {
       return parts.length ? "\n\n[공격 후 패시브: " + attackerAlias + "]\n" + parts.join("\n\n") : "";
     } finally { _DEALT_TRIGGER_ACTIVE = false; }
   } catch (_e) { return ""; }
+}
+
+function _resolveEnemyStatusBlocked(enemy, attack, attackValue, statusResult) {
+  const result    = applyEnemyHpChange(enemy["enemy_id"], attackValue, false);
+  const effectOut = applyPendingAttackEffectIfHit(attack, attackValue, enemy["enemy_id"]);
+  resolvePendingAttack(attack["id"], {
+    대응종류: "상태이상으로 대응불가", 대응값: 0, 최종피해: attackValue,
+    메모: "상태이상으로 에너미 대응 행동 저지. 무대응 처리"
+  });
+  return (
+    (statusResult.text ? statusResult.text + "\n\n" : "") +
+    "[에너미 대응 불가]\n" +
+    "상태이상으로 대응하지 못했습니다.\n" +
+    "공격번호: " + attack["id"] + "\n공격값: " + attackValue + "\n최종피해: " + attackValue + "\n" +
+    "체력: " + result.before + " → " + result.after + " / " + result.maxHp +
+    _enemyPassiveBlock(result) +
+    (result.after <= 0 && result.before > 0 ? "\n\n[에너미 전투불능]" : "") + effectOut +
+    _fireAttackerResolvedOnEnemy(attack, attackValue)
+  );
 }
 
 function _resolveEnemyNoResponse(enemy, attack, attackValue) {
@@ -11032,6 +11064,11 @@ function enemyRespond(parts, displayName) {
   const attackerRef = String(attack["공격자"]).trim();
 
   if (mode === "무대응") return _resolveEnemyNoResponse(enemy, attack, attackValue);
+
+  const enemyRespondAlias   = enemyCanonicalAlias(enemy);
+  const respondStatusResult = processStatusBeforeCheck(enemyRespondAlias, KIND_RESPONSE);
+  if (respondStatusResult.blocked) return _resolveEnemyStatusBlocked(enemy, attack, attackValue, respondStatusResult);
+
   if (mode === "방어")   return _resolveEnemyDefend    (enemy, attack, attackValue);
   if (mode === "회피")   return _resolveEnemyEvade     (enemy, attack, attackValue);
 
@@ -11383,6 +11420,18 @@ function enemySkillUse(parts, displayName) {
   if (enemyCondCheck.blocked) return enemyCondCheck.text;
   var enemyConditionHeader = enemyCondCheck.headerText || "";
 
+  // ── 판정시작 상태 체크 ───────────────────────────────────────────────
+  const _skillEnemyAlias   = enemyCanonicalAlias(enemy);
+  const _skillStatusResult = processStatusBeforeCheck(_skillEnemyAlias, KIND_SKILL);
+  if (_skillStatusResult.blocked) {
+    return (
+      "[에너미 행동 불가]\n" +
+      "사용자: " + (enemy["alias"] || enemy["name"]) + " (" + enemy["enemy_id"] + ")\n" +
+      "스킬: " + String(skill["name"] || skill["skill_key"] || "").trim() + "\n\n" +
+      (_skillStatusResult.text || "상태이상으로 행동이 저지됐습니다.")
+    );
+  }
+
   // ── Roll ──────────────────────────────────────────────────────────
   var rollResult;
   try { rollResult = rollEnemySkill(enemy, skill, bonus); } catch(e) {
@@ -11479,6 +11528,7 @@ function enemySkillUse(parts, displayName) {
 
   // ── Build output ──────────────────────────────────────────────────
   return (
+    (_skillStatusResult.text ? _skillStatusResult.text + "\n\n" : "") +
     (enemyConditionHeader ? enemyConditionHeader + "\n\n" : "") +
     "【" + skillName + "】\n" +
     "사용자: " + enemyLabel + "\n" +
