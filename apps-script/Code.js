@@ -25,7 +25,8 @@ const SHEET_EQUIPMENT_DB   = "EQUIPMENT_DB";
 const SHEET_SHOP_DB        = "SHOP_DB";
 const SHEET_PARTY_DB       = "PARTY_DB";
 const SILVER_FIELD         = "은화";
-const QUICKSLOT_FIELDS     = ["퀵슬롯1", "퀵슬롯2", "퀵슬롯3"];
+const QUICKSLOT_FIELDS       = ["퀵슬롯1", "퀵슬롯2", "퀵슬롯3"];
+const EQUIP_QUICKSLOT_FIELDS = ["장비퀵슬롯1", "장비퀵슬롯2", "장비퀵슬롯3"];
 const COMMON_UNLOCK_LEVELS = [1, 2, 4, 6, 8, 12];
 const DEFAULT_FACTION = "무소속";
 const ENEMY_ACTION_FIELDS = [
@@ -541,6 +542,10 @@ function handleCommand(utterance, displayName) {
   if (command === "!퀵슬롯2")    return quickslotUseCommand(parts, displayName, 2);
   if (command === "!퀵슬롯3")    return quickslotUseCommand(parts, displayName, 3);
 
+  if (command === "!장비퀵슬롯1") return equipQuickslotSwapCommand(parts, displayName, 1);
+  if (command === "!장비퀵슬롯2") return equipQuickslotSwapCommand(parts, displayName, 2);
+  if (command === "!장비퀵슬롯3") return equipQuickslotSwapCommand(parts, displayName, 3);
+
   if (command === "!명령어목록" || command === "!도움말" || command === "!help") {
     return commandListCommand(parts);
   }
@@ -701,6 +706,7 @@ function commandListCommand(parts) {
       "  !교환 <상대> 은화 <금액>",
       "  !퀵슬롯1 / !퀵슬롯2 / !퀵슬롯3 [대상:별명]",
       "  !<아이템명>   (퀵슬롯 등록 아이템 단축 사용)",
+      "  !장비퀵슬롯1 / !장비퀵슬롯2 / !장비퀵슬롯3   (장비 퀵체인지 — 착용↔퀵슬롯 스왑)",
       "  ※ 상점 구매·퀵슬롯 등록은 웹 빌더에서",
       "",
       "[ 세션 ]",
@@ -13598,6 +13604,7 @@ function ensureEconomySheets() {
   try {
     _ensureSheetColumn(SHEET_BOT_DB, SILVER_FIELD, "현재체력");
     QUICKSLOT_FIELDS.forEach(function (c) { _ensureSheetColumn(SHEET_BOT_DB, c); });
+    EQUIP_QUICKSLOT_FIELDS.forEach(function (c) { _ensureSheetColumn(SHEET_BOT_DB, c); });
   } catch (_e) { /* 열 추가 실패는 무시 (권한/시트 부재) */ }
   try {
     var ss = _getSpreadsheet();
@@ -13837,6 +13844,77 @@ function quickslotUseCommand(parts, displayName, slotRef) {
   return "[" + itemName + " 사용]\n" + r.message;
 }
 
+// ── 장비 퀵슬롯 교체 ───────────────────────────────────────────────
+// slotIndex: 1~3. 퀵슬롯에 저장된 장비 ↔ 현재 착용 장비 스왑.
+// 무기 슬롯 교체 시 '무기교체' 상태(1회) 자동 부여.
+function equipQuickslotSwapCommand(parts, displayName, slotIndex) {
+  var self = findCharacter(displayName);
+  if (!self) return "캐릭터를 찾을 수 없습니다: " + displayName;
+  var alias = String(self["별명"] || "").trim();
+
+  var col = EQUIP_QUICKSLOT_FIELDS[slotIndex - 1];
+  var storedItem = String(self[col] || "").trim();
+  if (!storedItem) return "장비퀵슬롯" + slotIndex + "에 등록된 장비가 없습니다. 웹 캐릭터 관리에서 등록하세요.";
+
+  var itemDef = getItemByName(storedItem);
+  if (!itemDef) return "ITEM_DB에 없는 아이템입니다: " + storedItem;
+  if (String(itemDef["분류"] || "").trim() !== "장비") return "장비가 아닌 아이템입니다: " + storedItem;
+
+  var slot = String(itemDef["슬롯"] || "").trim();
+  if (!slot) return "슬롯 정보가 없는 아이템입니다: " + storedItem;
+
+  var inInv = getInventoryRows(alias).some(function (r) {
+    return String(r["아이템명"] || "").trim() === storedItem;
+  });
+  if (!inInv) return "인벤토리에 '" + storedItem + "'이(가) 없습니다.";
+
+  ensureItemSheets();
+  var eqRows = getEquipmentRows(alias);
+  var currentEq = eqRows.find(function (r) { return String(r["슬롯"]).trim() === slot; });
+  var currentItem = currentEq ? String(currentEq["아이템명"] || "").trim() : "";
+
+  // 현재 장착 장비 해제
+  if (currentEq) {
+    var sh = _getSpreadsheet().getSheetByName(SHEET_EQUIPMENT_DB);
+    var shData = sh.getDataRange().getValues();
+    var shHeaders = shData[0].map(function (h) { return String(h).trim(); });
+    var idCol = shHeaders.indexOf("id");
+    for (var i = 1; i < shData.length; i++) {
+      if (String(shData[i][idCol]).trim() === String(currentEq["id"]).trim()) { sh.deleteRow(i + 1); break; }
+    }
+    invalidateSheetCache(SHEET_EQUIPMENT_DB);
+  }
+
+  // 퀵슬롯 장비 착용
+  appendRowByHeaders(SHEET_EQUIPMENT_DB, {
+    id: _makeEqId(), 소유자: alias, 슬롯: slot, 아이템명: storedItem, 장착일: getNowText()
+  });
+  invalidateSheetCache(SHEET_EQUIPMENT_DB);
+
+  // 이전 착용 장비를 퀵슬롯으로 이동
+  ensureEconomySheets();
+  var rowInfo = findCharacterRowByAlias(alias);
+  if (!rowInfo) return "캐릭터 행을 찾을 수 없습니다: " + alias;
+  setCellByHeader(rowInfo, col, currentItem);
+
+  // 무기 슬롯 교체 시 '무기교체' 상태 부여 (택티컬 시프트 등 연계)
+  var weaponSwapLog = "";
+  if (slot === "무기") {
+    try {
+      addStatusToCharacter(alias, "무기교체", "버프", "기타", { count: 1, stackMode: "갱신" });
+      weaponSwapLog = "\n⚔ [무기교체] 상태 부여 (1회)";
+    } catch (_e) {}
+  }
+
+  _invalidateMyCharCache(alias);
+
+  var msg = "[장비 퀵체인지]\n장비퀵슬롯" + slotIndex + ": " + storedItem + " 장착";
+  if (currentItem) msg += "\n⇅ " + currentItem + " → 퀵슬롯" + slotIndex + "으로 이동";
+  else             msg += "\n(이전 착용 장비 없음)";
+  msg += weaponSwapLog;
+  return msg;
+}
+
 // =====================================================================
 // 내 캐릭터 관리 API (웹 빌더 전용)
 // doGet ?api=mychar&secret=... 로 진입. Vercel이 JWT 검증 후 호출.
@@ -13863,7 +13941,8 @@ function handleMyCharApi(e) {
     if (action === "equip")     return _myCharEquip(alias, invId);
     if (action === "unequip")   return _myCharUnequip(alias, slot || invId);
     if (action === "buy")       return _myCharBuy(alias, itemName, qty);
-    if (action === "quickslot") return _myCharSetQuickslot(alias, slotIndex, itemName);
+    if (action === "quickslot")      return _myCharSetQuickslot(alias, slotIndex, itemName);
+    if (action === "equipquickslot") return _myCharSetEquipQuickslot(alias, slotIndex, itemName);
 
     return { ok: false, error: "알 수 없는 action: " + action };
   } catch (err) {
@@ -13970,6 +14049,7 @@ function _myCharView(alias) {
   // 은화 + 퀵슬롯 (BOT_DB 열)
   var silver = Math.max(0, Math.floor(Number(character[SILVER_FIELD] || 0)));
   var quickslots = QUICKSLOT_FIELDS.map(function (f) { return String(character[f] || "").trim(); });
+  var equipQuickslots = EQUIP_QUICKSLOT_FIELDS.map(function (f) { return String(character[f] || "").trim(); });
 
   return {
     ok: true,
@@ -13985,7 +14065,8 @@ function _myCharView(alias) {
     items: view.items || [],
     equipment: view.equipment || [],
     silver: silver,
-    quickslots: quickslots
+    quickslots: quickslots,
+    equipQuickslots: equipQuickslots
   };
 }
 
@@ -14077,6 +14158,40 @@ function _myCharSetQuickslot(alias, slotIndex, itemName) {
   return Object.assign(_myCharView(alias), {
     ok: true,
     message: itemName ? ("퀵슬롯" + slotIndex + " → " + itemName) : ("퀵슬롯" + slotIndex + " 해제")
+  });
+}
+
+// 장비 퀵슬롯 지정/해제. slotIndex 1~3, itemName 빈 값이면 해제.
+function _myCharSetEquipQuickslot(alias, slotIndex, itemName) {
+  slotIndex = Math.floor(Number(slotIndex) || 0);
+  if (slotIndex < 1 || slotIndex > EQUIP_QUICKSLOT_FIELDS.length) {
+    return { ok: false, error: "장비퀵슬롯 번호는 1~" + EQUIP_QUICKSLOT_FIELDS.length + " 입니다." };
+  }
+  itemName = String(itemName || "").trim();
+
+  if (itemName) {
+    var inInv = getInventoryRows(alias).some(function (r) {
+      return String(r["아이템명"] || "").trim() === itemName;
+    });
+    if (!inInv) return { ok: false, error: "인벤토리에 없는 아이템입니다: " + itemName };
+    var def = getItemByName(itemName);
+    if (!def) return { ok: false, error: "ITEM_DB에 없는 아이템입니다: " + itemName };
+    if (String(def["분류"] || "").trim() !== "장비") {
+      return { ok: false, error: "장비퀵슬롯에는 장비만 등록할 수 있습니다: " + itemName };
+    }
+  }
+
+  ensureEconomySheets();
+  var rowInfo = findCharacterRowByAlias(alias);
+  if (!rowInfo) return { ok: false, error: "캐릭터를 찾을 수 없습니다: " + alias };
+  var col = EQUIP_QUICKSLOT_FIELDS[slotIndex - 1];
+  if (rowInfo.headers.indexOf(col) < 0) return { ok: false, error: "BOT_DB에 '" + col + "' 열이 없습니다." };
+  setCellByHeader(rowInfo, col, itemName);
+
+  _invalidateMyCharCache(alias);
+  return Object.assign(_myCharView(alias), {
+    ok: true,
+    message: itemName ? ("장비퀵슬롯" + slotIndex + " → " + itemName) : ("장비퀵슬롯" + slotIndex + " 해제")
   });
 }
 

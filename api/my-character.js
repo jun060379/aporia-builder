@@ -27,7 +27,7 @@ async function readJsonBody(req) {
   });
 }
 
-const ALLOWED_ACTIONS = new Set(['view', 'grow', 'equip', 'unequip', 'buy', 'quickslot']);
+const ALLOWED_ACTIONS = new Set(['view', 'grow', 'equip', 'unequip', 'buy', 'quickslot', 'equipquickslot']);
 
 export default async function handler(req, res) {
   try {

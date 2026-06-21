@@ -225,6 +225,16 @@ function ManageView({ data, selectedAlias, hasMultiple, onBack, onReload, onChan
     finally { setBusy(''); }
   };
 
+  const setEquipQuickslot = async (slotIndex, itemName) => {
+    setBusy('eqs:' + slotIndex); setError(''); setNotice('');
+    try {
+      const r = await callMyChar('equipquickslot', { slotIndex, itemName }, selectedAlias);
+      if (r.ok) afterWrite(r, r.message || '장비퀵슬롯 변경 완료');
+      else setError(r.error || r.message || '장비퀵슬롯 변경에 실패했습니다.');
+    } catch (e) { setError(e.message); }
+    finally { setBusy(''); }
+  };
+
   const equipBySlot = {};
   (data.equipment || []).forEach(e => { equipBySlot[e.slot] = e; });
   const gearItems = (data.items || []).filter(i => i.category === '장비');
@@ -387,6 +397,34 @@ function ManageView({ data, selectedAlias, hasMultiple, onBack, onReload, onChan
                   <option value="">— 비어 있음 —</option>
                   {consumables.map(it => <option key={it.invId} value={it.name}>{it.name} ×{it.quantity}</option>)}
                   {!hasCur && <option value={cur}>{cur} (보유 없음)</option>}
+                </select>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* 장비 퀵슬롯 */}
+      <section>
+        <SectionTitle>장비 퀵슬롯 <span className="text-[10px] text-slate-400 font-normal">(장비 퀵체인지 · !장비퀵슬롯1~3 — 착용↔슬롯 스왑)</span></SectionTitle>
+        <p className="text-[10px] text-slate-400 mb-2">장비를 등록해 두면 <code className="text-violet-600">!장비퀵슬롯N</code> 명령어로 현재 착용 장비와 즉시 교체됩니다. 무기 교체 시 <strong>무기교체</strong> 상태(1회)가 자동 부여됩니다.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {[0, 1, 2].map(i => {
+            const cur = (data.equipQuickslots || [])[i] || '';
+            const gears = (data.items || []).filter(it => it.category === '장비');
+            const hasCur = !cur || gears.some(g => g.name === cur);
+            return (
+              <div key={i} className="rounded-xl border border-violet-100 bg-violet-50/40 px-3 py-2.5">
+                <div className="text-[10px] text-violet-500 mb-1">장비퀵슬롯{i + 1}</div>
+                <select
+                  className={`${inputCls} text-xs`}
+                  value={cur}
+                  disabled={busy === 'eqs:' + (i + 1)}
+                  onChange={(e) => setEquipQuickslot(i + 1, e.target.value)}
+                >
+                  <option value="">— 비어 있음 —</option>
+                  {gears.map(it => <option key={it.invId} value={it.name}>{it.name}{it.slot ? ` (${it.slot})` : ''}</option>)}
+                  {!hasCur && cur && <option value={cur}>{cur} (보유 없음)</option>}
                 </select>
               </div>
             );
