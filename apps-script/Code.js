@@ -2123,6 +2123,12 @@ function parseTargetAndMods(tokens) {
         var next = String(tokens[i] || "").trim();
         // +2/-3 보정값, key:value 옵션이면 중단
         if (!next || /^[+\-]/.test(next) || /^[가-힣A-Za-z0-9_]+[:=]/.test(next)) break;
+        // 쉼표로 끝나는 다중 대상 누적 (예: "대상:A," 다음 "B" → "A,B")
+        if (target.endsWith(",") || target.endsWith("，")) {
+          target = target + next;
+          i++;
+          continue;
+        }
         var combined = target + " " + next;
         if (findCharacterByAlias(combined)) {
           target = combined;
@@ -2137,13 +2143,79 @@ function parseTargetAndMods(tokens) {
     }
   }
 
-  // 최종 닉네임 → 정식 별명 변환
-  if (target && target !== "자신" && target !== "대상") {
-    var char = findCharacterByAlias(target);
-    if (char) target = String(char["별명"] || target).trim();
+  // 쉼표로 구분된 개별 대상 분리
+  var rawTargets = target.split(/[,，]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+
+  // 단일 대상일 때만 닉네임 → 정식 별명 변환 (다중 대상은 resolveMultiTargets에서 처리)
+  if (rawTargets.length === 1) {
+    var t0 = rawTargets[0];
+    if (t0 && t0 !== "자신" && t0 !== "대상") {
+      var charFound = findCharacterByAlias(t0);
+      if (charFound) {
+        target = String(charFound["별명"] || t0).trim();
+        rawTargets[0] = target;
+      } else {
+        target = t0;
+      }
+    } else {
+      target = t0 || "";
+    }
+  } else if (rawTargets.length > 1) {
+    target = rawTargets[0];
   }
 
-  return { target: target, mods: mods };
+  return { target: target, mods: mods, rawTargets: rawTargets };
+}
+
+// 다중 대상 문자열 배열(rawTargets)을 정규 별명 목록으로 변환.
+// 파티명이 포함된 경우 파티 멤버 전체로 확장한다.
+function resolveMultiTargets(rawTargets) {
+  if (!rawTargets || rawTargets.length === 0) return [];
+  var resolved = [];
+  var seen = {};
+
+  rawTargets.forEach(function(t) {
+    t = String(t || "").trim();
+    if (!t) return;
+
+    if (t === "자신" || t === "대상") {
+      if (!seen[t]) { seen[t] = true; resolved.push(t); }
+      return;
+    }
+
+    // 파티명 확인 → 멤버 전체 확장
+    var members = getPartyMembers(t);
+    if (members.length > 0) {
+      members.forEach(function(m) {
+        m = String(m || "").trim();
+        if (m && !seen[m]) { seen[m] = true; resolved.push(m); }
+      });
+      return;
+    }
+
+    // 캐릭터 별명 정규화
+    var ch = findCharacterByAlias(t);
+    if (ch) {
+      var canon = String(ch["별명"] || t).trim();
+      if (!seen[canon]) { seen[canon] = true; resolved.push(canon); }
+      return;
+    }
+
+    // 에너미 (createPendingAttackFlex가 처리; 원본 문자열 유지)
+    try {
+      var enemy = resolveEnemy(t);
+      if (enemy) {
+        var ekey = String(enemy["enemy_id"] || t).trim();
+        if (!seen[ekey]) { seen[ekey] = true; resolved.push(t); }
+        return;
+      }
+    } catch(_e) {}
+
+    // 알 수 없는 대상 — 원본 보존 (호출부에서 오류 처리)
+    if (!seen[t]) { seen[t] = true; resolved.push(t); }
+  });
+
+  return resolved;
 }
 
 function statCheck(parts, displayName) {
@@ -2448,20 +2520,15 @@ function actionCheck(parts, displayName) {
 
   if (isDamage && parsed.target) {
     const attackerAlias = alias;
-
-    const pending = createPendingAttackFlex(
-      attackerAlias,
-      parsed.target,
-      "액션",
-      actionName,
-      sum
+    const targets = resolveMultiTargets(
+      parsed.rawTargets && parsed.rawTargets.length > 0 ? parsed.rawTargets : [parsed.target]
     );
-
-    if (pending.ok) {
-      combatText = "\n\n" + makeCombatChoiceTextFlex(pending);
-    } else {
-      combatText = "\n\n" + pending.text;
-    }
+    const combatTexts = [];
+    targets.forEach(function(tgt) {
+      const pending = createPendingAttackFlex(attackerAlias, tgt, "액션", actionName, sum);
+      combatTexts.push(pending.ok ? makeCombatChoiceTextFlex(pending) : pending.text);
+    });
+    if (combatTexts.length > 0) combatText = "\n\n" + combatTexts.join("\n\n");
   }
 
   const judged = isDamage ? null : getDifficultyResultText(sum, difficulty);
@@ -2602,19 +2669,16 @@ function powerCheck(parts, type, displayName) {
   let combatText = "";
 
   if (type === "화력" && targetAlias) {
-    const pending = createPendingAttackFlex(
-      alias,
-      targetAlias,
-      KIND_POWER,
-      "화력 " + rank,
-      finalValue
+    const targets = resolveMultiTargets(
+      targetParsed.rawTargets && targetParsed.rawTargets.length > 0
+        ? targetParsed.rawTargets : [targetAlias]
     );
-
-    if (pending.ok) {
-      combatText = "\n\n" + makeCombatChoiceTextFlex(pending);
-    } else {
-      combatText = "\n\n" + pending.text;
-    }
+    const combatTexts = [];
+    targets.forEach(function(tgt) {
+      const pending = createPendingAttackFlex(alias, tgt, KIND_POWER, "화력 " + rank, finalValue);
+      combatTexts.push(pending.ok ? makeCombatChoiceTextFlex(pending) : pending.text);
+    });
+    if (combatTexts.length > 0) combatText = "\n\n" + combatTexts.join("\n\n");
   }
 
   // summary: 상태 처리(패시브 제외), detail: 패시브 포함 전체
@@ -3398,21 +3462,27 @@ function safeEvalFormula(formula, variables) {
 
 // ── TASK-12/13: 스킬 효과 처리 분기 헬퍼 ──────────────────────────────
 // skillUse / commonSkillUseCommand 양쪽에서 동일하게 사용.
-// opts = { rawEffectText, skillForEffects, alias, targetAlias, finalValue, type }
+// opts = { rawEffectText, skillForEffects, alias, targetAlias, rawTargets, finalValue, type }
+// rawTargets(선택): 다중 대상 배열. 미지정 시 targetAlias 단일 대상으로 동작.
 // 성공: { ok:true, pendingId, healingDetailText, combatDetailText,
 //                  interferenceDetailText, effectDetailText, effectSummary }
 // 실패: { ok:false, errorText }
 function _buildSkillEffectResult(opts) {
   const rawEffectText  = opts.rawEffectText  || "";
-  const skillForEffects = opts.skillForEffects;   // { 스킬명, 효과, ... }
+  const skillForEffects = opts.skillForEffects;
   const alias          = opts.alias;
   const targetAlias    = opts.targetAlias    || "";
   const finalValue     = opts.finalValue;
   const type           = opts.type           || "";
   const skillName      = String((skillForEffects && skillForEffects["스킬명"]) || "").trim();
 
-  const isTargetedAttack      = ATTACK_SKILL_TYPES.includes(type) && targetAlias;
-  const isTargetedInterference = type === "간섭" && targetAlias;
+  // 다중 대상 해소
+  const _rawTargets = opts.rawTargets && opts.rawTargets.length > 0
+    ? opts.rawTargets : (targetAlias ? [targetAlias] : []);
+  const targets = resolveMultiTargets(_rawTargets);
+
+  const isTargetedAttack      = ATTACK_SKILL_TYPES.includes(type) && targets.length > 0;
+  const isTargetedInterference = type === "간섭" && targets.length > 0;
 
   let pendingId            = "";
   let healingDetailText    = "";
@@ -3423,20 +3493,34 @@ function _buildSkillEffectResult(opts) {
 
   // ── 치유/재생 ──
   if (type === "치유" || type === "재생") {
-    const healTarget = targetAlias || alias;
-    const healResult = applyHealingToCharacter(healTarget, finalValue);
-    healingDetailText = "\n\n" + healResult.text;
+    const healTargets = targets.length > 0 ? targets : [targetAlias || alias];
+    const healTexts = [];
+    healTargets.forEach(function(ht) {
+      const healResult = applyHealingToCharacter(ht || alias, finalValue);
+      healTexts.push(healResult.text);
+    });
+    healingDetailText = "\n\n" + healTexts.join("\n\n");
     effectSummary = rawEffectText ? effectSummary : "회복 적용";
   }
 
   // ── 화력 대상 공격 → 공격 대기 ──
   if (isTargetedAttack) {
-    const pending = createPendingAttackFlex(alias, targetAlias, KIND_SKILL, skillName, finalValue);
+    const pendingIds = [];
+    const combatTexts = [];
+    targets.forEach(function(tgt) {
+      const pending = createPendingAttackFlex(alias, tgt, KIND_SKILL, skillName, finalValue);
+      if (pending.ok) {
+        pendingIds.push(pending.id);
+        combatTexts.push(makeCombatChoiceTextFlex(pending));
+      } else {
+        combatTexts.push((targets.length > 1 ? "[" + tgt + "] " : "") + (pending.text || "공격 대기 생성 실패"));
+      }
+    });
 
-    if (pending.ok) {
-      pendingId = pending.id;
-      combatDetailText = "\n\n" + makeCombatChoiceTextFlex(pending);
+    pendingId = pendingIds.join(", ");
+    combatDetailText = combatTexts.length > 0 ? "\n\n" + combatTexts.join("\n\n") : "";
 
+    if (pendingIds.length > 0) {
       if (rawEffectText) {
         effectSummary    = "맞게 될 시 " + summarizeSkillEffects(rawEffectText);
         effectDetailText =
@@ -3450,43 +3534,54 @@ function _buildSkillEffectResult(opts) {
         effectSummary = "없음";
       }
     } else {
-      combatDetailText = "\n\n" + pending.text;
-      effectSummary    = "공격 대기 생성 실패";
+      effectSummary = "공격 대기 생성 실패";
     }
 
   // ── 간섭 대상 → 저항 판정 후 효과 처리 ──
   } else if (isTargetedInterference) {
-    let resistance;
-    try {
-      resistance = rollResistanceForStatus(targetAlias, finalValue, []);
-    } catch (e) {
-      return { ok: false, errorText: "[간섭 저항 오류]\n" + skillName + "\n\n오류: " + e.message };
+    const interfTexts = [];
+    const effectTexts = [];
+    let allResisted = true;
+
+    for (var _ti = 0; _ti < targets.length; _ti++) {
+      var _tgt = targets[_ti];
+      var _resistance;
+      try {
+        _resistance = rollResistanceForStatus(_tgt, finalValue, []);
+      } catch (e) {
+        return { ok: false, errorText: "[간섭 저항 오류]\n" + skillName + "\n\n오류: " + e.message };
+      }
+      var _label = targets.length > 1 ? "[" + _tgt + "]\n" : "";
+      interfTexts.push(_label + _resistance.text + "\n결과: " + (_resistance.success ? "간섭 무효" : "간섭 적중"));
+
+      if (!_resistance.success) {
+        allResisted = false;
+        try {
+          var _processed = processSkillEffects(rawEffectText, {
+            userAlias: alias, targetAlias: _tgt, finalValue: finalValue, skillName: skillName,
+            skill: skillForEffects, resistanceMode: RESIST_NONE
+          });
+          if (_processed) effectTexts.push(_processed);
+        } catch (e) {
+          return {
+            ok: false,
+            errorText: "[간섭 효과 처리 오류]\n" + skillName + "\n\n오류: " + e.message +
+                       "\n\n효과:\n```" + rawEffectText + "```"
+          };
+        }
+      }
     }
 
-    interferenceDetailText =
-      "\n\n[간섭 저항]\n" + resistance.text + "\n\n" +
-      "결과: " + (resistance.success ? "간섭 무효" : "간섭 적중");
+    interferenceDetailText = "\n\n[간섭 저항]\n" + interfTexts.join("\n\n");
 
-    if (resistance.success) {
+    if (allResisted) {
       effectSummary    = rawEffectText ? "저항 성공으로 무효" : "간섭 무효";
       effectDetailText = rawEffectText
         ? "\n\n[스킬 효과 무효]\n대상이 간섭 저항에 성공하여 효과가 발동하지 않습니다."
         : "";
     } else {
-      try {
-        const processed = processSkillEffects(rawEffectText, {
-          userAlias: alias, targetAlias, finalValue, skillName,
-          skill: skillForEffects, resistanceMode: RESIST_NONE
-        });
-        effectDetailText = processed;
-        effectSummary    = processed ? "적용됨 / " + summarizeSkillEffects(rawEffectText) : "없음";
-      } catch (e) {
-        return {
-          ok: false,
-          errorText: "[간섭 효과 처리 오류]\n" + skillName + "\n\n오류: " + e.message +
-                     "\n\n효과:\n```" + rawEffectText + "```"
-        };
-      }
+      effectDetailText = effectTexts.join("\n\n");
+      effectSummary    = effectTexts.length > 0 ? "적용됨 / " + summarizeSkillEffects(rawEffectText) : "없음";
     }
 
   // ── 그 외 (강화/방호/특수/자가치유 등) ──
@@ -3814,7 +3909,8 @@ function skillUse(parts, displayName) {
 
   const _efx = _buildSkillEffectResult({
     rawEffectText, skillForEffects: skill,
-    alias, targetAlias, finalValue, type
+    alias, targetAlias, rawTargets: targetParsed.rawTargets || [],
+    finalValue, type
   });
   if (!_efx.ok) return _efx.errorText;
 
@@ -3853,11 +3949,15 @@ function skillUse(parts, displayName) {
     (condDetailMult !== 1 ? "세부조건 배율: ×" + condDetailMult + "\n" : "") +
     (condDetailBonus !== 0 ? "세부조건 보정: " + formatSigned(condDetailBonus) + "\n" : "");
 
+  const displayTargetAlias = (targetParsed.rawTargets && targetParsed.rawTargets.length > 1)
+    ? targetParsed.rawTargets.join(", ")
+    : targetAlias;
+
   const summary =
     formatSkillSummaryBlock(
       skill,
       alias,
-      targetAlias,
+      displayTargetAlias,
       rank,
       rankValue,
       finalValue,
@@ -8313,11 +8413,20 @@ function formatSkillSummaryBlock(skill, alias, targetAlias, rank, rankValue, fin
   }
 
   if (pendingId) {
-    text +=
-      "\n\n" +
-      "공격번호: " + pendingId + "\n\n" +
-      "대응: !대응 방어/회피/맞대응/무대응\n" +
-      "지정 대응: !대응 " + pendingId + " 방어/회피/맞대응/무대응";
+    var _pids = String(pendingId).split(",").map(function(s) { return s.trim(); }).filter(Boolean);
+    if (_pids.length === 1) {
+      text +=
+        "\n\n" +
+        "공격번호: " + _pids[0] + "\n\n" +
+        "대응: !대응 방어/회피/맞대응/무대응\n" +
+        "지정 대응: !대응 " + _pids[0] + " 방어/회피/맞대응/무대응";
+    } else {
+      text += "\n\n공격번호: " + _pids.join(", ");
+      text += "\n\n대응 (각 대상별):\n";
+      text += _pids.map(function(pid) {
+        return "  !대응 " + pid + " 방어/회피/맞대응/무대응";
+      }).join("\n");
+    }
   }
 
   return text;
@@ -11200,17 +11309,27 @@ function enemySkillUse(parts, displayName) {
   }
 
   // Parse 대상: and bonus from remaining tokens
-  var targetRef   = "";
-  var bonus       = 0;
+  var targetRef     = "";
+  var _rawTargetStr = "";
+  var bonus         = 0;
 
   parts.slice(3).forEach(function(t) {
     t = String(t || "").trim();
     if (t.startsWith("대상:") || t.startsWith("대상=")) {
-      targetRef = t.replace(/^대상[:=]/, "").trim();
+      _rawTargetStr = t.replace(/^대상[:=]/, "").trim();
+    } else if (_rawTargetStr && (_rawTargetStr.endsWith(",") || _rawTargetStr.endsWith("，")) && !/^[+\-]/.test(t) && !/^[가-힣A-Za-z0-9_]+[:=]/.test(t)) {
+      // 쉼표 뒤 이어지는 추가 대상 토큰 누적
+      _rawTargetStr = _rawTargetStr + t;
     } else if (/^[+\-]?\d+$/.test(t)) {
       bonus += Number(t);
     }
   });
+
+  // 쉼표로 구분된 대상 목록 파싱 (다중 대상 지원)
+  var _enemyRawTargets = _rawTargetStr
+    ? _rawTargetStr.split(/[,，]+/).map(function(s) { return s.trim(); }).filter(Boolean)
+    : [];
+  targetRef = _enemyRawTargets[0] || "";
 
   const targetMode = String(skill["target_mode"] || "none").trim().toLowerCase();
   if (targetMode === "required" && !targetRef) {
@@ -11222,28 +11341,36 @@ function enemySkillUse(parts, displayName) {
   }
 
   // ── Resolve target ────────────────────────────────────────────────
+  // 파티명이거나 다중 대상이면 resolveMultiTargets로 먼저 확인.
+  // 단일 대상인 경우에만 PC/에너미 구별 검사를 수행한다.
   var targetIsPC     = false;
   var targetIsEnemy  = false;
   var targetEnemyObj = null;
 
   if (targetRef) {
-    const pcChar   = findCharacterByAlias(targetRef);
-    var   enemyObj = null;
-    try { enemyObj = resolveEnemy(targetRef); } catch(e2) {}
+    // 파티 확인: 파티명이면 유효한 다중 대상으로 취급하고 단일 유효성 검사를 건너뜀
+    var _isPartyTarget = getPartyMembers(targetRef).length > 0;
+    var _isMultiTarget = _enemyRawTargets.length > 1 || _isPartyTarget;
 
-    if (pcChar && enemyObj) {
-      return (
-        "[에너미 스킬 오류]\n" +
-        "대상 지정이 애매합니다. 캐릭터명 또는 에너미 ID를 정확히 입력해주세요.\n" +
-        "대상: " + targetRef
-      );
+    if (!_isMultiTarget) {
+      const pcChar   = findCharacterByAlias(targetRef);
+      var   enemyObj = null;
+      try { enemyObj = resolveEnemy(targetRef); } catch(e2) {}
+
+      if (pcChar && enemyObj) {
+        return (
+          "[에너미 스킬 오류]\n" +
+          "대상 지정이 애매합니다. 캐릭터명 또는 에너미 ID를 정확히 입력해주세요.\n" +
+          "대상: " + targetRef
+        );
+      }
+      if (!pcChar && !enemyObj) {
+        return "[에너미 스킬 오류]\n대상을 찾을 수 없습니다: " + targetRef;
+      }
+      targetIsPC     = !!pcChar;
+      targetIsEnemy  = !!enemyObj;
+      targetEnemyObj = enemyObj;
     }
-    if (!pcChar && !enemyObj) {
-      return "[에너미 스킬 오류]\n대상을 찾을 수 없습니다: " + targetRef;
-    }
-    targetIsPC     = !!pcChar;
-    targetIsEnemy  = !!enemyObj;
-    targetEnemyObj = enemyObj;
   }
 
   // 조건 자동 판정 (에너미는 캐릭터 컨텍스트 없음 → 자유텍스트 위주)
@@ -11267,7 +11394,12 @@ function enemySkillUse(parts, displayName) {
   const rank       = rollResult.rank;
   const effectText = String(skill["effect"]   || "").trim();
   const enemyLabel = enemy["alias"] || enemy["name"];
-  const targetLine = targetRef ? "대상: " + targetRef + "\n" : "";
+  // 다중 대상 해소 (파티명 확장 포함)
+  const _resolvedEnemyTargets = _enemyRawTargets.length > 0
+    ? resolveMultiTargets(_enemyRawTargets) : [];
+  const _targetDisplayStr = _resolvedEnemyTargets.length > 0
+    ? _resolvedEnemyTargets.join(", ") : targetRef;
+  const targetLine = _targetDisplayStr ? "대상: " + _targetDisplayStr + "\n" : "";
   const diceDetail = rollResult.diceLogs.length > 0
     ? rollResult.diceLogs.join("\n") + "\n"
     : "";
@@ -11279,19 +11411,24 @@ function enemySkillUse(parts, displayName) {
   var healText   = "";
 
   // ── Combat (화력) ─────────────────────────────────────────────────
-  if (category === "화력" && targetRef) {
+  if (category === "화력" && _resolvedEnemyTargets.length > 0) {
+    const combatParts = [];
+    _resolvedEnemyTargets.forEach(function(tgt) {
+      const pending = createPendingAttackFlex(
+        enemy["enemy_id"], tgt, KIND_ENEMY_SKILL, skillName, rollResult.total
+      );
+      combatParts.push(pending.ok
+        ? makeCombatChoiceTextFlex(pending)
+        : "공격 대기 생성 실패: " + (pending.text || ""));
+    });
+    combatText = "\n" + combatParts.join("\n\n");
+  } else if (category === "화력" && targetRef) {
     const pending = createPendingAttackFlex(
-      enemy["enemy_id"],
-      targetRef,
-      KIND_ENEMY_SKILL,
-      skillName,
-      rollResult.total
+      enemy["enemy_id"], targetRef, KIND_ENEMY_SKILL, skillName, rollResult.total
     );
-    if (pending.ok) {
-      combatText = "\n" + makeCombatChoiceTextFlex(pending);
-    } else {
-      combatText = "\n공격 대기 생성 실패: " + (pending.text || "");
-    }
+    combatText = pending.ok
+      ? "\n" + makeCombatChoiceTextFlex(pending)
+      : "\n공격 대기 생성 실패: " + (pending.text || "");
   }
 
   // ── Heal (치유/재생) ──────────────────────────────────────────────
@@ -12630,7 +12767,9 @@ function commonSkillUseCommand(parts, displayName) {
 
   const _efx = _buildSkillEffectResult({
     rawEffectText, skillForEffects,
-    alias, targetAlias: effectiveTarget, finalValue, type
+    alias, targetAlias: effectiveTarget,
+    rawTargets: targetSpec === "none" ? [] : (targetParsed.rawTargets || []),
+    finalValue, type
   });
   if (!_efx.ok) return _efx.errorText;
 
