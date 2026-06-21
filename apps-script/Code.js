@@ -5386,7 +5386,7 @@ function rollPowerValueForResponse(type, rank, mods) {
 // 대응에 쓰인 스킬(개인/공용)의 효과를 적용한다.
 // response: _rollResponseSkillByMode가 돌려준 객체. {kind:"스킬", source, isCommon, name, skill, value}
 // userAlias: 효과 사용자(자신)
-// targetAlias: 효과 대상(방어/회피/저항=자신, 맞대응=공격자)
+// targetAlias: 효과 대상(방어/회피/저항/맞대응 모두 공격자)
 // resistanceMode: RESIST_NONE | RESIST_NORMAL | RESIST_FORCE_FAIL
 function _applyResponseSkillEffects(response, userAlias, targetAlias, resistanceMode) {
   if (!response || response.kind !== "스킬" || !response.skill) return "";
@@ -5761,7 +5761,7 @@ function _resolveCombatDefend(attack, character, rest, selfAlias, attackValue, a
     if (foldState.amount !== 0) foldNote = "\n피해 보정: " + formatSigned(foldState.amount);
   }
 
-  const defenseSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, RESIST_NONE);
+  const defenseSkillEffectText = _applyResponseSkillEffects(response, selfAlias, attackerAlias, RESIST_NONE);
   const defenseSkillBlock = defenseSkillEffectText
     ? "\n\n[방어 스킬 효과]\n" + response.name + "\n" + defenseSkillEffectText
     : "";
@@ -5833,7 +5833,7 @@ function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, at
     if (foldState.amount !== 0) foldNote = "\n피해 보정: " + formatSigned(foldState.amount);
   }
 
-  const evadeSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, RESIST_NONE);
+  const evadeSkillEffectText = _applyResponseSkillEffects(response, selfAlias, attackerAlias, RESIST_NONE);
   const evadeSkillBlock = evadeSkillEffectText
     ? "\n\n[회피 스킬 효과]\n" + response.name + "\n" + evadeSkillEffectText
     : "";
@@ -6022,7 +6022,7 @@ function _resolveCombatResist(attack, character, rest, selfAlias, attackValue, a
 
   const resistValue   = response.value;
   const methodLine    = "저항 방식: " + (response.source === "공용" ? "공용 스킬" : "개인 스킬") + " - " + response.name + "\n";
-  const resistSkillEffectText = _applyResponseSkillEffects(response, selfAlias, selfAlias, RESIST_NONE);
+  const resistSkillEffectText = _applyResponseSkillEffects(response, selfAlias, attackerAlias, RESIST_NONE);
   const resistSkillBlock = resistSkillEffectText
     ? "\n\n[저항 스킬 효과]\n" + response.name + "\n" + resistSkillEffectText
     : "";
