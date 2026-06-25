@@ -9363,6 +9363,12 @@ function finishSession(parts, displayName) {
   var message = targeted ? "" : rest.join(" ").trim();
   if (!message) message = "...다음 시간에 계속.";
 
+  // 상태/스택 초기화를 먼저 실행한 뒤 패시브 효과 발동
+  // (패시브가 먼저 실행되면 clearTemporaryStacks가 패시브가 쓴 값을 0으로 덮어쓰는 버그 발생)
+  var statusResult = keepStatus ? { cleared: 0, kept: 0 } : clearTemporaryStatuses(aliasSet);
+  var stackResult  = keepStack  ? { cleared: 0, kept: 0 } : clearTemporaryStacks(aliasSet);
+  var hpResult     = _finRestoreHp(aliasSet);
+
   // 세션종료 패시브 효과 — aliasSet이 지정된 경우 해당 캐릭터만, 없으면 전체
   var passiveLogs = [];
   try {
@@ -9377,10 +9383,6 @@ function finishSession(parts, displayName) {
   } catch (e) {
     // 패시브 시트 없거나 오류 → 무시.
   }
-
-  var statusResult = keepStatus ? { cleared: 0, kept: 0 } : clearTemporaryStatuses(aliasSet);
-  var stackResult  = keepStack  ? { cleared: 0, kept: 0 } : clearTemporaryStacks(aliasSet);
-  var hpResult     = _finRestoreHp(aliasSet);
 
   // ── 접힌 요약: 종료 메시지만 ──
   var summaryLines = ["[극/세션 종료]"];
