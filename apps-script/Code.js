@@ -8062,6 +8062,88 @@ function processSkillEffects(effectText, context) {
       return;
     }
 
+    // 아이템지급 <대상> <아이템명> [수량:N]
+    if (command === "아이템지급") {
+      if (tokens.length < 3) {
+        throw new Error("아이템지급 효과 형식 오류: " + line);
+      }
+
+      const targetAlias = resolveEffectTarget(tokens[1], context);
+      const itemName = tokens[2];
+      const opts = parseEffectOptions(tokens.slice(3));
+      const qty = Math.max(1, Math.floor(Number(opts["수량"] || 1)));
+
+      if (!targetAlias) {
+        logs.push(
+          "[효과 무효]\n" +
+          "효과: 아이템지급 " + itemName + "\n" +
+          "이유: 대상이 지정되지 않았습니다."
+        );
+        return;
+      }
+
+      try {
+        var newQty = _addToInventory(targetAlias, itemName, qty);
+        logs.push(
+          "[아이템 지급]\n" +
+          "대상: " + targetAlias + "\n" +
+          "아이템: " + itemName + " ×" + qty + "\n" +
+          "보유 수량: " + newQty
+        );
+      } catch (e) {
+        logs.push("[아이템 지급 실패]\n아이템: " + itemName + "\n이유: " + String(e.message || e));
+      }
+      return;
+    }
+
+    // 쿨타임초기화 <대상> <스킬명|전체>
+    if (command === "쿨타임초기화") {
+      if (tokens.length < 3) {
+        throw new Error("쿨타임초기화 효과 형식 오류: " + line);
+      }
+
+      const targetAlias = resolveEffectTarget(tokens[1], context);
+      const skillTarget = tokens[2];
+
+      if (!targetAlias) {
+        logs.push(
+          "[효과 무효]\n" +
+          "효과: 쿨타임초기화 " + skillTarget + "\n" +
+          "이유: 대상이 지정되지 않았습니다."
+        );
+        return;
+      }
+
+      if (skillTarget === "전체") {
+        var cdRows = getActiveStatusRows(targetAlias).filter(function(r) {
+          return String(r["분류"] || "").trim() === COST_COOLDOWN_CAT &&
+                 String(r["효과코드"] || "").trim() === COST_COOLDOWN_CODE;
+        });
+        if (cdRows.length === 0) {
+          logs.push("[쿨타임 초기화]\n대상: " + targetAlias + "\n초기화된 쿨타임 없음");
+        } else {
+          var cdNames = [];
+          cdRows.forEach(function(r) {
+            updateRowById(SHEET_STATUS_DB, "id", r["id"], {
+              상태: "REMOVED",
+              처리일: getNowText(),
+              메모: "쿨타임초기화"
+            });
+            cdNames.push(String(r["상태명"] || "").replace(/^쿨타임_/, ""));
+          });
+          logs.push(
+            "[쿨타임 초기화]\n" +
+            "대상: " + targetAlias + "\n" +
+            "초기화: " + cdNames.join(", ") + " (" + cdRows.length + "개)"
+          );
+        }
+      } else {
+        logs.push(removeStatusFromCharacter(targetAlias, _cooldownStatusName(skillTarget)));
+        logs.push("[쿨타임 초기화] " + targetAlias + " — " + skillTarget);
+      }
+      return;
+    }
+
     throw new Error("알 수 없는 효과 명령입니다: " + command);
   });
 
