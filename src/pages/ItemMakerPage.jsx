@@ -11,13 +11,13 @@ const SLOTS = ['무기', '방어구', '장신구1', '장신구2'];
 const EQUIP_RANKS = ['', 'F', 'E', 'D', 'C', 'B', 'A', 'S', 'U', 'EX'];
 
 const EFFECT_KINDS = [
-  { id: '회복',     label: '회복',       needsTarget: false,       note: '대상 HP 회복 (소모품)' },
-  { id: '스탯보정', label: '스탯 보정',  needsTarget: 'stat',      note: '판정 시 스탯 보정 (복수 선택 가능)' },
-  { id: '액션보정', label: '액션 보정',  needsTarget: 'action',    note: '판정 시 액션 보정 (복수 선택 가능)' },
-  { id: '계열보정', label: '계열 보정',  needsTarget: 'series',    note: '판정 시 스킬 계열 보정 (복수 선택 가능)' },
-  { id: '계통보정', label: '계통 보정',  needsTarget: 'tradition', note: '판정 시 스킬 계통 보정 (복수 선택 가능)' },
-  { id: '피해감소', label: '피해 감소',  needsTarget: false,       note: '받는 피해 감소 (장비/소모품)' },
-  { id: '없음',     label: '효과 없음',  needsTarget: false,       note: '효과코드 없음' },
+  { id: '회복',     label: '회복',       needsTarget: false,       note: '대상 HP 회복 (소모품)',                  standalone: true  },
+  { id: '스탯보정', label: '스탯 보정',  needsTarget: 'stat',      note: '판정 시 스탯 보정 (복수 선택 가능)',     standalone: false },
+  { id: '액션보정', label: '액션 보정',  needsTarget: 'action',    note: '판정 시 액션 보정 (복수 선택 가능)',     standalone: false },
+  { id: '계열보정', label: '계열 보정',  needsTarget: 'series',    note: '판정 시 스킬 계열 보정 (복수 선택 가능)', standalone: false },
+  { id: '계통보정', label: '계통 보정',  needsTarget: 'tradition', note: '판정 시 스킬 계통 보정 (복수 선택 가능)', standalone: false },
+  { id: '피해감소', label: '피해 감소',  needsTarget: false,       note: '받는 피해 감소 (장비/소모품)',           standalone: true  },
+  { id: '없음',     label: '효과 없음',  needsTarget: false,       note: '효과코드 없음',                         standalone: true  },
 ];
 
 const STAT_NAMES      = ['근력', '민첩', '내구', '감각', '지능'];
@@ -27,10 +27,11 @@ const TRADITION_NAMES = ['마술', '주술', '신성', '마법', '혈계', '요�
 
 const ITEM_HEADERS = ['id', '이름', '분류', '슬롯', '랭크', '효과코드', '수치', '횟수', '설명', '메모'];
 
+const EMPTY_EFFECT = { effectKind: '회복', effectTarget: '', 수치: '' };
 const EMPTY = {
   이름: '', 분류: '소모품', 슬롯: '무기', 랭크: '',
-  effectKind: '회복', effectTarget: '',
-  수치: '', 횟수: '', 설명: '', 메모: '',
+  effects: [{ ...EMPTY_EFFECT }],
+  횟수: '', 설명: '', 메모: '',
 };
 
 const inputCls  = 'w-full bg-white border border-slate-200 text-slate-900 rounded-lg px-3 py-1.5 text-sm focus:border-violet-400 focus:ring-1 focus:ring-violet-400/20 outline-none placeholder:text-slate-400 transition-colors';
@@ -44,20 +45,63 @@ function targetOptions(needsTarget) {
   return [];
 }
 
-// effectTarget은 콤마로 구분된 복수 대상 문자열. 예: "화력,간섭".
-function targetListOf(row) {
-  return String(row.effectTarget || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
+// 단일 효과 항목의 effectTarget 콤마 파싱
+function targetListOf(eff) {
+  return String(eff.effectTarget || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
 }
 
-function buildEffectCode(row) {
-  const kind = EFFECT_KINDS.find(k => k.id === row.effectKind);
+// 단일 효과 항목에서 효과코드 문자열 생성
+function buildEffectCode(eff) {
+  const kind = EFFECT_KINDS.find(k => k.id === eff.effectKind);
   if (!kind || kind.id === '없음') return '';
   if (kind.needsTarget) {
-    const targets = targetListOf(row);
+    const targets = targetListOf(eff);
     if (!targets.length) return '';
     return `${kind.id}:${targets.join(',')}`;
   }
   return kind.id;
+}
+
+// 다중 효과 배열에서 효과코드(|구분)와 수치(|구분) 생성
+function buildMultiEffect(effects) {
+  const valid = effects.filter(e => {
+    const kind = EFFECT_KINDS.find(k => k.id === e.effectKind);
+    if (!kind || kind.id === '없음') return false;
+    if (kind.needsTarget && !targetListOf(e).length) return false;
+    return true;
+  });
+  const codes  = valid.map(e => buildEffectCode(e));
+  const values = valid.map(e => String(e.수치 || '').trim());
+  return {
+    effectCode: codes.join('|'),
+    suChi: valid.length > 1 ? values.join('|') : (values[0] ?? ''),
+  };
+}
+
+// 기존 아이템 효과코드+수치를 effects 배열로 파싱 (불러오기용)
+function parseEffectsFromItem(effCode, suChiStr) {
+  // 이능보정 → 계열보정 정규화
+  effCode = String(effCode || '').split('|')
+    .map(s => s.trim().replace(/^이능보정/, '계열보정'))
+    .join('|');
+
+  const codeEntries  = effCode.split('|').map(s => s.trim()).filter(Boolean);
+  const valueEntries = String(suChiStr || '').includes('|')
+    ? String(suChiStr).split('|').map(s => s.trim())
+    : codeEntries.map(() => String(suChiStr || ''));
+
+  if (!codeEntries.length) return [{ effectKind: '없음', effectTarget: '', 수치: '' }];
+
+  return codeEntries.map((code, i) => {
+    const ek = EFFECT_KINDS.find(k => code === k.id || code.startsWith(k.id + ':'))
+               || EFFECT_KINDS.find(k => k.id === '없음');
+    const tgt = code.includes(':') ? code.slice(code.indexOf(':') + 1).trim() : '';
+    return {
+      effectKind: ek.id,
+      effectTarget: tgt,
+      수치: valueEntries[i] ?? valueEntries[0] ?? '',
+    };
+  });
 }
 
 // ── 메인 ──────────────────────────────────────────────────────
@@ -73,9 +117,15 @@ function ItemMaker() {
   const [shopPrice, setShopPrice] = useState('');
   const [shopMsg, setShopMsg] = useState('');
 
-  const kind = EFFECT_KINDS.find(k => k.id === row.effectKind) || EFFECT_KINDS[0];
-  const effectCode = buildEffectCode(row);
   const field = (k) => (e) => setRow(r => ({ ...r, [k]: e.target.value }));
+
+  const { effectCode, suChi } = useMemo(() => buildMultiEffect(row.effects), [row.effects]);
+
+  // 보정 효과만 스택 가능 (회복/피해감소/없음은 단독)
+  const allBonus = row.effects.every(e => {
+    const k = EFFECT_KINDS.find(x => x.id === e.effectKind);
+    return k && !k.standalone;
+  });
 
   const loadItems = () => {
     setItemsLoading(true);
@@ -90,10 +140,15 @@ function ItemMaker() {
   const errors = useMemo(() => {
     const errs = [];
     if (!row.이름.trim()) errs.push('이름은 필수입니다.');
-    if (kind.needsTarget && !targetListOf(row).length) errs.push('효과 대상을 1개 이상 선택하세요.');
     if (row.분류 === '장비' && !row.슬롯) errs.push('장비는 슬롯이 필요합니다.');
+    row.effects.forEach((e, i) => {
+      const kind = EFFECT_KINDS.find(k => k.id === e.effectKind);
+      if (kind && kind.needsTarget && !targetListOf(e).length) {
+        errs.push(`효과 ${i + 1}: 대상을 1개 이상 선택하세요.`);
+      }
+    });
     return errs;
-  }, [row, kind]);
+  }, [row]);
 
   const tsv = useMemo(() => {
     const obj = {
@@ -103,13 +158,13 @@ function ItemMaker() {
       슬롯: row.분류 === '장비' ? row.슬롯 : '',
       랭크: row.분류 === '장비' ? row.랭크 : '',
       효과코드: effectCode,
-      수치: row.수치,
+      수치: suChi,
       횟수: row.횟수,
       설명: row.설명,
       메모: row.메모,
     };
     return ITEM_HEADERS.map(h => String(obj[h] ?? '').replace(/\t/g, ' ').replace(/\r?\n/g, ' ')).join('\t');
-  }, [row, effectCode]);
+  }, [row, effectCode, suChi]);
 
   const payload = () => ({
     이름: row.이름.trim(),
@@ -117,7 +172,7 @@ function ItemMaker() {
     슬롯: row.분류 === '장비' ? row.슬롯 : '',
     랭크: row.분류 === '장비' ? row.랭크 : '',
     효과코드: effectCode,
-    수치: row.수치,
+    수치: suChi,
     횟수: row.횟수,
     설명: row.설명,
     메모: row.메모,
@@ -179,20 +234,30 @@ function ItemMaker() {
   }
 
   function editExisting(it) {
-    // 구데이터 "이능보정:..." → "계열보정:..." 로 정규화.
-    let eff = String(it.effect || '');
-    if (eff.startsWith('이능보정')) eff = '계열보정' + eff.slice('이능보정'.length);
-    const ek = EFFECT_KINDS.find(k => eff.startsWith(k.id)) || EFFECT_KINDS.find(k => k.id === '없음');
-    const tgt = eff.includes(':') ? eff.slice(eff.indexOf(':') + 1).trim() : '';
+    const effects = parseEffectsFromItem(it.effect, it.value);
     setRow({
       이름: it.name, 분류: it.category || '소모품', 슬롯: it.slot || '무기', 랭크: it.rank || '',
-      effectKind: ek.id === '없음' && !eff ? '없음' : (ek.id || '없음'),
-      effectTarget: tgt,
-      수치: it.value === '' ? '' : String(it.value),
+      effects,
       횟수: it.count === '' ? '' : String(it.count),
       설명: it.description || '', 메모: it.memo || '',
     });
     setNotice(''); setError('');
+  }
+
+  function updateEffect(idx, patch) {
+    setRow(r => {
+      const newEffects = [...r.effects];
+      newEffects[idx] = { ...newEffects[idx], ...patch };
+      return { ...r, effects: newEffects };
+    });
+  }
+
+  function addEffect() {
+    setRow(r => ({ ...r, effects: [...r.effects, { effectKind: '액션보정', effectTarget: '', 수치: '' }] }));
+  }
+
+  function removeEffect(idx) {
+    setRow(r => ({ ...r, effects: r.effects.filter((_, i) => i !== idx) }));
   }
 
   return (
@@ -236,74 +301,128 @@ function ItemMaker() {
         </div>
       </div>
 
-      {/* 효과 */}
+      {/* 효과 목록 */}
       <div className="space-y-3 bg-slate-50 rounded-xl border border-slate-200 p-4">
         <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">효과</span>
-        <div className="flex flex-wrap gap-1.5">
-          {EFFECT_KINDS.map(k => (
-            <button
-              key={k.id}
-              type="button"
-              onClick={() => setRow(r => ({ ...r, effectKind: k.id, effectTarget: '' }))}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                row.effectKind === k.id
-                  ? 'bg-violet-600 text-white border-violet-600'
-                  : 'bg-white text-slate-500 border-slate-200 hover:border-violet-300'
-              }`}
-            >
-              {k.label}
-            </button>
-          ))}
-        </div>
-        <p className="text-[10px] text-slate-400">{kind.note}</p>
+        <p className="text-[10px] text-slate-400">+ 효과 추가로 여러 보정(예: 액션 보정 + 계열 보정)을 한 아이템에 설정할 수 있습니다. 효과마다 수치를 다르게 지정 가능.</p>
 
-        {kind.needsTarget && (
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] text-slate-500">대상 선택 (복수 가능 · 누르면 토글)</span>
-            <div className="flex flex-wrap gap-1.5">
-              {targetOptions(kind.needsTarget).map(t => {
-                const active = targetListOf(row).includes(t);
-                return (
+        {row.effects.map((eff, idx) => {
+          const kind = EFFECT_KINDS.find(k => k.id === eff.effectKind) || EFFECT_KINDS[0];
+          const effTargets = targetListOf(eff);
+          return (
+            <div key={idx} className="bg-white rounded-xl border border-slate-200 p-3 space-y-2">
+              {/* 헤더 */}
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-semibold text-slate-500">효과 {idx + 1}</span>
+                {row.effects.length > 1 && (
                   <button
-                    key={t}
                     type="button"
-                    onClick={() => setRow(r => {
-                      const list = String(r.effectTarget || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
-                      const i = list.indexOf(t);
-                      if (i >= 0) list.splice(i, 1); else list.push(t);
-                      return { ...r, effectTarget: list.join(',') };
-                    })}
+                    onClick={() => removeEffect(idx)}
+                    className="text-[10px] px-2 py-0.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 rounded transition-colors"
+                  >
+                    삭제
+                  </button>
+                )}
+              </div>
+
+              {/* 효과 종류 버튼 */}
+              <div className="flex flex-wrap gap-1.5">
+                {EFFECT_KINDS.map(k => (
+                  <button
+                    key={k.id}
+                    type="button"
+                    onClick={() => updateEffect(idx, { effectKind: k.id, effectTarget: '' })}
                     className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                      active
+                      eff.effectKind === k.id
                         ? 'bg-violet-600 text-white border-violet-600'
                         : 'bg-white text-slate-500 border-slate-200 hover:border-violet-300'
                     }`}
                   >
-                    {t}
+                    {k.label}
                   </button>
-                );
-              })}
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-400">{kind.note}</p>
+
+              {/* 대상 선택 */}
+              {kind.needsTarget && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">대상 선택 (복수 가능 · 누르면 토글)</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {targetOptions(kind.needsTarget).map(t => {
+                      const active = effTargets.includes(t);
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => {
+                            const list = [...effTargets];
+                            const i2 = list.indexOf(t);
+                            if (i2 >= 0) list.splice(i2, 1); else list.push(t);
+                            updateEffect(idx, { effectTarget: list.join(',') });
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                            active
+                              ? 'bg-violet-600 text-white border-violet-600'
+                              : 'bg-white text-slate-500 border-slate-200 hover:border-violet-300'
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 수치 */}
+              {eff.effectKind !== '없음' && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">수치</span>
+                  <input
+                    className={`${inputCls} font-mono`}
+                    value={eff.수치}
+                    onChange={e => updateEffect(idx, { 수치: e.target.value })}
+                    placeholder="예: 30 또는 -5"
+                  />
+                </label>
+              )}
             </div>
-          </div>
+          );
+        })}
+
+        {/* 효과 추가 버튼: 현재 모든 효과가 보정 타입일 때만 */}
+        {allBonus && (
+          <button
+            type="button"
+            onClick={addEffect}
+            className="w-full py-2 border border-dashed border-slate-300 text-slate-500 rounded-xl text-xs hover:border-violet-300 hover:text-violet-600 transition-colors"
+          >
+            + 효과 추가 (다른 보정 타입 추가)
+          </button>
         )}
 
-        <div className="grid grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-slate-500">수치</span>
-            <input className={`${inputCls} font-mono`} value={row.수치} onChange={field('수치')} placeholder="예: 30 또는 -5" />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] text-slate-500">횟수 (소모품 버프 지속, 빈칸=1)</span>
-            <input className={`${inputCls} font-mono`} value={row.횟수} onChange={field('횟수')} placeholder="예: 3" />
-          </label>
-        </div>
-
+        {/* 생성된 효과코드 미리보기 */}
         {effectCode && (
-          <div className="rounded-lg bg-white border border-violet-100 px-3 py-2 text-xs">
-            <span className="text-slate-400">효과코드: </span>
-            <code className="font-mono text-violet-700">{effectCode}</code>
+          <div className="rounded-lg bg-white border border-violet-100 px-3 py-2 text-xs space-y-0.5">
+            <div>
+              <span className="text-slate-400">효과코드: </span>
+              <code className="font-mono text-violet-700">{effectCode}</code>
+            </div>
+            {suChi && (
+              <div>
+                <span className="text-slate-400">수치: </span>
+                <code className="font-mono text-violet-700">{suChi}</code>
+              </div>
+            )}
           </div>
         )}
+
+        {/* 횟수 (소모품) */}
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-slate-500">횟수 (소모품 버프 지속, 빈칸=1)</span>
+          <input className={`${inputCls} font-mono w-40`} value={row.횟수} onChange={field('횟수')} placeholder="예: 3" />
+        </label>
       </div>
 
       {/* 설명/메모 */}
