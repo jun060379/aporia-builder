@@ -13096,27 +13096,51 @@ function getEquipmentRows(alias) {
   } catch(_e) { return []; }
 }
 
+// 아이템 효과코드와 수치를 파싱해 다중 효과 목록으로 반환.
+// 효과코드: "액션보정:참격|계열보정:화력"  수치: "3|5"  →  [{effectCode:"액션보정:참격", value:3}, ...]
+// 단일 효과 구버전 ("계열보정:화력", 수치=3) 도 그대로 지원.
+function _parseMultiEffectEntries(effectCode, suChi) {
+  var codes = String(effectCode || "").split("|").map(function(s){ return s.trim(); }).filter(Boolean);
+  if (!codes.length) return [];
+  var suChiStr = String(suChi === undefined || suChi === null ? "" : suChi).trim();
+  var values;
+  if (suChiStr.indexOf("|") >= 0) {
+    values = suChiStr.split("|").map(function(s){ return Number(s.trim()) || 0; });
+  } else {
+    var single = Number(suChiStr) || 0;
+    values = codes.map(function() { return single; });
+  }
+  return codes.map(function(code, i) {
+    return { effectCode: code, value: i < values.length ? values[i] : (values[values.length - 1] || 0) };
+  });
+}
+
 function getEquipmentModifier(alias, checkTypes) {
   var delta = 0;
   var logs  = [];
   try {
     var eqRows = getEquipmentRows(alias);
+    var types = (checkTypes || []).map(function(t){ return String(t||"").trim(); });
     eqRows.forEach(function(eq) {
       var item = getItemByName(eq["아이템명"]);
       if (!item) return;
       var effectCode = String(item["효과코드"] || "").trim();
-      var value = Number(item["수치"] || 0);
-      if (!effectCode || !value) return;
-      // 스탯/액션/계열/계통 보정. (이능보정은 구데이터 하위호환 별칭 → 계열로 취급)
-      var m = effectCode.match(/^(스탯|액션|계열|계통|이능)보정:(.+)$/);
-      if (!m) return;
-      // 대상은 콤마로 여러 개 지정 가능: "계열보정:화력,간섭" / "계통보정:마술,주술".
-      var targets = m[2].split(/[,，、]/).map(function(s){ return s.trim(); }).filter(Boolean);
-      var types = (checkTypes || []).map(function(t){ return String(t||"").trim(); });
-      var matched = types.indexOf("전체") >= 0 || targets.some(function(t){ return types.indexOf(t) >= 0; });
-      if (!matched) return;
-      delta += value;
-      logs.push("[장비: " + String(eq["아이템명"]) + "]\n보정: " + formatSigned(value));
+      if (!effectCode) return;
+      // 다중 효과 파싱: "액션보정:참격|계열보정:화력" + "3|5"
+      var entries = _parseMultiEffectEntries(effectCode, item["수치"]);
+      entries.forEach(function(entry) {
+        var value = entry.value;
+        if (!value) return;
+        // 스탯/액션/계열/계통 보정. (이능보정은 구데이터 하위호환 별칭 → 계열로 취급)
+        var m = entry.effectCode.match(/^(스탯|액션|계열|계통|이능)보정:(.+)$/);
+        if (!m) return;
+        // 대상은 콤마로 여러 개 지정 가능: "계열보정:화력,간섭".
+        var targets = m[2].split(/[,，、]/).map(function(s){ return s.trim(); }).filter(Boolean);
+        var matched = types.indexOf("전체") >= 0 || targets.some(function(t){ return types.indexOf(t) >= 0; });
+        if (!matched) return;
+        delta += value;
+        logs.push("[장비: " + String(eq["아이템명"]) + "]\n보정: " + formatSigned(value));
+      });
     });
   } catch(_e) {}
   return { delta: delta, text: logs.join("\n\n") };
@@ -13179,7 +13203,15 @@ function equipmentShowCommand(parts, displayName) {
   var lines = ["[장착 장비: " + alias + "]"];
   rows.forEach(function(r) {
     var item = getItemByName(String(r["아이템명"]));
-    var effectInfo = item ? ("  " + String(item["효과코드"] || "") + " " + (item["수치"] ? formatSigned(Number(item["수치"])) : "")) : "";
+    var effectInfo = "";
+    if (item) {
+      var effEntries = _parseMultiEffectEntries(String(item["효과코드"] || ""), item["수치"]);
+      if (effEntries.length) {
+        effectInfo = "  " + effEntries.map(function(e){ return e.effectCode + (e.value ? " " + formatSigned(e.value) : ""); }).join(" | ");
+      } else if (String(item["효과코드"] || "").trim()) {
+        effectInfo = "  " + String(item["효과코드"]);
+      }
+    }
     var rankInfo = (item && String(item["랭크"] || "").trim()) ? " (랭크 " + String(item["랭크"]).trim() + ")" : "";
     lines.push("[" + String(r["슬롯"]) + "] " + String(r["아이템명"]) + rankInfo + effectInfo);
   });
@@ -13492,36 +13524,51 @@ function _consumeInventoryRow(alias, invRow, target) {
   if (tChar) targetAlias = String(tChar["별명"] || targetAlias).trim();
 
   var effectCode = String(item["효과코드"] || "").trim();
-  var value      = Number(item["수치"] || 0);
   var itemCount  = Number(item["횟수"] || 1);
   var result     = "";
 
-  if (effectCode === "회복") {
-    var healResult = applyHealingToCharacter(targetAlias, value);
-    result = healResult.text || "[회복] " + formatSigned(value);
-  } else {
-    var m = effectCode.match(/^(스탯|액션|이능)보정:(.+)$/);
-    var statusCat  = "강화";
-    var statusCode = "enhance";
-    var checkType  = "전체";
-    if (m) {
-      var kindMap = { "스탯": KIND_STAT, "액션": KIND_ACTION, "이능": KIND_POWER };
-      checkType = (kindMap[m[1]] || "전체") + "," + m[2].trim();
-    } else if (effectCode === "피해감소") {
-      statusCat  = "쇠약강화";
-      statusCode = "debuff";
+  // 다중 효과 파싱: "액션보정:참격|계열보정:화력" + "3|5"
+  var entries = _parseMultiEffectEntries(effectCode, item["수치"]);
+  if (!entries.length) entries = [{ effectCode: effectCode, value: Number(item["수치"] || 0) }];
+
+  var resultLines = [];
+  ensureItemSheets();
+  entries.forEach(function(entry) {
+    var code  = entry.effectCode;
+    var value = entry.value;
+    if (code === "회복") {
+      var healResult = applyHealingToCharacter(targetAlias, value);
+      resultLines.push(healResult.text || "[회복] " + formatSigned(value));
+    } else if (code === "피해감소") {
+      appendRowByHeaders(SHEET_STATUS_DB, {
+        id: makeStatusId(), 상태: "ACTIVE", 대상: targetAlias,
+        상태명: itemName, 분류: "쇠약강화", 효과코드: "debuff",
+        수치: value, 확률: 100, 누적확률: 0, 증가확률: 0, 최대확률: 100,
+        발동타이밍: "판정시작", 대상판정: "전체",
+        남은횟수: itemCount, 중복방식: "덮어쓰기",
+        출처: "아이템:" + itemName, 메모: "", 생성일: getNowText(), 처리일: ""
+      });
+      resultLines.push(code + " " + formatSigned(value));
+    } else {
+      // 스탯/액션/이능/계열/계통 보정 → STATUS_DB에 임시 강화 상태 추가
+      var bm = code.match(/^(스탯|액션|이능|계열|계통)보정:(.+)$/);
+      var checkType = "전체";
+      if (bm) {
+        var kindMap = { "스탯": KIND_STAT, "액션": KIND_ACTION, "이능": KIND_POWER, "계열": KIND_SKILL, "계통": KIND_SKILL };
+        checkType = (kindMap[bm[1]] || "전체") + "," + bm[2].trim();
+      }
+      appendRowByHeaders(SHEET_STATUS_DB, {
+        id: makeStatusId(), 상태: "ACTIVE", 대상: targetAlias,
+        상태명: itemName, 분류: "강화", 효과코드: "enhance",
+        수치: value, 확률: 100, 누적확률: 0, 증가확률: 0, 최대확률: 100,
+        발동타이밍: "판정시작", 대상판정: checkType,
+        남은횟수: itemCount, 중복방식: "덮어쓰기",
+        출처: "아이템:" + itemName, 메모: "", 생성일: getNowText(), 처리일: ""
+      });
+      resultLines.push(code + " " + formatSigned(value));
     }
-    ensureItemSheets();
-    appendRowByHeaders(SHEET_STATUS_DB, {
-      id: makeStatusId(), 상태: "ACTIVE", 대상: targetAlias,
-      상태명: itemName, 분류: statusCat, 효과코드: statusCode,
-      수치: value, 확률: 100, 누적확률: 0, 증가확률: 0, 최대확률: 100,
-      발동타이밍: "판정시작", 대상판정: checkType,
-      남은횟수: itemCount, 중복방식: "덮어쓰기",
-      출처: "아이템:" + itemName, 메모: "", 생성일: getNowText(), 처리일: ""
-    });
-    result = "[효과 적용] " + itemName + " (" + effectCode + " " + formatSigned(value) + ", " + itemCount + "회) → " + targetAlias;
-  }
+  });
+  result = "[효과 적용] " + itemName + " (" + resultLines.join(", ") + ", " + itemCount + "회) → " + targetAlias;
 
   var newQty = Number(invRow["수량"]) - 1;
   if (newQty <= 0) {
