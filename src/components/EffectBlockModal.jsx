@@ -2,15 +2,17 @@ import { useState } from 'react';
 import EffectVariableHelp from './EffectVariableHelp';
 
 const EFFECT_TYPES = [
-  { id: 'template',     label: '상태 템플릿 부여' },
-  { id: 'custom',       label: '커스텀 상태 부여' },
-  { id: 'statusRemove', label: '상태 해제' },
-  { id: 'stack',        label: '스택 변경' },
-  { id: 'random',       label: '랜덤 지정' },
-  { id: 'set',          label: '설정/보정' },
-  { id: 'damage',       label: '피해' },
-  { id: 'heal',         label: '회복' },
-  { id: 'free',         label: '자유 입력' },
+  { id: 'template',        label: '상태 템플릿 부여' },
+  { id: 'custom',          label: '커스텀 상태 부여' },
+  { id: 'statusRemove',    label: '상태 해제' },
+  { id: 'stack',           label: '스택 변경' },
+  { id: 'random',          label: '랜덤 지정' },
+  { id: 'set',             label: '설정/보정' },
+  { id: 'damage',          label: '피해' },
+  { id: 'heal',            label: '회복' },
+  { id: 'itemGrant',       label: '아이템 지급' },
+  { id: 'cooldownReset',   label: '쿨타임 초기화' },
+  { id: 'free',            label: '자유 입력' },
 ];
 
 // 설정/보정 효과 변수
@@ -25,15 +27,17 @@ const SET_VARS = [
 ];
 
 const DESCRIPTIONS = {
-  template:     '미리 정의된 상태 템플릿을 자신 또는 대상에게 부여합니다.',
-  custom:       '직접 정의 상태를 부여합니다. 운영진 검수가 필요합니다.',
-  statusRemove: '자신 또는 대상에게 걸린 특정 상태를 해제합니다.',
-  stack:        '자신 또는 대상의 스택을 증가, 감소, 설정합니다.',
-  random:       '목록 중 무작위 1개를 골라 "접두어_선택" 상태를 부여합니다. 같은 접두어의 다른 상태는 제거됩니다. (매 턴 액션 지정 등)',
-  set:          '값을 설정하거나 보정을 겁니다. 이면침식/현재체력/일상점은 DB 값 설정, 판정/피해/회복 보정은 장면 동안 임시 보정 상태로 적용됩니다.',
-  damage:       '자신 또는 대상에게 피해를 입힙니다. (패시브·보호막 처리 포함)',
-  heal:         '자신 또는 대상의 체력을 회복시킵니다.',
-  free:         '자동 블럭으로 만들 수 없는 효과를 직접 입력합니다. 운영진 수동 검수 대상입니다.',
+  template:      '미리 정의된 상태 템플릿을 자신 또는 대상에게 부여합니다.',
+  custom:        '직접 정의 상태를 부여합니다. 운영진 검수가 필요합니다.',
+  statusRemove:  '자신 또는 대상에게 걸린 특정 상태를 해제합니다.',
+  stack:         '자신 또는 대상의 스택을 증가, 감소, 설정합니다.',
+  random:        '목록 중 무작위 1개를 골라 "접두어_선택" 상태를 부여합니다. 같은 접두어의 다른 상태는 제거됩니다. (매 턴 액션 지정 등)',
+  set:           '값을 설정하거나 보정을 겁니다. 이면침식/현재체력/일상점은 DB 값 설정, 판정/피해/회복 보정은 장면 동안 임시 보정 상태로 적용됩니다.',
+  damage:        '자신 또는 대상에게 피해를 입힙니다. (패시브·보호막 처리 포함)',
+  heal:          '자신 또는 대상의 체력을 회복시킵니다.',
+  itemGrant:     '자신 또는 대상의 인벤토리에 특정 아이템을 지급합니다. 아이템명은 ITEM_DB에 등록된 이름과 정확히 일치해야 합니다.',
+  cooldownReset: '자신 또는 대상의 특정 스킬 쿨타임, 혹은 모든 쿨타임을 초기화합니다.',
+  free:          '자동 블럭으로 만들 수 없는 효과를 직접 입력합니다. 운영진 수동 검수 대상입니다.',
 };
 
 const NUM_TOKENS = [
@@ -155,6 +159,19 @@ function buildEffectBody(type, params) {
   if (type === 'heal') {
     if (!params.amount) return '';
     return `회복 ${params.target || '자신'} ${params.amount}`;
+  }
+  if (type === 'itemGrant') {
+    if (!params.itemName) return '';
+    let t = `아이템지급 ${params.target || '자신'} ${params.itemName}`;
+    if (params.qty && String(params.qty).trim() !== '1' && String(params.qty).trim() !== '') {
+      t += ` 수량:${String(params.qty).trim()}`;
+    }
+    return t;
+  }
+  if (type === 'cooldownReset') {
+    const skillRef = params.cdAll ? '전체' : (params.skillName || '').trim();
+    if (!skillRef) return '';
+    return `쿨타임초기화 ${params.target || '자신'} ${skillRef}`;
   }
   if (type === 'free') return params.text || '';
   return '';
@@ -469,6 +486,42 @@ export default function EffectBlockModal({ initialType, initialParams, onInsert,
                 <input className={`${inputCls} font-mono`} value={params.amount || ''} onChange={e => setParam('amount', e.target.value)} placeholder="10 또는 최종값 또는 랭크 * 2" />
               </label>
               <NumTokenBar onInsert={t => setParam('amount', (params.amount || '') + t)} />
+            </div>
+          )}
+
+          {/* ── itemGrant ── */}
+          {type === 'itemGrant' && (
+            <div className="space-y-3">
+              <TargetToggle value={params.target || '자신'} onChange={v => setParam('target', v)} />
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-500">아이템명 <span className="text-slate-400">(ITEM_DB 등록명과 정확히 일치)</span></span>
+                <input className={inputCls} value={params.itemName || ''} onChange={e => setParam('itemName', e.target.value)} placeholder="예: 회복 포션" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-slate-500">수량 <span className="text-slate-400">(기본 1)</span></span>
+                <input className={`${inputCls} font-mono`} value={params.qty || ''} onChange={e => setParam('qty', e.target.value)} placeholder="1" />
+              </label>
+            </div>
+          )}
+
+          {/* ── cooldownReset ── */}
+          {type === 'cooldownReset' && (
+            <div className="space-y-3">
+              <TargetToggle value={params.target || '자신'} onChange={v => setParam('target', v)} />
+              <div className="space-y-1.5">
+                <span className="text-[11px] text-slate-500">초기화 범위</span>
+                <div className="flex gap-1">
+                  {['특정 스킬', '전체'].map(opt => (
+                    <BtnSel key={opt} active={!!params.cdAll === (opt === '전체')} onClick={() => setParam('cdAll', opt === '전체')}>{opt}</BtnSel>
+                  ))}
+                </div>
+              </div>
+              {!params.cdAll && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-slate-500">스킬명</span>
+                  <input className={inputCls} value={params.skillName || ''} onChange={e => setParam('skillName', e.target.value)} placeholder="예: 질풍참" />
+                </label>
+              )}
             </div>
           )}
 
