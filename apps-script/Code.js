@@ -7984,8 +7984,16 @@ function processSkillEffects(effectText, context) {
 
       const targetAlias = resolveEffectTarget(tokens[1], context);
       const stackName = tokens[2];
-      const value = Number(String(tokens[3]).replace(/^=/, "")) || 0;
-      const opts = parseEffectOptions(tokens.slice(4));
+      // "= 값" (공백 분리) 형식 지원: tokens[3]이 "="만인 경우 tokens[4]를 값으로 읽음
+      let value, opts;
+      if (tokens[3] === "=") {
+        if (tokens.length < 5) throw new Error("스택설정 효과 형식 오류: " + line);
+        value = Number(tokens[4]) || 0;
+        opts = parseEffectOptions(tokens.slice(5));
+      } else {
+        value = Number(String(tokens[3]).replace(/^=/, "")) || 0;
+        opts = parseEffectOptions(tokens.slice(4));
+      }
 
       if (!targetAlias) {
         logs.push(
