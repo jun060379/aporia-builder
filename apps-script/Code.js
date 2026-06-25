@@ -9363,7 +9363,12 @@ function finishSession(parts, displayName) {
   var message = targeted ? "" : rest.join(" ").trim();
   if (!message) message = "...다음 시간에 계속.";
 
-  // 세션종료 패시브 효과 — aliasSet이 지정된 경우 해당 캐릭터만, 없으면 전체
+  // 초기화 먼저 수행 — 세션종료 패시브가 설정한 스택이 초기화되지 않도록
+  var statusResult = keepStatus ? { cleared: 0, kept: 0 } : clearTemporaryStatuses(aliasSet);
+  var stackResult  = keepStack  ? { cleared: 0, kept: 0 } : clearTemporaryStacks(aliasSet);
+  var hpResult     = _finRestoreHp(aliasSet);
+
+  // 세션종료 패시브 효과 — 초기화 이후에 발동해야 스택 설정이 0으로 덮어쓰이지 않음
   var passiveLogs = [];
   try {
     var allChars = getSheetData(SHEET_BOT_DB);
@@ -9377,10 +9382,6 @@ function finishSession(parts, displayName) {
   } catch (e) {
     // 패시브 시트 없거나 오류 → 무시.
   }
-
-  var statusResult = keepStatus ? { cleared: 0, kept: 0 } : clearTemporaryStatuses(aliasSet);
-  var stackResult  = keepStack  ? { cleared: 0, kept: 0 } : clearTemporaryStacks(aliasSet);
-  var hpResult     = _finRestoreHp(aliasSet);
 
   // ── 접힌 요약: 종료 메시지만 ──
   var summaryLines = ["[극/세션 종료]"];
