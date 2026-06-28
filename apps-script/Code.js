@@ -452,6 +452,7 @@ function handleCommand(utterance, displayName) {
   if (command === "!내정보") return showMyInfo(displayName);
   if (command === "!판정") return statCheck(parts, displayName);
   if (command === "!액션") return actionCheck(parts, displayName);
+  if (command === "!기습") return ambushCheck(parts, displayName);
 
   if (command === "!화력") return powerCheck(parts, "화력", displayName);
   if (command === "!방호") return powerCheck(parts, "방호", displayName);
@@ -622,6 +623,8 @@ function commandListCommand(parts) {
       "  !<스탯명>    [난이도] [보정]      (단축)",
       "  !액션        <액션명> [난이도] [보정]",
       "  !<액션명>    [난이도] [보정]      (단축)",
+      "  !기습        <피해액션명> [대상:대상명] [보정]  (*2 배율)",
+      "  !기습 스킬   <스킬명> [대상:대상명] [보정]      (*2 배율)",
       "  사회 액션:  !설득 / !기만 / !협박",
       "",
       "[ 능력 ]",
@@ -2593,6 +2596,63 @@ function actionCheck(parts, displayName) {
     actionPostBlock;
 
   return makeFoldedResponse(summary, detail);
+}
+
+// !기습 <피해액션명> [대상:대상명] [보정]
+// !기습 스킬 <스킬명> [대상:대상명] [보정]
+// 기존 액션/스킬 판정에 *2 최종 배율을 적용한다. 상태/패시브 보정·대가 소모는 동일하게 동작.
+function ambushCheck(parts, displayName) {
+  if (parts.length < 2) {
+    return (
+      "사용법:\n" +
+      "  !기습 <피해액션명> [대상:대상명] [보정]\n" +
+      "  !기습 스킬 <스킬명> [대상:대상명] [보정]\n\n" +
+      "예시:\n" +
+      "  !기습 참격 대상:적A\n" +
+      "  !기습 스킬 월광참 대상:적A\n\n" +
+      "사용 가능 피해 액션: " + DAMAGE_ACTIONS.join(", ")
+    );
+  }
+
+  const sub = String(parts[1] || "").trim();
+  var result;
+
+  if (sub === "스킬") {
+    if (parts.length < 3) {
+      return "사용법: !기습 스킬 스킬명 [대상:대상명] [보정]";
+    }
+    // 스킬 결과에 *2 최종 배율 주입
+    const skillParts = ["!스킬"].concat(parts.slice(2)).concat(["*2"]);
+    result = skillUse(skillParts, displayName);
+  } else {
+    if (!DAMAGE_ACTIONS.includes(sub)) {
+      return (
+        "[기습 오류]\n" +
+        "기습은 피해 액션에만 사용할 수 있습니다.\n" +
+        "사용 가능 액션: " + DAMAGE_ACTIONS.join(", ") + "\n\n" +
+        "스킬 기습: !기습 스킬 스킬명 [대상:대상명] [보정]"
+      );
+    }
+    // 액션 결과에 *2 최종 배율 주입
+    const actionParts = ["!액션"].concat(parts.slice(1)).concat(["*2"]);
+    result = actionCheck(actionParts, displayName);
+  }
+
+  return _wrapAmbushResult(result);
+}
+
+// 기습 결과 앞에 [기습] 헤더를 삽입한다.
+function _wrapAmbushResult(result) {
+  var SUMMARY_MARK = "@@SUMMARY@@";
+  var DETAIL_MARK = "@@DETAIL@@";
+  var s = String(result || "");
+  if (s.indexOf(SUMMARY_MARK) === 0 && s.indexOf(DETAIL_MARK) > 0) {
+    var detailAt = s.indexOf(DETAIL_MARK);
+    var summaryBody = s.slice(SUMMARY_MARK.length, detailAt).replace(/^\n+/, "");
+    var detailBody = s.slice(detailAt);
+    return SUMMARY_MARK + "\n[기습]\n" + summaryBody + detailBody;
+  }
+  return "[기습]\n" + s;
 }
 
 function powerCheck(parts, type, displayName) {
