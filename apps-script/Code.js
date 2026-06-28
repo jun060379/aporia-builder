@@ -5980,8 +5980,9 @@ function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, at
     return "[회피 대응 오류]\n" + e.message;
   }
 
-  const evadeValue  = response.value;
-  const success     = evadeValue >= attackValue;
+  const evadeValue     = response.value;
+  const evadeThreshold = attackValue * 0.75;
+  const success        = evadeValue >= evadeThreshold;
 
   let damage, damageResult, attackEffectText, foldNote = "";
   if (success) {
@@ -6018,6 +6019,7 @@ function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, at
     "[회피 대응]\n" + statusSummaryLine +
     "공격번호: " + attack["id"] + "\n" + methodLine + "\n" +
     "공격값: " + attackValue + "\n" +
+    "필요 회피값: " + Math.ceil(evadeThreshold) + " (공격값×0.75)\n" +
     "회피값: " + evadeValue + foldNote + "\n\n" +
     "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
     "최종피해: " + damage + "\n" +
@@ -6036,7 +6038,8 @@ function _resolveCombatEvade(attack, character, rest, selfAlias, attackValue, at
     "공격번호: " + attack["id"] + "\n" +
     "공격자: " + attackerAlias + "\n" +
     "대상: " + targetAlias + "\n" +
-    "공격값: " + attackValue + foldNote + "\n\n" +
+    "공격값: " + attackValue + foldNote + "\n" +
+    "필요 회피값: " + Math.ceil(evadeThreshold) + " (공격값×0.75)\n\n" +
     response.detailText + "\n\n" +
     "결과: " + (success ? "회피 성공" : "회피 실패") + "\n" +
     "최종피해: " + damage + "\n\n" +
