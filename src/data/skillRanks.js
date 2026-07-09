@@ -16,6 +16,24 @@ export function getRankValue(rank) {
   return RANK_MAP[rank] ?? 1;
 }
 
+// ── 랭크별 주사위 크기(1d{N}). 기존 "랭크" 계산식 토큰을 대체 ──
+// F는 미지정 → E 기준(다른 랭크별 계수 표와 동일 규칙).
+export const RANK_DICE = {
+  F:  4,
+  E:  4,
+  D:  7,
+  C:  10,
+  B:  13,
+  A:  16,
+  S:  19,
+  U:  22,
+  EX: 25,
+};
+
+export function getRankDie(rank) {
+  return RANK_DICE[rank] ?? RANK_DICE.E;
+}
+
 export const SKILL_TRADITIONS = ['마술', '주술', '신성', '마법', '혈계', '요력', '특수'];
 export const SKILL_SERIES = ['화력', '방호', '치유', '재생', '간섭', '강화', '특수'];
 

@@ -1,4 +1,5 @@
 import { ACTIONS } from './actions';
+import { getRankDie } from './skillRanks';
 
 // ── 랭크별 기초부 계수 [주스탯계수, 부스탯계수]. (F는 미지정 → E 기준) ──
 // SkillMaker의 빠른조합 액션식과 동일 규칙. 공격 아키타입에서 재사용.
@@ -15,19 +16,20 @@ export const PRESET_RANK_COEF = {
 };
 
 // 액션의 스탯/기능/숙련 구조 + 선택 랭크 계수로
-// "1d20 + 랭크 + ( 기초부 ) * ( 1 + 배율부 )" 계산식을 생성.
+// "1d{랭크별 주사위} + ( 기초부 ) * ( 1 + 배율부 )" 계산식을 생성.
 // 배율부는 calcAction.js의 multiplier = 1 + Σ(기능/숙련*계수) 규칙과 동일하게
 // 선두에 "1 +"를 둔다. (없으면 기능/숙련이 0일 때 기초부가 거의 사라짐)
 export function buildActionPresetFormula(action, rank) {
   if (!action) return '';
   const [c1, c2] = PRESET_RANK_COEF[rank] || PRESET_RANK_COEF.E;
+  const die = getRankDie(rank);
   const b = action.base || [];
   const baseParts = [];
   if (b[0]) baseParts.push(`${b[0].stat} * ${c1}`);
   if (b[1]) baseParts.push(`${b[1].stat} * ${c2}`);
   const basePart = baseParts.join(' + ');
   const multPart = (action.mult || []).map(m => `${m.key} * ${m.coef}`).join(' + ');
-  return `1d20 + 랭크 + ( ${basePart} ) * ( 1 + ${multPart} )`;
+  return `1d${die} + ( ${basePart} ) * ( 1 + ${multPart} )`;
 }
 
 function actionByName(name) {
@@ -35,8 +37,8 @@ function actionByName(name) {
 }
 
 // 비공격 아키타입(회복/버프/디버프)의 기본 발동 판정식. 편집 가능한 시작점.
-function simpleRollFormula(stat) {
-  return `1d20 + 랭크 + ${stat || '지능'}`;
+function simpleRollFormula(stat, rank) {
+  return `1d${getRankDie(rank)} + ${stat || '지능'}`;
 }
 
 const DAMAGE_ACTIONS = ACTIONS.filter(a => a.isDamage).map(a => a.name);
@@ -92,7 +94,7 @@ export const SKILL_ARCHETYPES = [
       { key: 'target', label: '회복 대상', type: 'select', options: ['자신', '대상'] },
       { key: 'stat', label: '기준 스탯', type: 'select', options: STAT_OPTIONS },
     ],
-    buildFormula: (m) => simpleRollFormula(m.stat),
+    buildFormula: (m, rank) => simpleRollFormula(m.stat, rank),
     buildEffects: (m) => `회복 ${m.target || '자신'} 최종값`,
   },
   {
@@ -107,7 +109,7 @@ export const SKILL_ARCHETYPES = [
       { key: 'value', label: '수치', type: 'text' },
       { key: 'count', label: '지속 횟수', type: 'text' },
     ],
-    buildFormula: () => simpleRollFormula('지능'),
+    buildFormula: (m, rank) => simpleRollFormula('지능', rank),
     buildEffects: (m) => {
       if (m.kind === 'enhance') {
         return templateLine('자신', '강화', { value: m.value, count: m.count });
@@ -130,7 +132,7 @@ export const SKILL_ARCHETYPES = [
       { key: 'count', label: '횟수', type: 'text' },
       { key: 'resist', label: '저항 가능', type: 'bool' },
     ],
-    buildFormula: () => simpleRollFormula('지능'),
+    buildFormula: (m, rank) => simpleRollFormula('지능', rank),
     buildEffects: (m) => templateLine('대상', m.status || '취약', { value: m.value, count: m.count, resist: m.resist }),
   },
   {
